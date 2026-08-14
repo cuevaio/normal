@@ -40,6 +40,7 @@ Secret examples never contain usable key material.
 | `READ_MESSAGE_RECORDS_PER_DAY` | Non-secret approved quota | API MCP resource server | Authoritative per-Personal-Account Stored Message records returned per UTC day. Tombstones count and there is no production default. |
 | `DECRYPTED_MEDIA_BYTES_PER_DAY` | Non-secret approved quota | API MCP resource server | Authoritative per-Personal-Account full plaintext Stored Media bytes reserved per UTC day before decryption. There is no production default. |
 | `MCP_CURSOR_HMAC_SECRET` | Secret | API MCP resource server | Dedicated 32-byte hex HMAC key for authorization-bound pagination cursors. Generate independently with `openssl rand -hex 32`; never reuse OAuth, content, provider-reference, webhook, reservation, or deletion keys. Rotation invalidates outstanding short-lived cursors. |
+| `API_KEY_HMAC_SECRET` | Secret | API API Key management | Dedicated 32-byte hex HMAC key for User-created API Key credential digests. Generate independently with `openssl rand -hex 32`; never reuse OAuth, cursor, content, provider-reference, webhook, reservation, or deletion keys. A Personal Account may retain at most ten active API Keys. Creating an API Key requires Clerk first-factor verification within five minutes. Rotation invalidates every remaining active API Key. |
 | `SEND_FINGERPRINT_HMAC_SECRET` | Secret | API outbound-send workflow | Dedicated 32-byte hex HMAC key for non-reversible exact-request fingerprints retained with idempotency bindings. Generate independently; do not replace it while any 90-day binding remains live. |
 | `SENDS_PER_MINUTE` | Non-secret approved quota | API outbound-send workflow | Per-authorization exact rolling-minute send reservation limit. There is no production default. |
 | `SENDS_PER_DAY` | Non-secret approved quota | API outbound-send workflow | Per-Personal-Account UTC-day send reservation limit. There is no production default. |
@@ -304,6 +305,12 @@ Authorization-management telemetry contains only
 `not_found`, and the API service name. Never add the User, Personal Account,
 authorization handle or internal ID, MCP Client, Connection, scope set,
 timestamp, token, credential hash, or request path.
+
+API Key management telemetry contains only `api_key.management.completed`,
+`create`, `list`, or `revoke`, an allowlisted outcome, and the API service
+name. Never add the User, Personal Account, API Key handle or internal ID,
+credential, digest, hint, name, Connection, permission set, timestamp, or
+request path.
 
 Migration 0017 adds the RLS-protected, metadata-only Tool Call Log and the
 stateless MCP `list_connections` boundary. Migration 0018 adds encrypted group

@@ -33,6 +33,7 @@ export interface Env {
   readonly MESSAGE_RETENTION_DAY_OPTIONS: string;
   readonly NEON_BRANCH_ID: string;
   readonly READ_MESSAGE_RECORDS_PER_DAY: string;
+  readonly API_KEY_HMAC_SECRET: string;
   readonly MCP_CURSOR_HMAC_SECRET: string;
   readonly SEND_FINGERPRINT_HMAC_SECRET: string;
   readonly SENDS_PER_DAY: string;

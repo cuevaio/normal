@@ -1,5 +1,13 @@
 import { Effect, Layer } from "effect";
 import {
+  ApiKeyClock,
+  ApiKeyHmac,
+  ApiKeyIdentifiers,
+  ApiKeyPersistence,
+  makeApiKeyHmac,
+  productionApiKeyIdentifiers,
+} from "../../src/api-key";
+import {
   HumanIdentity,
   InvalidHumanIdentity as InvalidHumanIdentityRequest,
 } from "../../src/auth/human-identity";
@@ -154,6 +162,21 @@ const provisioningLeases = new Map<string, string>();
 const provisionedSetups = new Set<string>();
 let authorizationRevokedAt: Date | null = null;
 const testAuthorizationId = "mca_123456789012345678901";
+const apiKeys: Array<{
+  clerkUserId: string;
+  connectionIds: ReadonlyArray<string>;
+  createdAt: Date;
+  credentialHint: string;
+  expiresAt: Date | null;
+  lastUsedAt: Date | null;
+  name: string;
+  permissions: ReadonlyArray<
+    "connections:read" | "directory:read" | "messages:read" | "messages:send"
+  >;
+  publicId: string;
+  revokedAt: Date | null;
+  state: "active" | "expired" | "revoked";
+}> = [];
 const providerObservations: string[] = [];
 const qrObservations = new Map<string, number>();
 let providerConnectionState:
@@ -303,7 +326,22 @@ const makeTestLayer = (
         }
         return Effect.fail(new InvalidHumanIdentityRequest());
       },
-      verifyRecently: () => Effect.die("not used"),
+      verifyRecently: (request) => {
+        const authorization = request.headers.get("authorization");
+        if (authorization === "Bearer signed-test-user") {
+          return Effect.succeed({
+            clerkUserId: "user_test_public_boundary",
+            reverifiedAt: new Date("2026-01-02T03:03:00.000Z"),
+          });
+        }
+        if (authorization === "Bearer signed-second-test-user") {
+          return Effect.succeed({
+            clerkUserId: "user_second_test_public_boundary",
+            reverifiedAt: new Date("2026-01-02T03:03:00.000Z"),
+          });
+        }
+        return Effect.fail(new InvalidHumanIdentityRequest());
+      },
     }),
     Layer.succeed(BoundaryProvider, {
       observeConnection: failWhenSelected(failure, "provider").pipe(
@@ -756,6 +794,112 @@ const makeTestLayer = (
           return { revokedAt: authorizationRevokedAt };
         }),
       rotateRefreshCredential: () => Effect.die("not used"),
+    }),
+    Layer.succeed(ApiKeyClock, {
+      now: Effect.succeed(new Date("2026-01-02T03:04:05.000Z")),
+    }),
+    Layer.succeed(ApiKeyIdentifiers, productionApiKeyIdentifiers),
+    Layer.succeed(
+      ApiKeyHmac,
+      makeApiKeyHmac(
+        "4242424242424242424242424242424242424242424242424242424242424242",
+      ),
+    ),
+    Layer.succeed(ApiKeyPersistence, {
+      authenticate: () => Effect.succeed(null),
+      create: (input) =>
+        Effect.sync(() => {
+          if (
+            input.clerkUserId !== "user_test_public_boundary" &&
+            input.clerkUserId !== "user_second_test_public_boundary"
+          ) {
+            return { outcome: "not_found" as const };
+          }
+          if (
+            apiKeys.filter(
+              (key) =>
+                key.clerkUserId === input.clerkUserId && key.state === "active",
+            ).length >= 10
+          ) {
+            return { outcome: "limit_reached" as const };
+          }
+          if (
+            apiKeys.some(
+              (key) =>
+                key.clerkUserId === input.clerkUserId &&
+                key.state === "active" &&
+                key.name.toLowerCase() === input.name.toLowerCase(),
+            )
+          ) {
+            return { outcome: "duplicate_name" as const };
+          }
+          if (input.expiresAt !== null && input.expiresAt <= input.createdAt) {
+            return { outcome: "invalid" as const };
+          }
+          const summary = {
+            clerkUserId: input.clerkUserId,
+            connectionIds: input.connectionIds,
+            createdAt: input.createdAt,
+            credentialHint: input.credentialHint,
+            expiresAt: input.expiresAt,
+            lastUsedAt: null,
+            name: input.name,
+            permissions: input.permissions,
+            publicId: input.publicId,
+            revokedAt: null,
+            state: "active" as const,
+          };
+          apiKeys.push(summary);
+          return {
+            outcome: "created" as const,
+            summary: {
+              connectionIds: summary.connectionIds,
+              createdAt: summary.createdAt,
+              credentialHint: summary.credentialHint,
+              expiresAt: summary.expiresAt,
+              id: summary.publicId,
+              lastUsedAt: summary.lastUsedAt,
+              name: summary.name,
+              permissions: summary.permissions,
+              revokedAt: summary.revokedAt,
+              state: summary.state,
+            },
+          };
+        }),
+      list: (clerkUserId, observedAt) =>
+        Effect.succeed(
+          apiKeys
+            .filter((key) => key.clerkUserId === clerkUserId)
+            .map((key) => ({
+              connectionIds: key.connectionIds,
+              createdAt: key.createdAt,
+              credentialHint: key.credentialHint,
+              expiresAt: key.expiresAt,
+              id: key.publicId,
+              lastUsedAt: key.lastUsedAt,
+              name: key.name,
+              permissions: key.permissions,
+              revokedAt: key.revokedAt,
+              state:
+                key.state === "revoked"
+                  ? ("revoked" as const)
+                  : key.expiresAt !== null && key.expiresAt <= observedAt
+                    ? ("expired" as const)
+                    : ("active" as const),
+            })),
+        ),
+      revoke: (input) =>
+        Effect.sync(() => {
+          const existing = apiKeys.find(
+            (key) =>
+              key.clerkUserId === input.clerkUserId &&
+              key.publicId === input.publicId,
+          );
+          if (existing === undefined) return null;
+          existing.revokedAt ??= input.revokedAt;
+          existing.state = "revoked";
+          return { revokedAt: existing.revokedAt };
+        }),
     }),
     Layer.succeed(ConnectionSetupPersistence, {
       cancel: ({ clerkUserId, setupId }) =>

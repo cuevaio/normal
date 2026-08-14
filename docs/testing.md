@@ -44,6 +44,16 @@ idempotent atomic authorization/family revocation, and immediate access and
 refresh denial. The HTTP fixture contains only safe product metadata and never
 models or returns token material.
 
+The API Key management journey creates, lists, and revokes through the same
+signed-in browser-to-Worker seam with exact Origin and Clerk JWT. Creation
+requires first-factor verification within five minutes and returns the
+plaintext credential once. Database coverage applies the production migrations
+under `whatsapp_api_runtime` to prove digest-only persistence, the ten-active
+key limit, unique active names, disconnected Connection selection, constant
+not-found for unknown or cross-tenant handles, idempotent revocation that
+clears the digest, and RLS isolation. Worker tests never put fixture
+credentials in the production composition root.
+
 The browser always renders `apps/web/src/app/home-experience.tsx`; there is no
 test component alias or selectable web composition root. Playwright supplies
 only the external Clerk-shaped identity boundary and test network routing from

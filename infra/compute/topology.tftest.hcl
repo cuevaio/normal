@@ -98,6 +98,7 @@ run "development_topology" {
       "inherit:DELETION_MARKER_HMAC_SECRET",
       "inherit:KMS_CONTENT_ROOT_KEY_ARN",
       "inherit:KMS_DELETION_COORDINATOR_KEY_ARN",
+      "inherit:API_KEY_HMAC_SECRET",
       "inherit:MCP_CURSOR_HMAC_SECRET",
       "inherit:NEON_BRANCH_ID",
       "inherit:RECIPIENT_TRANSITION_HMAC_SECRET",

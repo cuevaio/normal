@@ -530,6 +530,10 @@ resource "cloudflare_worker_version" "api" {
       type = "inherit"
     },
     {
+      name = "API_KEY_HMAC_SECRET"
+      type = "inherit"
+    },
+    {
       name = "MCP_CURSOR_HMAC_SECRET"
       type = "inherit"
     },

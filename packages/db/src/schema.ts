@@ -1,4 +1,5 @@
 export * from "./schema/accounts";
+export * from "./schema/api-keys";
 export * from "./schema/common";
 export * from "./schema/connection-setups";
 export * from "./schema/connections";

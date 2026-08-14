@@ -17,6 +17,7 @@ export function getPersonalAccountConfiguration() {
 
   return {
     clerkJwtTemplate: CLERK_JWT_TEMPLATE,
+    apiKeysEndpoint: new URL("/v1/api-keys", apiOrigin).toString(),
     mcpAuthorizationsEndpoint: new URL(
       "/v1/mcp-authorizations",
       apiOrigin,

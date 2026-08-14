@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./api-key": "./src/api-key.ts",
     "./connection-health": "./src/connection-health.ts",
     "./connection-setup": "./src/connection-setup.ts",
     "./config": "./src/config.ts",
@@ -32,7 +33,7 @@
     "./whatsapp-connection": "./src/whatsapp-connection.ts"
   },
   "scripts": {
-    "build": "bun build src/config.ts src/connection-health.ts src/connection-setup.ts src/connectivity.ts src/database.ts src/directory.ts src/group.ts src/mcp-authorization.ts src/mcp-tool.ts src/message-retention.ts src/message-search.ts src/migrations.ts src/onboarding-profile.ts src/personal-account.ts src/readiness.ts src/recipient-exclusion.ts src/request-connection.ts src/restore.ts src/schema.ts src/send.ts src/stored-media.ts src/tool-call-log.ts src/record-ingestion-gap-cli.ts src/schema-version.ts src/webhook-event.ts src/webhook-ingress.ts src/webhook-replay.ts src/whatsapp-connection.ts --outdir dist --target bun",
+    "build": "bun build src/api-key.ts src/config.ts src/connection-health.ts src/connection-setup.ts src/connectivity.ts src/database.ts src/directory.ts src/group.ts src/mcp-authorization.ts src/mcp-tool.ts src/message-retention.ts src/message-search.ts src/migrations.ts src/onboarding-profile.ts src/personal-account.ts src/readiness.ts src/recipient-exclusion.ts src/request-connection.ts src/restore.ts src/schema.ts src/send.ts src/stored-media.ts src/tool-call-log.ts src/record-ingestion-gap-cli.ts src/schema-version.ts src/webhook-event.ts src/webhook-ingress.ts src/webhook-replay.ts src/whatsapp-connection.ts --outdir dist --target bun",
     "db:check": "bun src/check-cli.ts",
     "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts",
     "db:migrate-public-data": "bun src/migrate-public-data-cli.ts",

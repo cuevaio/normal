@@ -205,6 +205,7 @@ describe("API production root", () => {
     "MCP_REQUESTS_PER_HOUR",
     "MCP_REQUESTS_PER_MINUTE",
     "READ_MESSAGE_RECORDS_PER_DAY",
+    "API_KEY_HMAC_SECRET",
     "MCP_CURSOR_HMAC_SECRET",
     "SMOKE_CHECK_SECRET",
     "WHATSAPP_NUMBER_RESERVATION_HMAC_SECRET",
@@ -230,6 +231,15 @@ describe("API production root", () => {
     const response = await createProductionHandler({
       ...validEnvironment(),
       MCP_CURSOR_HMAC_SECRET: "not-a-32-byte-key",
+    })(new Request("https://api.example.test/health"));
+
+    expect(response.status).toBe(503);
+  });
+
+  test("fails closed when the API Key HMAC secret is malformed", async () => {
+    const response = await createProductionHandler({
+      ...validEnvironment(),
+      API_KEY_HMAC_SECRET: "not-a-32-byte-key",
     })(new Request("https://api.example.test/health"));
 
     expect(response.status).toBe(503);

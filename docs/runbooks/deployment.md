@@ -228,6 +228,9 @@ openssl rand -hex 32 | wrangler secret put OAUTH_PROTOCOL_ENCRYPTION_KEY \
 openssl rand -hex 32 | wrangler secret put MCP_CURSOR_HMAC_SECRET \
   --cwd apps/api \
   --env "$DEPLOYMENT_ENVIRONMENT"
+openssl rand -hex 32 | wrangler secret put API_KEY_HMAC_SECRET \
+  --cwd apps/api \
+  --env "$DEPLOYMENT_ENVIRONMENT"
 openssl rand -hex 32 | wrangler secret put SEND_FINGERPRINT_HMAC_SECRET \
   --cwd apps/api \
   --env "$DEPLOYMENT_ENVIRONMENT"
@@ -237,7 +240,7 @@ wrangler secret list \
 ```
 
 The API list must include `CLERK_JWT_KEY`, `OAUTH_PROTOCOL_ENCRYPTION_KEY`,
-`MCP_CURSOR_HMAC_SECRET`, `SEND_FINGERPRINT_HMAC_SECRET`,
+`MCP_CURSOR_HMAC_SECRET`, `API_KEY_HMAC_SECRET`, `SEND_FINGERPRINT_HMAC_SECRET`,
 `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SIGNING_SECRET`, the three short-lived AWS
 session credential names, both KMS key ARN names, `DELETION_MARKER_HMAC_SECRET`,
 and `WHATSAPP_NUMBER_RESERVATION_HMAC_SECRET`; values are never printed. Keeping
@@ -497,10 +500,12 @@ API Worker secret:
 ```sh
 openssl rand -hex 32 | wrangler secret put MCP_CURSOR_HMAC_SECRET \
   --cwd apps/api --env production
+openssl rand -hex 32 | wrangler secret put API_KEY_HMAC_SECRET \
+  --cwd apps/api --env production
 ```
 
 Do not reuse any OAuth, content, provider-reference, webhook, reservation, or
-deletion key. Rotation is safe but invalidates every outstanding cursor; MCP
+deletion key. Cursor rotation is safe but invalidates every outstanding cursor; MCP
 Clients restart the affected listing from its first page.
 
 AWS KMS records cryptographic operations in CloudTrail. Encryption context is
@@ -594,7 +599,8 @@ Worker manifests set `AWS_KMS_REGION` explicitly. Set
 `KMS_CONTENT_ROOT_KEY_ARN` and `KMS_DELETION_COORDINATOR_KEY_ARN` in the API
 deployment configuration and populate the marker HMAC plus three AWS credential
 secrets before deployment. `CLERK_JWT_KEY` and
-`OAUTH_PROTOCOL_ENCRYPTION_KEY`, `MCP_CURSOR_HMAC_SECRET`, and
+`OAUTH_PROTOCOL_ENCRYPTION_KEY`, `MCP_CURSOR_HMAC_SECRET`,
+`API_KEY_HMAC_SECRET`, and
 `SEND_FINGERPRINT_HMAC_SECRET` must already exist
 on the selected API Worker and are preserved as inherited secret bindings.
 Rotating the cursor secret invalidates all outstanding pagination cursors but

@@ -5,6 +5,7 @@ import {
   Activity,
   Cable,
   ChevronsUpDown,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   MessageCircleMore,
@@ -48,6 +49,7 @@ import {
   type PersonalAccountView,
   PublicBoundaryJourney,
 } from "../public-boundary-journey";
+import { ApiKeysPanel } from "./api-keys/api-keys-panel";
 
 type PersonalAccountConfiguration = ReturnType<
   typeof getPersonalAccountConfiguration
@@ -65,6 +67,7 @@ const navigation = [
     icon: Cable,
     label: "MCP Authorizations",
   },
+  { href: "/dashboard/api-keys", icon: KeyRound, label: "API Keys" },
   { href: "/dashboard/activity", icon: Activity, label: "Tool Call Logs" },
 ] as const;
 
@@ -254,11 +257,35 @@ export function DashboardShell({
                 <p className="text-sm text-muted-foreground">
                   Your Personal Account is temporarily unavailable.
                 </p>
+              ) : pathname === "/dashboard/api-keys" ? (
+                <ApiKeysPanel
+                  apiKeysEndpoint={configuration.apiKeysEndpoint}
+                  clerkJwtTemplate={configuration.clerkJwtTemplate}
+                  connectionsEndpoint={configuration.connectionsEndpoint}
+                />
               ) : (
                 <PublicBoundaryJourney
                   autoInitialize
+                  clerkJwtTemplate={configuration.clerkJwtTemplate}
+                  connectionsEndpoint={configuration.connectionsEndpoint}
+                  connectionSetupEndpoint={
+                    configuration.connectionSetupEndpoint
+                  }
+                  mcpAuthorizationsEndpoint={
+                    configuration.mcpAuthorizationsEndpoint
+                  }
+                  mcpServerUrl={configuration.mcpServerUrl}
+                  onboardingProfileEndpoint={
+                    configuration.onboardingProfileEndpoint
+                  }
+                  personalAccountDeletionEndpoint={
+                    configuration.personalAccountDeletionEndpoint
+                  }
+                  personalAccountEndpoint={
+                    configuration.personalAccountEndpoint
+                  }
+                  toolCallLogsEndpoint={configuration.toolCallLogsEndpoint}
                   view={viewByPathname[pathname] ?? "overview"}
-                  {...configuration}
                 />
               )}
             </section>

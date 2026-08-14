@@ -28,6 +28,10 @@ WHATSAPP_NUMBER_RESERVATION_HMAC_SECRET=replace-with-dedicated-32-byte-hex-secre
 # Generate independently with openssl rand -hex 32.
 MCP_CURSOR_HMAC_SECRET=replace-with-dedicated-32-byte-hex-secret
 
+# Purpose-specific HMAC for API Key credential digests.
+# Generate independently with openssl rand -hex 32.
+API_KEY_HMAC_SECRET=replace-with-dedicated-32-byte-hex-secret
+
 # Clerk deployment material.
 CLERK_JWT_KEY="-----BEGIN PUBLIC KEY-----
 replace-with-clerk-jwt-public-key

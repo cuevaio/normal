@@ -1,5 +1,13 @@
 import type { Layer } from "effect";
 import {
+  type ApiKeyClockService,
+  type ApiKeyHmacService,
+  type ApiKeyIdentifiersService,
+  type ApiKeyPersistenceService,
+  createApiKeyManagementHandler,
+  isApiKeyManagementRequest,
+} from "./api-key";
+import {
   type ConnectionSetupRequirements,
   createConnectionSetupHandler,
   isConnectionSetupRequest,
@@ -75,6 +83,10 @@ type BoundaryRequirements =
   | BoundaryProvider
   | BoundaryResource;
 type PublicBoundaryRequirements =
+  | ApiKeyClockService
+  | ApiKeyHmacService
+  | ApiKeyIdentifiersService
+  | ApiKeyPersistenceService
   | BoundaryRequirements
   | ConnectionSetupRequirements
   | McpAuthorizationClockService
@@ -190,6 +202,13 @@ export const createPublicBoundaryWorker = (
 
       if (isMcpAuthorizationManagementRequest(request)) {
         return createMcpAuthorizationManagementHandler(
+          options.layerFor(request, environment),
+          options.browserOrigin,
+        )(request);
+      }
+
+      if (isApiKeyManagementRequest(request)) {
+        return createApiKeyManagementHandler(
           options.layerFor(request, environment),
           options.browserOrigin,
         )(request);

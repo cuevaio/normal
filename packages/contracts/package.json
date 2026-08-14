@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./api-key": "./src/api-key.ts",
     "./cursor": "./src/cursor.ts",
     "./handles": "./src/handles.ts",
     "./health": "./src/health.ts",

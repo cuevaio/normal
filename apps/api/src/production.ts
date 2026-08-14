@@ -11,6 +11,7 @@ import {
   makeSendId,
 } from "@whatsapp-mcp/contracts/handles";
 import type { ProviderControlService } from "@whatsapp-mcp/contracts/provider-control";
+import { makePgApiKeyRepository } from "@whatsapp-mcp/db/api-key";
 import {
   type ConnectionHealthRepository,
   makePgConnectionHealthRepository,
@@ -57,6 +58,17 @@ import {
   type WasenderIdentityProtectionKey,
 } from "@whatsapp-mcp/wasender/session";
 import { Config, ConfigProvider, Data, Effect, Layer, Redacted } from "effect";
+import {
+  ApiKeyClock,
+  ApiKeyHmac,
+  ApiKeyIdentifiers,
+  ApiKeyPersistence,
+  ApiKeyPersistenceError,
+  createApiKeyManagementHandler,
+  isApiKeyManagementRequest,
+  makeApiKeyHmac,
+  productionApiKeyIdentifiers,
+} from "./api-key";
 import { makeClerkHumanIdentity } from "./auth/clerk";
 import { HumanIdentity } from "./auth/human-identity";
 import { decodeBase64, encodeBase64, encodeBase64Url } from "./base64-url";
@@ -298,6 +310,7 @@ export interface ApiEnvironment {
   readonly MESSAGE_RETENTION_DAY_OPTIONS?: string | undefined;
   readonly NEON_BRANCH_ID?: string | undefined;
   readonly READ_MESSAGE_RECORDS_PER_DAY?: string | undefined;
+  readonly API_KEY_HMAC_SECRET?: string | undefined;
   readonly MCP_CURSOR_HMAC_SECRET?: string | undefined;
   readonly SEND_FINGERPRINT_HMAC_SECRET?: string | undefined;
   readonly SENDS_PER_DAY?: string | undefined;
@@ -352,6 +365,13 @@ const mcpRequestQuotaConfig = Config.all({
   }),
 );
 
+const apiKeyHmacSecret = Config.redacted("API_KEY_HMAC_SECRET").pipe(
+  Config.validate({
+    message: "API_KEY_HMAC_SECRET must be a 32-byte hex secret",
+    validation: (value) => /^[a-f0-9]{64}$/iu.test(Redacted.value(value)),
+  }),
+);
+
 const mcpCursorHmacSecret = Config.redacted("MCP_CURSOR_HMAC_SECRET").pipe(
   Config.validate({
     message: "MCP_CURSOR_HMAC_SECRET must be a 32-byte hex secret",
@@ -388,6 +408,7 @@ const sendQuotaConfig = Config.all({
 );
 
 const productionConfig = Config.all({
+  apiKeyHmacSecret,
   environment: Config.literal(
     "development",
     "preview",
@@ -1090,6 +1111,72 @@ const mcpAuthorizationPersistenceLayer = (environment: ApiEnvironment) =>
         catch: () => new McpAuthorizationPersistenceError({}),
       }),
   });
+
+const apiKeyPersistenceLayer = (environment: ApiEnvironment) =>
+  Layer.succeed(ApiKeyPersistence, {
+    authenticate: (input) =>
+      Effect.tryPromise({
+        try: () => {
+          const connectionString = environment.HYPERDRIVE?.connectionString;
+          if (typeof connectionString !== "string") {
+            throw new Error("database unavailable");
+          }
+          return makePgApiKeyRepository(connectionString).authenticate(input);
+        },
+        catch: () => new ApiKeyPersistenceError({}),
+      }),
+    create: (input) =>
+      Effect.tryPromise({
+        try: () => {
+          const connectionString = environment.HYPERDRIVE?.connectionString;
+          if (typeof connectionString !== "string") {
+            throw new Error("database unavailable");
+          }
+          return makePgApiKeyRepository(connectionString).create(input);
+        },
+        catch: () => new ApiKeyPersistenceError({}),
+      }),
+    list: (clerkUserId, observedAt) =>
+      Effect.tryPromise({
+        try: () => {
+          const connectionString = environment.HYPERDRIVE?.connectionString;
+          if (typeof connectionString !== "string") {
+            throw new Error("database unavailable");
+          }
+          return makePgApiKeyRepository(connectionString).list(
+            clerkUserId,
+            observedAt,
+          );
+        },
+        catch: () => new ApiKeyPersistenceError({}),
+      }),
+    revoke: (input) =>
+      Effect.tryPromise({
+        try: () => {
+          const connectionString = environment.HYPERDRIVE?.connectionString;
+          if (typeof connectionString !== "string") {
+            throw new Error("database unavailable");
+          }
+          return makePgApiKeyRepository(connectionString).revoke(input);
+        },
+        catch: () => new ApiKeyPersistenceError({}),
+      }),
+  });
+
+const apiKeyRuntimeLayer = (environment: ApiEnvironment) =>
+  Layer.mergeAll(
+    Layer.succeed(ApiKeyClock, {
+      now: Effect.sync(() => new Date()),
+    }),
+    Layer.succeed(ApiKeyIdentifiers, productionApiKeyIdentifiers),
+    Layer.effect(
+      ApiKeyHmac,
+      apiKeyHmacSecret.pipe(
+        Effect.map((secret) => makeApiKeyHmac(Redacted.value(secret))),
+        Effect.withConfigProvider(environmentConfigProvider(environment)),
+      ),
+    ),
+  );
 
 const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
   Layer.succeed(McpToolPersistence, {
@@ -1866,6 +1953,8 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
     whatsAppConnectionRuntimeLayer,
     mcpAuthorizationPersistenceLayer(environment),
     mcpAuthorizationRuntimeLayer,
+    apiKeyPersistenceLayer(environment),
+    apiKeyRuntimeLayer(environment),
     messageRetentionLayer(environment),
     onboardingProfileLayer(environment),
     recipientExclusionLayer(environment),
@@ -1902,6 +1991,10 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
       layer,
       environment.CLERK_AUTHORIZED_PARTY ?? "",
     );
+  const apiKeyManagementHandler = createApiKeyManagementHandler(
+    layer,
+    environment.CLERK_AUTHORIZED_PARTY ?? "",
+  );
   const toolCallLogHandler = createToolCallLogHandler(
     layer,
     environment.CLERK_AUTHORIZED_PARTY ?? "",
@@ -2021,6 +2114,9 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
         }
         if (isMcpAuthorizationManagementRequest(nextRequest)) {
           return mcpAuthorizationManagementHandler(nextRequest);
+        }
+        if (isApiKeyManagementRequest(nextRequest)) {
+          return apiKeyManagementHandler(nextRequest);
         }
         if (isToolCallLogRequest(nextRequest)) {
           return toolCallLogHandler(nextRequest);

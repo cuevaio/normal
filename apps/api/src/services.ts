@@ -281,6 +281,19 @@ export interface McpAuthorizationManagementCompletedEvent {
   readonly service: "api";
 }
 
+export interface ApiKeyManagementCompletedEvent {
+  readonly event: "api_key.management.completed";
+  readonly operation: "create" | "list" | "revoke";
+  readonly outcome:
+    | "created"
+    | "duplicate_name"
+    | "invalid"
+    | "limit_reached"
+    | "not_found"
+    | "success";
+  readonly service: "api";
+}
+
 export interface McpToolCallCompletedEvent {
   readonly event: "mcp.tool_call.completed";
   readonly failureStage?:
@@ -438,6 +451,7 @@ export type SafeTelemetryEvent =
   | ConnectionSetupStartCompletedEvent
   | GroupDirectoryReconciliationCompletedEvent
   | HttpCompletedEvent
+  | ApiKeyManagementCompletedEvent
   | McpAuthorizationManagementCompletedEvent
   | McpToolCallCompletedEvent
   | MessageRetentionPolicyUpdateCompletedEvent
