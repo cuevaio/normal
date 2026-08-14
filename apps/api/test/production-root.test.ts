@@ -239,7 +239,7 @@ describe("API production root", () => {
   test("fails closed when the API Key HMAC secret is malformed", async () => {
     const response = await createProductionHandler({
       ...validEnvironment(),
-      API_KEY_HMAC_SECRET: "not-a-32-byte-key",
+      API_KEY_HMAC_SECRET: "too-short",
     })(new Request("https://api.example.test/health"));
 
     expect(response.status).toBe(503);

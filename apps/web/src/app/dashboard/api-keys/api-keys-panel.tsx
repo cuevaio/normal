@@ -282,13 +282,10 @@ export function ApiKeysPanel({
 
   return (
     <section aria-label="API Keys" className="flex flex-col gap-8">
-      <div>
-        <h2 className="text-xl font-semibold tracking-tight">API Keys</h2>
-        <p className="text-sm text-muted-foreground">
-          Server-side credentials for your Personal Account. The plaintext is
-          shown once.
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        Server-side credentials for your Personal Account. The plaintext is
+        shown once.
+      </p>
 
       {state === "loading" ? (
         <p aria-live="polite">Loading API Keys…</p>

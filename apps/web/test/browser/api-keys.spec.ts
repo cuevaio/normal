@@ -69,7 +69,9 @@ test("creates, lists, and revokes an API Key across the browser-to-API boundary"
   await page.goto("/dashboard/api-keys");
 
   const panel = page.getByRole("region", { name: "API Keys" });
-  await expect(page.getByRole("heading", { name: "API Keys" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "API Keys" }),
+  ).toBeVisible();
   await expect(panel).toBeVisible();
   await expect(panel.getByText("No API Keys yet.")).toBeVisible();
   await expect(
