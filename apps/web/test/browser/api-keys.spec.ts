@@ -42,6 +42,21 @@ test("creates, lists, and revokes an API Key across the browser-to-API boundary"
       });
       return;
     }
+    if (
+      /^\/v1\/whatsapp-connections\/con_[A-Za-z0-9_-]{21}\/retention-policy$/u.test(
+        requestPath,
+      ) &&
+      original.method() === "GET"
+    ) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          allowed_days: [7, 30, 90],
+          policy: { days: 30 },
+        }),
+      });
+      return;
+    }
     if (requestPath === "/v1/api-keys" && original.method() === "POST") {
       createRequests += 1;
     }
@@ -137,7 +152,8 @@ test("creates, lists, and revokes an API Key across the browser-to-API boundary"
     pagination: { has_more: false, next_cursor: null },
   });
 
-  await page.goto("/dashboard/activity");
+  await page.getByRole("link", { name: "Activity Log" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/activity$/u);
   await expect(
     page.getByRole("region", { name: "Activity Log" }),
   ).toContainText("API Key · CI");
