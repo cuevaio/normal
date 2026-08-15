@@ -7,8 +7,8 @@ import {
   type RestConnectionList,
 } from "@whatsapp-mcp/contracts/rest";
 import type {
-  AuthenticatedApiKey,
   ApiKeyPermission,
+  AuthenticatedApiKey,
 } from "@whatsapp-mcp/db/api-key";
 import type {
   BeginProtectedOperationInput,
@@ -25,8 +25,8 @@ import {
 } from "./api-key";
 import {
   EncryptionError,
-  EnvelopeEncryptionService,
   type EnvelopeEncryption,
+  EnvelopeEncryptionService,
 } from "./encryption/envelope";
 import { noStoreJsonResponse, noStoreResponse } from "./http-response";
 import {
@@ -233,9 +233,9 @@ const authenticate = (
       return yield* Effect.fail(problemResponse("invalid_credentials", 401));
     }
     const hmac = yield* ApiKeyHmac;
-    const digest = yield* hmac.digest(parsed.credential).pipe(
-      Effect.mapError(() => problemResponse("unavailable", 503)),
-    );
+    const digest = yield* hmac
+      .digest(parsed.credential)
+      .pipe(Effect.mapError(() => problemResponse("unavailable", 503)));
     const persistence = yield* ApiKeyPersistence;
     const grant = yield* persistence
       .authenticate({
@@ -297,7 +297,8 @@ const listConnections = (
         return problemResponse("rate_limited", 429, {
           retry_after_seconds: started.right.retryAfterSeconds,
           retryable: true,
-          resets_at: started.right.resetsAt.toISOString() as ProblemDetails["resets_at"],
+          resets_at:
+            started.right.resetsAt.toISOString() as ProblemDetails["resets_at"],
         });
       }
 
@@ -434,10 +435,7 @@ export const createRestHandler =
         return problemResponse("invalid_credentials", 401);
       }
       const authenticated = await Effect.runPromise(
-        authenticate(request).pipe(
-          Effect.provide(layer),
-          Effect.either,
-        ),
+        authenticate(request).pipe(Effect.provide(layer), Effect.either),
       );
       if (authenticated._tag === "Left") {
         return authenticated.left instanceof Response

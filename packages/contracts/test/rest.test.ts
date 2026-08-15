@@ -9,7 +9,7 @@ import {
   RestConnectionListContract,
 } from "../src/rest";
 
-const connectionId = "con_exampleConnection001";
+const connectionId = "con_xxxxxxxxxxxxxxxxxxxxx";
 
 const validList = {
   data: [
@@ -25,11 +25,11 @@ const validList = {
     has_more: false,
     next_cursor: null,
   },
-};
+} as const;
 
 describe("REST contracts", () => {
   test("rejects excess collection properties and cross-type handles", () => {
-    expect(decodeRestConnectionList(validList)).toEqual(validList);
+    expect(decodeRestConnectionList(validList) as unknown).toEqual(validList);
     expect(() =>
       decodeRestConnectionList({
         ...validList,
@@ -56,8 +56,8 @@ describe("REST contracts", () => {
       status: 401,
       title: "Invalid credentials",
       type: problemType("invalid_credentials"),
-    };
-    expect(decodeProblemDetails(problem)).toEqual(problem);
+    } as const;
+    expect(decodeProblemDetails(problem) as unknown).toEqual(problem);
     expect(() =>
       decodeProblemDetails({
         ...problem,
@@ -88,7 +88,7 @@ describe("REST contracts", () => {
     expect(serialized).toContain('"operationId":"listConnections"');
     expect(serialized).toContain('"type":"http"');
     expect(serialized).toContain('"scheme":"bearer"');
-    expect(serialized).toContain("con_exampleConnection001");
+    expect(serialized).toContain("con_xxxxxxxxxxxxxxxxxxxxx");
     expect(serialized).not.toMatch(
       /normal_apk_[A-Za-z0-9_-]{21}\.[A-Za-z0-9_-]+/u,
     );

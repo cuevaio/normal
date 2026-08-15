@@ -114,11 +114,14 @@ test("creates, lists, and revokes an API Key across the browser-to-API boundary"
   expect(createRequests).toBe(1);
   await expect(panel).not.toContainText("temporarily unavailable");
 
-  const listed = await request.get(`http://127.0.0.1:${apiPort}/v1/connections`, {
-    headers: {
-      authorization: `Bearer ${plaintext}`,
+  const listed = await request.get(
+    `http://127.0.0.1:${apiPort}/v1/connections`,
+    {
+      headers: {
+        authorization: `Bearer ${plaintext}`,
+      },
     },
-  });
+  );
   expect(listed.status()).toBe(200);
   expect(listed.headers()["access-control-allow-origin"]).toBeUndefined();
   expect(await listed.json()).toEqual({

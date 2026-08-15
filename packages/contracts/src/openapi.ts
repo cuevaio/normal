@@ -1,8 +1,5 @@
-import { API_KEY_PERMISSIONS } from "./api-key";
-import {
-  ProblemDetailsContract,
-  RestConnectionListContract,
-} from "./rest";
+import type { API_KEY_PERMISSIONS } from "./api-key";
+import { ProblemDetailsContract, RestConnectionListContract } from "./rest";
 
 export const REST_API_VERSION = "1.0.0";
 
@@ -32,7 +29,7 @@ export const restRouteRegistry = [
 const connectionListExample = {
   data: [
     {
-      connection_id: "con_exampleConnection001",
+      connection_id: "con_xxxxxxxxxxxxxxxxxxxxx",
       display_name: "Personal WhatsApp",
       number_last_four: "0000",
       state: "connected",
@@ -55,8 +52,7 @@ const problemExample = {
 
 const jsonSchema = (schema: {
   readonly jsonSchema: unknown;
-}): Record<string, unknown> =>
-  schema.jsonSchema as Record<string, unknown>;
+}): Record<string, unknown> => schema.jsonSchema as Record<string, unknown>;
 
 export const generateOpenApiDocument = (): Record<string, unknown> => ({
   openapi: "3.1.0",
@@ -104,7 +100,8 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
                 schema: { $ref: "#/components/schemas/ProblemDetails" },
               },
             },
-            description: "The API Key is missing, malformed, expired, or revoked.",
+            description:
+              "The API Key is missing, malformed, expired, or revoked.",
           },
           "403": {
             content: {
@@ -120,7 +117,8 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
                 schema: { $ref: "#/components/schemas/ProblemDetails" },
               },
             },
-            description: "Personal Account or API Key request quota is exhausted.",
+            description:
+              "Personal Account or API Key request quota is exhausted.",
           },
           "503": {
             content: {

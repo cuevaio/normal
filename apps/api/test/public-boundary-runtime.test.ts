@@ -449,7 +449,9 @@ describe("public-boundary Worker harness", () => {
       }),
     );
     expect(created.status).toBe(201);
-    const createdBody = (await created.json()) as { readonly credential: string };
+    const createdBody = (await created.json()) as {
+      readonly credential: string;
+    };
     expect(created.headers.get("access-control-allow-origin")).toBe(
       "http://127.0.0.1:3000",
     );

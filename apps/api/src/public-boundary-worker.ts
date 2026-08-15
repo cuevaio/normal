@@ -37,13 +37,6 @@ import {
   type PersonalAccountRequirements,
 } from "./personal-account";
 import {
-  createRestHandler,
-  isRestRequest,
-  type RestClockService,
-  type RestIdentifiersService,
-  type RestPersistenceService,
-} from "./rest";
-import {
   type BoundaryClock,
   type BoundaryIdentifiers,
   type BoundaryIdentity,
@@ -51,6 +44,14 @@ import {
   type BoundaryResource,
   createPublicBoundaryHandler,
 } from "./public-boundary";
+import {
+  createRestHandler,
+  isRestRequest,
+  type RestClockService,
+  type RestIdentifiersService,
+  type RestPersistenceService,
+} from "./rest";
+import type { SafeTelemetry as SafeTelemetryService } from "./services";
 import {
   createToolCallLogHandler,
   isToolCallLogRequest,
@@ -82,7 +83,6 @@ import {
   isWhatsAppConnectionRequest,
   type WhatsAppConnectionRequirements,
 } from "./whatsapp-connection";
-import type { SafeTelemetry as SafeTelemetryService } from "./services";
 import { createWorker } from "./worker";
 
 type BoundaryRequirements =

@@ -69,14 +69,6 @@ import {
   makeApiKeyHmac,
   productionApiKeyIdentifiers,
 } from "./api-key";
-import {
-  createRestHandler,
-  isRestRequest,
-  RestClock,
-  RestIdentifiers,
-  RestPersistence,
-  RestPersistenceError,
-} from "./rest";
 import { makeClerkHumanIdentity } from "./auth/clerk";
 import { HumanIdentity } from "./auth/human-identity";
 import { decodeBase64, encodeBase64, encodeBase64Url } from "./base64-url";
@@ -239,6 +231,14 @@ import {
   RecipientTransitionJournal,
   type RecipientTransitionJournalService,
 } from "./recipient-exclusion";
+import {
+  createRestHandler,
+  isRestRequest,
+  RestClock,
+  RestIdentifiers,
+  RestPersistence,
+  RestPersistenceError,
+} from "./rest";
 import { serializeSafeTelemetry } from "./safe-telemetry";
 import {
   importSendFingerprintKey,

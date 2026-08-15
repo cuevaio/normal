@@ -242,9 +242,7 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   await expect(mcpLogs.first()).toContainText("list connections");
   await toolCallLogs.getByRole("button", { name: "Sort by results" }).click();
   await expect(mcpLogs.first()).toContainText("read messages");
-  await toolCallLogs
-    .getByLabel("Search Activity Log")
-    .fill("list connections");
+  await toolCallLogs.getByLabel("Search Activity Log").fill("list connections");
   await expect(mcpLogs).toHaveCount(1);
   await expect(mcpLogs).toContainText("list connections");
   await toolCallLogs.getByLabel("Search Activity Log").fill("");

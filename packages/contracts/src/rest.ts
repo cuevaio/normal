@@ -31,8 +31,7 @@ export const RestConnectionListContract = makePublicObjectContract({
   data: Schema.Array(RestConnection).pipe(Schema.maxItems(3)),
   pagination: RestPagination,
 });
-export type RestConnectionList =
-  typeof RestConnectionListContract.schema.Type;
+export type RestConnectionList = typeof RestConnectionListContract.schema.Type;
 
 export const ProblemStatus = Schema.Literal(400, 401, 403, 404, 409, 429, 503);
 

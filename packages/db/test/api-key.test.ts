@@ -430,13 +430,14 @@ describe("API Key repository", () => {
       publicId: connectionA,
     });
 
+    expect(listed?.map((row) => row.publicId)).not.toContain(connectionB);
     await database.query(
       `INSERT INTO public.whatsapp_connections (
          id, personal_account_id, webhook_ingress_id,
          display_name_fallback, public_id
        ) VALUES (
          '20000000-0000-4000-8000-000000000081', $1,
-         '30000000-0000-4000-8000-000000000081', 'Later Otter',
+         '30000000-0000-4000-8000-000000000081', 'Kind Otter',
          'con_123456789012345678904'
        )`,
       [accountId],

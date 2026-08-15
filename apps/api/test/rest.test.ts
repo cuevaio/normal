@@ -39,7 +39,8 @@ const makeHarness = (options?: {
       options?.begin ??
       ((input) =>
         Effect.succeed(
-          input.requiredPermission !== undefined &&
+          input.channel === "api" &&
+            input.requiredPermission !== undefined &&
             !(input.permissions ?? []).includes(input.requiredPermission)
             ? {
                 auditLogId: input.auditLogId,
@@ -130,7 +131,10 @@ const request = (
 ) => {
   const headers = new Headers();
   if (options.authorization !== null) {
-    headers.set("authorization", options.authorization ?? `Bearer ${credential}`);
+    headers.set(
+      "authorization",
+      options.authorization ?? `Bearer ${credential}`,
+    );
   }
   if (options.extraAuthorization !== undefined) {
     headers.append("authorization", options.extraAuthorization);

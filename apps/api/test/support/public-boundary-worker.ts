@@ -8,11 +8,6 @@ import {
   productionApiKeyIdentifiers,
 } from "../../src/api-key";
 import {
-  RestClock,
-  RestIdentifiers,
-  RestPersistence,
-} from "../../src/rest";
-import {
   HumanIdentity,
   InvalidHumanIdentity as InvalidHumanIdentityRequest,
 } from "../../src/auth/human-identity";
@@ -68,6 +63,7 @@ import {
   RecipientExclusionPersistence,
   RecipientTransitionJournal,
 } from "../../src/recipient-exclusion";
+import { RestClock, RestIdentifiers, RestPersistence } from "../../src/rest";
 import { RestoreSafeDeletion, SafeTelemetry } from "../../src/services";
 import {
   ToolCallLogClock,
@@ -1028,7 +1024,9 @@ const makeTestLayer = (
         }),
       completeToolCall: (input) =>
         Effect.sync(() => {
-          const existing = apiActivityLogs.find((log) => log.id === input.auditLogId);
+          const existing = apiActivityLogs.find(
+            (log) => log.id === input.auditLogId,
+          );
           if (existing === undefined) return;
           existing.completedAt = input.completedAt;
           existing.errorCode = input.errorCode;
