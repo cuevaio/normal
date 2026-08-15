@@ -15,6 +15,7 @@ import { makeDatabase, makeQueryConnection } from "./database";
 import type { McpAuthorizationScope } from "./mcp-authorization";
 import { withPgRequestConnection } from "./request-connection";
 import {
+  apiKeysInApp,
   ingestionGapsInApp,
   mcpAuthorizationConnectionsInApp,
   mcpAuthorizationsInApp,
@@ -341,7 +342,9 @@ export type BeginProtectedOperationInput = {
       readonly keyHourLimit: number;
       readonly keyMinuteLimit: number;
       readonly operationName: string;
+      readonly permissions?: ReadonlyArray<string>;
       readonly personalAccountId: string;
+      readonly requiredPermission?: string;
     }
 );
 
@@ -393,6 +396,11 @@ export interface McpToolRepository {
       readonly observedAt: Date;
     },
   ) => Promise<ReadonlyArray<McpToolConnectionRecord> | null>;
+  readonly listApiKeyConnections: (input: {
+    readonly apiKeyGrantId: string;
+    readonly observedAt: Date;
+    readonly personalAccountId: string;
+  }) => Promise<ReadonlyArray<McpToolConnectionRecord> | null>;
   readonly getSendStatus: (
     input: McpAccessAuthorization & {
       readonly connectionPublicId: string;
@@ -974,6 +982,132 @@ const enterAccountContext = async (
   return account[0]?.id ?? null;
 };
 
+const loadGrantedConnections = async (
+  connection: McpToolConnection,
+  grant:
+    | { readonly kind: "api"; readonly apiKeyId: string }
+    | { readonly kind: "mcp"; readonly authorizationId: string },
+): Promise<ReadonlyArray<McpToolConnectionRecord>> => {
+  const db = makeDatabase(connection);
+  const selectedTable =
+    grant.kind === "api"
+      ? sql`public.api_key_connections`
+      : sql`public.mcp_authorization_connections`;
+  const grantPredicate =
+    grant.kind === "api"
+      ? sql`selected.api_key_id = ${grant.apiKeyId}`
+      : sql`selected.mcp_authorization_id = ${grant.authorizationId}`;
+  const result = await db.execute<Record<string, unknown>>(sql`
+    SELECT
+      account_keys.ciphertext AS account_key_ciphertext,
+      account_keys.key_version AS account_key_version,
+      account_keys.kms_key_id AS account_kms_key_id,
+      connections.id AS connection_id,
+      connection_keys.account_key_version AS connection_key_account_version,
+      connection_keys.ciphertext AS connection_key_ciphertext,
+      connection_keys.nonce AS connection_key_nonce,
+      connection_keys.key_version AS connection_key_version,
+      connections.display_name_ciphertext AS display_name_ciphertext,
+      connections.display_name_ciphertext_version AS display_name_ciphertext_version,
+      connections.display_name_fallback AS display_name_fallback,
+      connections.display_name_key_version AS display_name_key_version,
+      connections.display_name_nonce AS display_name_nonce,
+      connections.personal_account_id AS personal_account_id,
+      connections.number_suffix AS number_last_four,
+      connections.public_id AS public_id,
+      connections.state AS state,
+      connections.state_changed_at AS state_changed_at
+    FROM ${selectedTable} AS selected
+    JOIN public.whatsapp_connections AS connections
+      ON connections.personal_account_id = selected.personal_account_id
+     AND connections.id = selected.whatsapp_connection_id
+    LEFT JOIN public.personal_account_key_envelopes AS account_keys
+      ON account_keys.personal_account_id = connections.personal_account_id
+     AND account_keys.unavailable_at IS NULL
+    LEFT JOIN public.whatsapp_connection_key_envelopes AS connection_keys
+      ON connection_keys.personal_account_id = connections.personal_account_id
+     AND connection_keys.whatsapp_connection_id = connections.id
+     AND connection_keys.unavailable_at IS NULL
+    WHERE ${grantPredicate}
+      AND connections.state <> 'deleting'
+    ORDER BY connections.created_at, connections.public_id
+  `);
+  return result.map((row) => {
+    const state = row.state;
+    const stateChangedAt = timestampString(row.state_changed_at);
+    const accountCiphertext = bytes(row.account_key_ciphertext);
+    const accountVersion = positiveInteger(row.account_key_version);
+    const connectionKeyCiphertext = bytes(row.connection_key_ciphertext);
+    const connectionKeyNonce = bytes(row.connection_key_nonce);
+    const connectionKeyVersion = positiveInteger(row.connection_key_version);
+    const connectionKeyAccountVersion = positiveInteger(
+      row.connection_key_account_version,
+    );
+    const displayName = persistedCiphertext(row, "display_name");
+    const displayNameFallback =
+      typeof row.display_name_fallback === "string"
+        ? row.display_name_fallback
+        : null;
+    const hasEncryptedName = displayName !== null;
+    const hasEncryptionMaterial =
+      accountCiphertext !== null &&
+      accountVersion !== null &&
+      typeof row.account_kms_key_id === "string" &&
+      connectionKeyCiphertext !== null &&
+      connectionKeyNonce !== null &&
+      connectionKeyVersion !== null &&
+      connectionKeyAccountVersion !== null;
+    if (
+      typeof row.personal_account_id !== "string" ||
+      typeof row.connection_id !== "string" ||
+      hasEncryptedName === (displayNameFallback !== null) ||
+      (hasEncryptedName && !hasEncryptionMaterial) ||
+      (row.number_last_four !== null &&
+        (typeof row.number_last_four !== "string" ||
+          !/^[0-9]{4}$/u.test(row.number_last_four))) ||
+      typeof row.public_id !== "string" ||
+      !/^con_[A-Za-z0-9_-]{21}$/u.test(row.public_id) ||
+      (state !== "connected" &&
+        state !== "connecting" &&
+        state !== "disconnected" &&
+        state !== "reconnect_required" &&
+        state !== "degraded") ||
+      stateChangedAt === null
+    ) {
+      throw new Error("invalid persisted WhatsApp Connection");
+    }
+    return {
+      accountKey: hasEncryptedName
+        ? {
+            ciphertext: base64(accountCiphertext as Uint8Array),
+            keyVersion: accountVersion as number,
+            kmsKeyId: row.account_kms_key_id as string,
+            personalAccountId: row.personal_account_id,
+            version: 1 as const,
+          }
+        : null,
+      connectionId: row.connection_id,
+      connectionKey: hasEncryptedName
+        ? {
+            accountKeyVersion: connectionKeyAccountVersion as number,
+            ciphertext: base64(connectionKeyCiphertext as Uint8Array),
+            connectionId: row.connection_id,
+            keyVersion: connectionKeyVersion as number,
+            nonce: base64(connectionKeyNonce as Uint8Array),
+            personalAccountId: row.personal_account_id,
+            version: 1 as const,
+          }
+        : null,
+      displayName,
+      displayNameFallback,
+      numberLastFour: row.number_last_four,
+      publicId: row.public_id,
+      state,
+      stateChangedAt,
+    };
+  });
+};
+
 const requestQuotaExhausted = (
   starts: ReadonlyArray<Date>,
   observedAt: Date,
@@ -1376,6 +1510,31 @@ export const makeMcpToolRepository = (
                 outcome: "authorization_denied" as const,
               };
             }
+            if (
+              input.requiredPermission !== undefined &&
+              !(input.permissions ?? []).includes(input.requiredPermission)
+            ) {
+              const apiKey = { ...input.apiKey, name: apiKeyName };
+              await insertToolCallLog(connection, {
+                apiKey,
+                auditLogId: input.auditLogId,
+                authorizationId: null,
+                channel: "api",
+                completed: true,
+                connectionPublicId: input.connectionPublicId,
+                errorCode: "authorization_denied",
+                observedAt: input.observedAt,
+                outcome: "authorization_denied",
+                personalAccountId,
+                quotaReserved: false,
+                sendPublicId: input.sendPublicId,
+                toolName: input.operationName,
+              });
+              return {
+                auditLogId: input.auditLogId,
+                outcome: "authorization_denied" as const,
+              };
+            }
 
             const recent = await lockAccountAndListReservedStarts(
               connection,
@@ -1466,7 +1625,6 @@ export const makeMcpToolRepository = (
   listConnections: (input) =>
     provider.withConnection((connection) =>
       (async () => {
-        const db = makeDatabase(connection);
         if (
           input.authorizationContextEstablished !== true &&
           (await enterAuthorizationContext(connection, input)) === null
@@ -1477,118 +1635,45 @@ export const makeMcpToolRepository = (
         if (scopes === null || !scopes.includes("connections:read")) {
           return null;
         }
-        const result = await db.execute<Record<string, unknown>>(sql`
-          SELECT
-            account_keys.ciphertext AS account_key_ciphertext,
-            account_keys.key_version AS account_key_version,
-            account_keys.kms_key_id AS account_kms_key_id,
-            connections.id AS connection_id,
-            connection_keys.account_key_version AS connection_key_account_version,
-            connection_keys.ciphertext AS connection_key_ciphertext,
-            connection_keys.nonce AS connection_key_nonce,
-            connection_keys.key_version AS connection_key_version,
-            connections.display_name_ciphertext AS display_name_ciphertext,
-            connections.display_name_ciphertext_version AS display_name_ciphertext_version,
-            connections.display_name_fallback AS display_name_fallback,
-            connections.display_name_key_version AS display_name_key_version,
-            connections.display_name_nonce AS display_name_nonce,
-            connections.personal_account_id AS personal_account_id,
-            connections.number_suffix AS number_last_four,
-            connections.public_id AS public_id,
-            connections.state AS state,
-            connections.state_changed_at AS state_changed_at
-          FROM public.mcp_authorization_connections AS selected
-          JOIN public.whatsapp_connections AS connections
-            ON connections.personal_account_id = selected.personal_account_id
-           AND connections.id = selected.whatsapp_connection_id
-          LEFT JOIN public.personal_account_key_envelopes AS account_keys
-            ON account_keys.personal_account_id = connections.personal_account_id
-           AND account_keys.unavailable_at IS NULL
-          LEFT JOIN public.whatsapp_connection_key_envelopes AS connection_keys
-            ON connection_keys.personal_account_id = connections.personal_account_id
-           AND connection_keys.whatsapp_connection_id = connections.id
-           AND connection_keys.unavailable_at IS NULL
-          WHERE selected.mcp_authorization_id = ${input.authorizationId}
-            AND connections.state <> 'deleting'
-          ORDER BY connections.created_at, connections.public_id
-        `);
-        return result.map((row) => {
-          const state = row.state;
-          const stateChangedAt = timestampString(row.state_changed_at);
-          const accountCiphertext = bytes(row.account_key_ciphertext);
-          const accountVersion = positiveInteger(row.account_key_version);
-          const connectionKeyCiphertext = bytes(row.connection_key_ciphertext);
-          const connectionKeyNonce = bytes(row.connection_key_nonce);
-          const connectionKeyVersion = positiveInteger(
-            row.connection_key_version,
-          );
-          const connectionKeyAccountVersion = positiveInteger(
-            row.connection_key_account_version,
-          );
-          const displayName = persistedCiphertext(row, "display_name");
-          const displayNameFallback =
-            typeof row.display_name_fallback === "string"
-              ? row.display_name_fallback
-              : null;
-          const hasEncryptedName = displayName !== null;
-          const hasEncryptionMaterial =
-            accountCiphertext !== null &&
-            accountVersion !== null &&
-            typeof row.account_kms_key_id === "string" &&
-            connectionKeyCiphertext !== null &&
-            connectionKeyNonce !== null &&
-            connectionKeyVersion !== null &&
-            connectionKeyAccountVersion !== null;
-          if (
-            typeof row.personal_account_id !== "string" ||
-            typeof row.connection_id !== "string" ||
-            hasEncryptedName === (displayNameFallback !== null) ||
-            (hasEncryptedName && !hasEncryptionMaterial) ||
-            (row.number_last_four !== null &&
-              (typeof row.number_last_four !== "string" ||
-                !/^[0-9]{4}$/u.test(row.number_last_four))) ||
-            typeof row.public_id !== "string" ||
-            !/^con_[A-Za-z0-9_-]{21}$/u.test(row.public_id) ||
-            (state !== "connected" &&
-              state !== "connecting" &&
-              state !== "disconnected" &&
-              state !== "reconnect_required" &&
-              state !== "degraded") ||
-            stateChangedAt === null
-          ) {
-            throw new Error("invalid persisted MCP WhatsApp Connection");
-          }
-          return {
-            accountKey: hasEncryptedName
-              ? {
-                  ciphertext: base64(accountCiphertext as Uint8Array),
-                  keyVersion: accountVersion as number,
-                  kmsKeyId: row.account_kms_key_id as string,
-                  personalAccountId: row.personal_account_id,
-                  version: 1 as const,
-                }
-              : null,
-            connectionId: row.connection_id,
-            connectionKey: hasEncryptedName
-              ? {
-                  accountKeyVersion: connectionKeyAccountVersion as number,
-                  ciphertext: base64(connectionKeyCiphertext as Uint8Array),
-                  connectionId: row.connection_id,
-                  keyVersion: connectionKeyVersion as number,
-                  nonce: base64(connectionKeyNonce as Uint8Array),
-                  personalAccountId: row.personal_account_id,
-                  version: 1 as const,
-                }
-              : null,
-            displayName,
-            displayNameFallback,
-            numberLastFour: row.number_last_four,
-            publicId: row.public_id,
-            state,
-            stateChangedAt,
-          };
+        return loadGrantedConnections(connection, {
+          authorizationId: input.authorizationId,
+          kind: "mcp",
         });
       })(),
+    ),
+  listApiKeyConnections: (input) =>
+    provider.withConnection((connection) =>
+      withTransaction(connection, async () => {
+        if (
+          (await enterAccountContext(connection, input.personalAccountId)) ===
+          null
+        ) {
+          return null;
+        }
+        const db = makeDatabase(connection);
+        const grants = await db
+          .select({
+            expiresAt: apiKeysInApp.expiresAt,
+            permissions: apiKeysInApp.permissions,
+            state: apiKeysInApp.state,
+          })
+          .from(apiKeysInApp)
+          .where(eq(apiKeysInApp.id, input.apiKeyGrantId));
+        const grant = grants[0];
+        if (
+          grant === undefined ||
+          grant.state !== "active" ||
+          (grant.expiresAt !== null &&
+            new Date(grant.expiresAt) <= input.observedAt) ||
+          !grant.permissions.includes("connections:read")
+        ) {
+          return null;
+        }
+        return loadGrantedConnections(connection, {
+          apiKeyId: input.apiKeyGrantId,
+          kind: "api",
+        });
+      }),
     ),
   getSendStatus: (input) =>
     provider.withConnection((connection) =>

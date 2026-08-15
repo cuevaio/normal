@@ -224,6 +224,33 @@ describe("Activity Log protected-operation admission", () => {
     });
   });
 
+  test("records missing API Key permission without reserving quota", async () => {
+    await expect(
+      repository.beginProtectedOperation({
+        ...apiPrincipal,
+        auditLogId: "50000000-0000-4000-8000-000000000049",
+        observedAt,
+        operationName: "list_connections",
+        permissions: ["messages:send"],
+        requiredPermission: "connections:read",
+      }),
+    ).resolves.toEqual({
+      auditLogId: "50000000-0000-4000-8000-000000000049",
+      outcome: "authorization_denied",
+    });
+    const persisted = await database.query<{
+      outcome: string;
+      quota_reserved: boolean;
+    }>(
+      `SELECT outcome, quota_reserved
+       FROM public.tool_call_logs
+       WHERE id = '50000000-0000-4000-8000-000000000049'`,
+    );
+    expect(persisted.rows).toEqual([
+      { outcome: "authorization_denied", quota_reserved: false },
+    ]);
+  });
+
   test("denies an inactive Personal Account without writing an Activity Log", async () => {
     await database.query(
       `UPDATE public.personal_accounts SET state = 'deleting' WHERE id = $1`,

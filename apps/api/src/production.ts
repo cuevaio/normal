@@ -69,6 +69,14 @@ import {
   makeApiKeyHmac,
   productionApiKeyIdentifiers,
 } from "./api-key";
+import {
+  createRestHandler,
+  isRestRequest,
+  RestClock,
+  RestIdentifiers,
+  RestPersistence,
+  RestPersistenceError,
+} from "./rest";
 import { makeClerkHumanIdentity } from "./auth/clerk";
 import { HumanIdentity } from "./auth/human-identity";
 import { decodeBase64, encodeBase64, encodeBase64Url } from "./base64-url";
@@ -1178,6 +1186,57 @@ const apiKeyRuntimeLayer = (environment: ApiEnvironment) =>
     ),
   );
 
+const restPersistenceLayer = (environment: ApiEnvironment) =>
+  Layer.mergeAll(
+    Layer.succeed(RestClock, {
+      now: Effect.sync(() => new Date()),
+    }),
+    Layer.succeed(RestIdentifiers, {
+      nextAuditLogId: Effect.sync(() => crypto.randomUUID()),
+    }),
+    Layer.succeed(RestPersistence, {
+      beginProtectedOperation: (input) =>
+        Effect.tryPromise({
+          try: () => {
+            const connectionString = environment.HYPERDRIVE?.connectionString;
+            if (typeof connectionString !== "string") {
+              throw new Error("database unavailable");
+            }
+            return makePgMcpToolRepository(
+              connectionString,
+            ).beginProtectedOperation(input);
+          },
+          catch: () => new RestPersistenceError(),
+        }),
+      completeToolCall: (input) =>
+        Effect.tryPromise({
+          try: () => {
+            const connectionString = environment.HYPERDRIVE?.connectionString;
+            if (typeof connectionString !== "string") {
+              throw new Error("database unavailable");
+            }
+            return makePgMcpToolRepository(connectionString).completeToolCall(
+              input,
+            );
+          },
+          catch: () => new RestPersistenceError(),
+        }),
+      listConnections: (input) =>
+        Effect.tryPromise({
+          try: () => {
+            const connectionString = environment.HYPERDRIVE?.connectionString;
+            if (typeof connectionString !== "string") {
+              throw new Error("database unavailable");
+            }
+            return makePgMcpToolRepository(
+              connectionString,
+            ).listApiKeyConnections(input);
+          },
+          catch: () => new RestPersistenceError(),
+        }),
+    }),
+  );
+
 const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
   Layer.succeed(McpToolPersistence, {
     failStoredMediaRead: (input) =>
@@ -1955,6 +2014,7 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
     mcpAuthorizationRuntimeLayer,
     apiKeyPersistenceLayer(environment),
     apiKeyRuntimeLayer(environment),
+    restPersistenceLayer(environment),
     messageRetentionLayer(environment),
     onboardingProfileLayer(environment),
     recipientExclusionLayer(environment),
@@ -2117,6 +2177,14 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
         }
         if (isApiKeyManagementRequest(nextRequest)) {
           return apiKeyManagementHandler(nextRequest);
+        }
+        if (isRestRequest(nextRequest)) {
+          return createRestHandler(layer, {
+            hourLimit: requestQuota.hourLimit,
+            keyHourLimit: requestQuota.hourLimit,
+            keyMinuteLimit: requestQuota.minuteLimit,
+            minuteLimit: requestQuota.minuteLimit,
+          })(nextRequest);
         }
         if (isToolCallLogRequest(nextRequest)) {
           return toolCallLogHandler(nextRequest);

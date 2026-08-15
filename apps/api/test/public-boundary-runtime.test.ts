@@ -432,6 +432,74 @@ describe("public-boundary Worker harness", () => {
     });
   });
 
+  test("lists selected Connections with an API Key and records Activity Log", async () => {
+    const created = await exports.default.fetch(
+      new Request("https://api.example.test/v1/api-keys", {
+        body: JSON.stringify({
+          connection_ids: ["con_123456789012345678901"],
+          name: "CI",
+          permissions: ["connections:read"],
+        }),
+        headers: {
+          authorization: "Bearer signed-test-user",
+          "content-type": "application/json",
+          origin: "http://127.0.0.1:3000",
+        },
+        method: "POST",
+      }),
+    );
+    expect(created.status).toBe(201);
+    const createdBody = (await created.json()) as { readonly credential: string };
+    expect(created.headers.get("access-control-allow-origin")).toBe(
+      "http://127.0.0.1:3000",
+    );
+
+    const listed = await exports.default.fetch(
+      new Request("https://api.example.test/v1/connections", {
+        headers: {
+          authorization: `Bearer ${createdBody.credential}`,
+        },
+      }),
+    );
+    expect(listed.status).toBe(200);
+    expect(listed.headers.get("access-control-allow-origin")).toBeNull();
+    expect(listed.headers.get("cache-control")).toBe("no-store");
+    expect(await listed.json()).toEqual({
+      data: [
+        {
+          connection_id: "con_123456789012345678901",
+          display_name: "Personal WhatsApp",
+          number_last_four: "3456",
+          state: "connected",
+          state_changed_at: "2026-08-14T12:00:00.000Z",
+        },
+      ],
+      pagination: { has_more: false, next_cursor: null },
+    });
+
+    const logs = await exports.default.fetch(
+      new Request("https://api.example.test/v1/tool-call-logs", {
+        headers: {
+          authorization: "Bearer signed-test-user",
+          origin: "http://127.0.0.1:3000",
+        },
+      }),
+    );
+    const logBody = (await logs.json()) as {
+      readonly tool_call_logs: ReadonlyArray<{
+        readonly channel: string;
+        readonly client: { readonly name: string };
+        readonly capability: string;
+      }>;
+    };
+    expect(logBody.tool_call_logs[0]).toMatchObject({
+      capability: "list_connections",
+      channel: "api",
+      client: { name: "CI" },
+    });
+    expect(JSON.stringify(logBody)).not.toContain(createdBody.credential);
+  });
+
   test("injects deterministic external failures only in the test root", async () => {
     const response = await exports.default.fetch(
       new Request("https://api.example.test/v1/personal-account", {

@@ -294,6 +294,19 @@ export interface ApiKeyManagementCompletedEvent {
   readonly service: "api";
 }
 
+export interface RestOperationCompletedEvent {
+  readonly event: "rest.operation.completed";
+  readonly operation: "list_connections";
+  readonly outcome:
+    | "audit_unavailable"
+    | "authorization_denied"
+    | "rate_limited"
+    | "success"
+    | "unavailable";
+  readonly resultCount?: number | undefined;
+  readonly service: "api";
+}
+
 export interface McpToolCallCompletedEvent {
   readonly event: "mcp.tool_call.completed";
   readonly failureStage?:
@@ -452,6 +465,7 @@ export type SafeTelemetryEvent =
   | GroupDirectoryReconciliationCompletedEvent
   | HttpCompletedEvent
   | ApiKeyManagementCompletedEvent
+  | RestOperationCompletedEvent
   | McpAuthorizationManagementCompletedEvent
   | McpToolCallCompletedEvent
   | MessageRetentionPolicyUpdateCompletedEvent

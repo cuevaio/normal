@@ -47,12 +47,17 @@ models or returns token material.
 The API Key management journey creates, lists, and revokes through the same
 signed-in browser-to-Worker seam with exact Origin and Clerk JWT. Creation
 requires first-factor verification within five minutes and returns the
-plaintext credential once. Database coverage applies the production migrations
-under `whatsapp_api_runtime` to prove digest-only persistence, the ten-active
-key limit, unique active names, disconnected Connection selection, constant
-not-found for unknown or cross-tenant handles, idempotent revocation that
-clears the digest, and RLS isolation. Worker tests never put fixture
-credentials in the production composition root.
+plaintext credential once. The same journey then calls `GET /v1/connections`
+from the test runner with that one-time credential and observes the API-channel
+Activity Log in the production-built dashboard. Database coverage applies the
+production migrations under `whatsapp_api_runtime` to prove digest-only
+persistence, the ten-active key limit, unique active names, disconnected
+Connection selection, selected-Connection listing, constant not-found for
+unknown or cross-tenant handles, idempotent revocation that clears the digest,
+and RLS isolation. Worker tests never put fixture credentials in the production
+composition root. REST Worker tests prove bearer parsing, Problem Details,
+no-CORS protected JSON, current permission checks, and immediate revocation
+without an authorization cache.
 
 The browser always renders `apps/web/src/app/home-experience.tsx`; there is no
 test component alias or selectable web composition root. Playwright supplies

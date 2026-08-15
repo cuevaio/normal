@@ -61,9 +61,11 @@ export type CreateApiKeyResult =
 export interface AuthenticatedApiKey {
   readonly connectionIds: ReadonlyArray<string>;
   readonly expiresAt: Date | null;
+  readonly grantId: string;
   readonly id: string;
   readonly name: string;
   readonly permissions: ReadonlyArray<ApiKeyPermission>;
+  readonly personalAccountId: string;
 }
 
 export interface ApiKeyRepository {
@@ -188,8 +190,10 @@ export const makeApiKeyRepository = (
         const grants = await db
           .select({
             expiresAt: apiKeysInApp.expiresAt,
+            id: apiKeysInApp.id,
             name: apiKeysInApp.name,
             permissions: apiKeysInApp.permissions,
+            personalAccountId: apiKeysInApp.personalAccountId,
             publicId: apiKeysInApp.publicId,
             state: apiKeysInApp.state,
           })
@@ -197,13 +201,19 @@ export const makeApiKeyRepository = (
           .where(eq(apiKeysInApp.id, apiKeyId));
         const grant = grants[0];
         if (grant === undefined || grant.state !== "active") return null;
+        await db
+          .update(apiKeysInApp)
+          .set({ lastUsedAt: sql`transaction_timestamp()` })
+          .where(eq(apiKeysInApp.id, apiKeyId));
         return {
           connectionIds: await loadGrantConnections(connection, apiKeyId),
           expiresAt:
             grant.expiresAt === null ? null : new Date(grant.expiresAt),
+          grantId: grant.id,
           id: grant.publicId,
           name: grant.name,
           permissions: grant.permissions.filter(isAllowedPermission),
+          personalAccountId: grant.personalAccountId,
         };
       }),
     ),

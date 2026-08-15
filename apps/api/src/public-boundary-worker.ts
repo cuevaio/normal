@@ -17,6 +17,7 @@ import {
   handleConnectionSetupProvisioningBatch,
   isConnectionSetupProvisioningMessage,
 } from "./connection-setup-provisioning";
+import type { EnvelopeEncryption } from "./encryption/envelope";
 import { noStoreJsonResponse } from "./http-response";
 import {
   createMcpAuthorizationManagementHandler,
@@ -35,6 +36,13 @@ import {
   isPersonalAccountRequest,
   type PersonalAccountRequirements,
 } from "./personal-account";
+import {
+  createRestHandler,
+  isRestRequest,
+  type RestClockService,
+  type RestIdentifiersService,
+  type RestPersistenceService,
+} from "./rest";
 import {
   type BoundaryClock,
   type BoundaryIdentifiers,
@@ -74,6 +82,7 @@ import {
   isWhatsAppConnectionRequest,
   type WhatsAppConnectionRequirements,
 } from "./whatsapp-connection";
+import type { SafeTelemetry as SafeTelemetryService } from "./services";
 import { createWorker } from "./worker";
 
 type BoundaryRequirements =
@@ -89,11 +98,16 @@ type PublicBoundaryRequirements =
   | ApiKeyPersistenceService
   | BoundaryRequirements
   | ConnectionSetupRequirements
+  | EnvelopeEncryption
   | McpAuthorizationClockService
   | McpAuthorizationPersistenceService
   | OnboardingProfileClockService
   | OnboardingProfilePersistenceService
   | PersonalAccountRequirements
+  | RestClockService
+  | RestIdentifiersService
+  | RestPersistenceService
+  | SafeTelemetryService
   | ToolCallLogClockService
   | ToolCallLogPersistenceService
   | WebhookIngressRequirements
@@ -212,6 +226,15 @@ export const createPublicBoundaryWorker = (
           options.layerFor(request, environment),
           options.browserOrigin,
         )(request);
+      }
+
+      if (isRestRequest(request)) {
+        return createRestHandler(options.layerFor(request, environment), {
+          hourLimit: 60,
+          keyHourLimit: 60,
+          keyMinuteLimit: 20,
+          minuteLimit: 20,
+        })(request);
       }
 
       if (isToolCallLogRequest(request)) {

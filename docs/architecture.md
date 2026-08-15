@@ -8,6 +8,7 @@ and runbooks.
 flowchart LR
     user[User]
     mcp[MCP Client]
+    apiCaller[Server-side API caller]
     clerk[Clerk]
     whatsapp[WhatsApp]
     wasender[Wasender]
@@ -38,6 +39,7 @@ flowchart LR
     user -->|sign in and manage| web
     web -->|Clerk JWT over HTTPS| api
     mcp -->|OAuth and MCP over HTTPS| api
+    apiCaller -->|API Key over HTTPS| api
     web --> clerk
     api -->|OAuth protocol artifacts| oauth
 
@@ -67,7 +69,8 @@ flowchart LR
 ## Boundary notes
 
 * The API Worker is the only public data plane. Browser requests go directly to
-  its configured origin.
+  its configured origin. Server-side automations call the same Worker with a
+  User-created API Key; they do not go through Vercel or a second public Worker.
 * `provider-control` is private. Provider API Credentials and provider specific
   behavior do not cross its boundary or the `packages/wasender` seam.
 * Neon is authoritative for identity mappings, tenant data, authorization,
@@ -80,9 +83,12 @@ flowchart LR
   restore coordinators preserve that terminal state through provider cleanup
   and database restore.
 * A WhatsApp Recipient Exclusion is a User-owned rule enforced beneath every
-  MCP Authorization. Neon holds current state; a locked, restore-external R2
-  journal holds the append-only transitions and permanent purge cutoffs the
-  restore coordinator replays before traffic reopens.
+  MCP Authorization and API Key. Neon holds current state; a locked,
+  restore-external R2 journal holds the append-only transitions and permanent
+  purge cutoffs the restore coordinator replays before traffic reopens.
+* API Keys authenticate through a purpose-specific HMAC digest and a narrow
+  Neon bootstrap. MCP and REST remain separate protocol adapters over shared
+  protected WhatsApp operations, quotas, and Activity Logs.
 
 For exact behavior, read [`CONTEXT.md`](../CONTEXT.md), the
 [MCP contract](mcp-contract.md), the [configuration reference](configuration.md),

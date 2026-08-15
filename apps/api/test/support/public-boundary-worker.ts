@@ -8,6 +8,11 @@ import {
   productionApiKeyIdentifiers,
 } from "../../src/api-key";
 import {
+  RestClock,
+  RestIdentifiers,
+  RestPersistence,
+} from "../../src/rest";
+import {
   HumanIdentity,
   InvalidHumanIdentity as InvalidHumanIdentityRequest,
 } from "../../src/auth/human-identity";
@@ -162,20 +167,40 @@ const provisioningLeases = new Map<string, string>();
 const provisionedSetups = new Set<string>();
 let authorizationRevokedAt: Date | null = null;
 const testAuthorizationId = "mca_123456789012345678901";
+const testPersonalAccountId = "10000000-0000-4000-8000-000000000018";
 const apiKeys: Array<{
   clerkUserId: string;
   connectionIds: ReadonlyArray<string>;
   createdAt: Date;
+  credentialDigest: Uint8Array;
   credentialHint: string;
   expiresAt: Date | null;
+  grantId: string;
   lastUsedAt: Date | null;
   name: string;
   permissions: ReadonlyArray<
     "connections:read" | "directory:read" | "messages:read" | "messages:send"
   >;
+  personalAccountId: string;
   publicId: string;
   revokedAt: Date | null;
   state: "active" | "expired" | "revoked";
+}> = [];
+const apiActivityLogs: Array<{
+  apiKeyId: string;
+  clientName: string;
+  completedAt: Date | null;
+  errorCode: string | null;
+  id: string;
+  outcome:
+    | "started"
+    | "success"
+    | "execution_error"
+    | "rate_limited"
+    | "authorization_denied";
+  resultCount: number | null;
+  startedAt: Date;
+  toolName: string;
 }> = [];
 const providerObservations: string[] = [];
 const qrObservations = new Map<string, number>();
@@ -529,41 +554,65 @@ const makeTestLayer = (
           clerkUserId === "user_test_public_boundary"
             ? {
                 logs: [
-                  cursor === null
-                    ? {
-                        apiKeyId: null,
-                        authorizationId: testAuthorizationId,
-                        channel: "mcp" as const,
-                        clientId: "approved-client",
-                        clientName: "Approved MCP Client",
-                        completedAt: new Date("2026-01-02T03:04:05.120Z"),
-                        connectionId: "con_123456789012345678901",
-                        errorCode: null,
-                        latencyMs: 120,
-                        mediaBytes: 0,
-                        outcome: "success" as const,
-                        resultCount: 1,
-                        sendId: null,
-                        startedAt: new Date("2026-01-02T03:04:05.000Z"),
-                        toolName: "list_connections",
-                      }
-                    : {
-                        apiKeyId: null,
-                        authorizationId: testAuthorizationId,
-                        channel: "mcp" as const,
-                        clientId: "approved-client",
-                        clientName: "Approved MCP Client",
-                        completedAt: new Date("2026-01-02T03:03:05.045Z"),
-                        connectionId: "con_123456789012345678901",
-                        errorCode: null,
-                        latencyMs: 45,
-                        mediaBytes: 0,
-                        outcome: "success" as const,
-                        resultCount: 2,
-                        sendId: null,
-                        startedAt: new Date("2026-01-02T03:03:05.000Z"),
-                        toolName: "read_messages",
-                      },
+                  ...apiActivityLogs.map((log) => ({
+                    apiKeyId: log.apiKeyId,
+                    authorizationId: null,
+                    channel: "api" as const,
+                    clientId: log.apiKeyId,
+                    clientName: log.clientName,
+                    completedAt: log.completedAt,
+                    connectionId: null,
+                    errorCode: log.errorCode,
+                    latencyMs:
+                      log.completedAt === null
+                        ? null
+                        : log.completedAt.valueOf() - log.startedAt.valueOf(),
+                    mediaBytes: 0,
+                    outcome: log.outcome,
+                    resultCount: log.resultCount,
+                    sendId: null,
+                    startedAt: log.startedAt,
+                    toolName: log.toolName,
+                  })),
+                  ...(cursor === null
+                    ? [
+                        {
+                          apiKeyId: null,
+                          authorizationId: testAuthorizationId,
+                          channel: "mcp" as const,
+                          clientId: "approved-client",
+                          clientName: "Approved MCP Client",
+                          completedAt: new Date("2026-01-02T03:04:05.120Z"),
+                          connectionId: "con_123456789012345678901",
+                          errorCode: null,
+                          latencyMs: 120,
+                          mediaBytes: 0,
+                          outcome: "success" as const,
+                          resultCount: 1,
+                          sendId: null,
+                          startedAt: new Date("2026-01-02T03:04:05.000Z"),
+                          toolName: "list_connections",
+                        },
+                      ]
+                    : [
+                        {
+                          apiKeyId: null,
+                          authorizationId: testAuthorizationId,
+                          channel: "mcp" as const,
+                          clientId: "approved-client",
+                          clientName: "Approved MCP Client",
+                          completedAt: new Date("2026-01-02T03:03:05.045Z"),
+                          connectionId: "con_123456789012345678901",
+                          errorCode: null,
+                          latencyMs: 45,
+                          mediaBytes: 0,
+                          outcome: "success" as const,
+                          resultCount: 2,
+                          sendId: null,
+                          startedAt: new Date("2026-01-02T03:03:05.000Z"),
+                          toolName: "read_messages",
+                        },
+                      ]),
                 ],
                 nextCursor:
                   cursor === null ? "tcl_123456789012345678901" : null,
@@ -806,7 +855,29 @@ const makeTestLayer = (
       ),
     ),
     Layer.succeed(ApiKeyPersistence, {
-      authenticate: () => Effect.succeed(null),
+      authenticate: (input) =>
+        Effect.sync(() => {
+          const existing = apiKeys.find(
+            (key) =>
+              key.publicId === input.publicId &&
+              key.state === "active" &&
+              key.credentialDigest.length === input.digest.length &&
+              key.credentialDigest.every(
+                (byte, index) => byte === input.digest[index],
+              ),
+          );
+          if (existing === undefined) return null;
+          existing.lastUsedAt = new Date("2026-01-02T03:04:05.000Z");
+          return {
+            connectionIds: existing.connectionIds,
+            expiresAt: existing.expiresAt,
+            grantId: existing.grantId,
+            id: existing.publicId,
+            name: existing.name,
+            permissions: existing.permissions,
+            personalAccountId: existing.personalAccountId,
+          };
+        }),
       create: (input) =>
         Effect.sync(() => {
           if (
@@ -840,11 +911,14 @@ const makeTestLayer = (
             clerkUserId: input.clerkUserId,
             connectionIds: input.connectionIds,
             createdAt: input.createdAt,
+            credentialDigest: input.credentialDigest,
             credentialHint: input.credentialHint,
             expiresAt: input.expiresAt,
+            grantId: input.id,
             lastUsedAt: null,
             name: input.name,
             permissions: input.permissions,
+            personalAccountId: testPersonalAccountId,
             publicId: input.publicId,
             revokedAt: null,
             state: "active" as const,
@@ -899,6 +973,114 @@ const makeTestLayer = (
           existing.revokedAt ??= input.revokedAt;
           existing.state = "revoked";
           return { revokedAt: existing.revokedAt };
+        }),
+    }),
+    Layer.succeed(RestClock, {
+      now: Effect.succeed(new Date("2026-01-02T03:04:05.000Z")),
+    }),
+    Layer.succeed(RestIdentifiers, {
+      nextAuditLogId: Effect.succeed("50000000-0000-4000-8000-000000000079"),
+    }),
+    Layer.succeed(RestPersistence, {
+      beginProtectedOperation: (input) =>
+        Effect.sync(() => {
+          if (input.channel !== "api") {
+            return {
+              auditLogId: input.auditLogId,
+              outcome: "authorization_denied" as const,
+            };
+          }
+          if (
+            input.requiredPermission !== undefined &&
+            !(input.permissions ?? []).includes(input.requiredPermission)
+          ) {
+            apiActivityLogs.unshift({
+              apiKeyId: input.apiKey.publicId,
+              clientName: input.apiKey.name,
+              completedAt: input.observedAt,
+              errorCode: "authorization_denied",
+              id: input.auditLogId,
+              outcome: "authorization_denied",
+              resultCount: null,
+              startedAt: input.observedAt,
+              toolName: input.operationName,
+            });
+            return {
+              auditLogId: input.auditLogId,
+              outcome: "authorization_denied" as const,
+            };
+          }
+          apiActivityLogs.unshift({
+            apiKeyId: input.apiKey.publicId,
+            clientName: input.apiKey.name,
+            completedAt: null,
+            errorCode: null,
+            id: input.auditLogId,
+            outcome: "started",
+            resultCount: null,
+            startedAt: input.observedAt,
+            toolName: input.operationName,
+          });
+          return {
+            auditLogId: input.auditLogId,
+            outcome: "started" as const,
+          };
+        }),
+      completeToolCall: (input) =>
+        Effect.sync(() => {
+          const existing = apiActivityLogs.find((log) => log.id === input.auditLogId);
+          if (existing === undefined) return;
+          existing.completedAt = input.completedAt;
+          existing.errorCode = input.errorCode;
+          existing.outcome = input.outcome;
+          existing.resultCount = input.resultCount;
+        }),
+      listConnections: (input) =>
+        Effect.sync(() => {
+          const key = apiKeys.find(
+            (candidate) =>
+              candidate.grantId === input.apiKeyGrantId &&
+              candidate.personalAccountId === input.personalAccountId &&
+              candidate.state === "active" &&
+              candidate.permissions.includes("connections:read"),
+          );
+          if (key === undefined) return null;
+          return key.connectionIds.flatMap((publicId) => {
+            const known = whatsAppConnections.find(
+              (connection) => connection.publicId === publicId,
+            );
+            const fallback =
+              publicId === "con_123456789012345678901"
+                ? {
+                    displayName: "Personal WhatsApp",
+                    numberSuffix: "3456",
+                    state: "connected" as const,
+                    stateChangedAt: "2026-08-14T12:00:00.000Z",
+                  }
+                : publicId === "con_123456789012345678902"
+                  ? {
+                      displayName: "Work WhatsApp",
+                      numberSuffix: "7890",
+                      state: "disconnected" as const,
+                      stateChangedAt: "2026-08-14T12:00:00.000Z",
+                    }
+                  : null;
+            const record = known ?? fallback;
+            if (record === null) return [];
+            return [
+              {
+                accountKey: null,
+                connectionId: "20000000-0000-4000-8000-000000000018",
+                connectionKey: null,
+                displayName: null,
+                displayNameFallback: record.displayName,
+                numberLastFour: record.numberSuffix,
+                publicId,
+                state: record.state,
+                stateChangedAt: record.stateChangedAt,
+              },
+            ];
+          });
         }),
     }),
     Layer.succeed(ConnectionSetupPersistence, {

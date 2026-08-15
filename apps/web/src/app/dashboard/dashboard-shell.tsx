@@ -68,7 +68,7 @@ const navigation = [
     label: "MCP Authorizations",
   },
   { href: "/dashboard/api-keys", icon: KeyRound, label: "API Keys" },
-  { href: "/dashboard/activity", icon: Activity, label: "Tool Call Logs" },
+  { href: "/dashboard/activity", icon: Activity, label: "Activity Log" },
 ] as const;
 
 function DashboardSidebar() {

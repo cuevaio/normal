@@ -35,12 +35,12 @@ Secret examples never contain usable key material.
 | `MCP_SMOKE_CLIENT_ID` | Public authorization-policy identifier | Deployment and launch-gate workflows | The reviewed public OAuth client ID used by the dedicated deployment-smoke MCP Authorization. Change only with the corresponding client-policy review and reauthorization. |
 | `MCP_SMOKE_REFRESH_SECRET_ID` | Sensitive identifier | Deployment and launch-gate workflows | The exact AWS Secrets Manager secret created by `mcp-smoke-credential.template.json`. Its plaintext is the current one-time refresh credential and is read and replaced only by the environment-bound smoke role. |
 | `AWS_MCP_SMOKE_CREDENTIAL_ROLE_ARN` | Non-secret authority identifier | GitHub Actions OIDC | Exact role allowed to read and rotate only the production smoke refresh secret. Trust is limited to this repository's `production` and `production-launch-gate` protected environments. |
-| `MCP_REQUESTS_PER_MINUTE` | Non-secret approved quota | API MCP resource server | Authoritative per-Personal-Account request reservations allowed in an exact rolling minute. Set the reviewed positive integer through `mcp_requests_per_minute`; there is no production default. |
-| `MCP_REQUESTS_PER_HOUR` | Non-secret approved quota | API MCP resource server | Authoritative per-Personal-Account request reservations allowed in an exact rolling hour. Set the reviewed integer through `mcp_requests_per_hour`; it must be at least the minute value and has no production default. |
+| `MCP_REQUESTS_PER_MINUTE` | Non-secret approved quota | API MCP and REST resource server | Authoritative per-Personal-Account request reservations allowed in an exact rolling minute, shared by MCP and REST. REST also applies the same reviewed value as the per-API-Key minute limit. Set the reviewed positive integer through `mcp_requests_per_minute`; there is no production default. |
+| `MCP_REQUESTS_PER_HOUR` | Non-secret approved quota | API MCP and REST resource server | Authoritative per-Personal-Account request reservations allowed in an exact rolling hour, shared by MCP and REST. REST also applies the same reviewed value as the per-API-Key hour limit. Set the reviewed integer through `mcp_requests_per_hour`; it must be at least the minute value and has no production default. |
 | `READ_MESSAGE_RECORDS_PER_DAY` | Non-secret approved quota | API MCP resource server | Authoritative per-Personal-Account Stored Message records returned per UTC day. Tombstones count and there is no production default. |
 | `DECRYPTED_MEDIA_BYTES_PER_DAY` | Non-secret approved quota | API MCP resource server | Authoritative per-Personal-Account full plaintext Stored Media bytes reserved per UTC day before decryption. There is no production default. |
 | `MCP_CURSOR_HMAC_SECRET` | Secret | API MCP resource server | Dedicated 32-byte hex HMAC key for authorization-bound pagination cursors. Generate independently with `openssl rand -hex 32`; never reuse OAuth, content, provider-reference, webhook, reservation, or deletion keys. Rotation invalidates outstanding short-lived cursors. |
-| `API_KEY_HMAC_SECRET` | Secret | API API Key management | Dedicated 32-byte hex HMAC key for User-created API Key credential digests. Generate independently with `openssl rand -hex 32`; never reuse OAuth, cursor, content, provider-reference, webhook, reservation, or deletion keys. A Personal Account may retain at most ten active API Keys. Creating an API Key requires Clerk first-factor verification within five minutes. Rotation invalidates every remaining active API Key. |
+| `API_KEY_HMAC_SECRET` | Secret | API API Key management and REST authentication | Dedicated 32-byte hex HMAC key for User-created API Key credential digests. The Worker computes the digest and passes only the public handle and digest to `bootstrap_api_key`. Generate independently with `openssl rand -hex 32`; never reuse OAuth, cursor, content, provider-reference, webhook, reservation, or deletion keys. A Personal Account may retain at most ten active API Keys. Creating an API Key requires Clerk first-factor verification within five minutes. Rotation invalidates every remaining active API Key. |
 | `SEND_FINGERPRINT_HMAC_SECRET` | Secret | API outbound-send workflow | Dedicated 32-byte hex HMAC key for non-reversible exact-request fingerprints retained with idempotency bindings. Generate independently; do not replace it while any 90-day binding remains live. |
 | `SENDS_PER_MINUTE` | Non-secret approved quota | API outbound-send workflow | Per-authorization exact rolling-minute send reservation limit. There is no production default. |
 | `SENDS_PER_DAY` | Non-secret approved quota | API outbound-send workflow | Per-Personal-Account UTC-day send reservation limit. There is no production default. |
@@ -337,9 +337,11 @@ payloads. MCP-channel rows remain compatible; API-channel rows omit
 `mcp_authorization_id` and present the `apk_` handle instead. MCP tool
 telemetry is limited to `mcp.tool_call.completed`, the fixed
 `list_connections` or `list_groups` tool name, an allowlisted outcome, the API service name, and
-the bounded result count on success. Do not enrich it with tenant,
-authorization, client, Connection, quota, credential, request, or response
-fields.
+the bounded result count on success. REST telemetry is limited to
+`rest.operation.completed`, the fixed `list_connections` operation name, an
+allowlisted outcome, the API service name, and the bounded result count on
+success. Do not enrich either event with tenant, authorization, client,
+Connection, quota, credential, request, or response fields.
 
 The endpoint returns at most 100 newest-first records at a time. Follow its
 opaque `next_cursor` until it is `null` to traverse the complete unexpired

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PGlite } from "@electric-sql/pglite";
 import { type ApiKeyRepository, makeApiKeyRepository } from "../src/api-key";
+import { makeMcpToolRepository } from "../src/mcp-tool";
 import { runMigrations } from "../src/migrations";
 
 const accountId = "10000000-0000-4000-8000-000000000078";
@@ -344,10 +345,17 @@ describe("API Key repository", () => {
     });
     expect(accepted).toMatchObject({
       connectionIds: [connectionA],
+      grantId: "50000000-0000-4000-8000-000000000001",
       id: publicIdFor(1),
       permissions: ["connections:read"],
+      personalAccountId: accountId,
     });
     expect(accepted).not.toHaveProperty("credentialDigest");
+    const used = await database.query<{ last_used_at: string | null }>(
+      `SELECT last_used_at FROM public.api_keys WHERE public_id = $1`,
+      [publicIdFor(1)],
+    );
+    expect(used.rows[0]?.last_used_at).not.toBeNull();
 
     const wrongDigest = await repository.authenticate({
       digest: otherDigest,
@@ -396,6 +404,68 @@ describe("API Key repository", () => {
     });
     expect(expired).toBeNull();
     expect(expired).toEqual(unknown);
+  });
+
+  test("lists only explicitly selected non-deleted Connections for an API Key", async () => {
+    expect(await createKey()).toMatchObject({ outcome: "created" });
+    const tools = makeMcpToolRepository({
+      withConnection: async (use) => {
+        await database.exec("SET ROLE whatsapp_api_runtime");
+        try {
+          return await use(database);
+        } finally {
+          await database.exec("RESET ROLE");
+        }
+      },
+    });
+    const listed = await tools.listApiKeyConnections({
+      apiKeyGrantId: "50000000-0000-4000-8000-000000000001",
+      observedAt: createdAt,
+      personalAccountId: accountId,
+    });
+    expect(listed?.map((row) => row.publicId)).toEqual([connectionA]);
+    expect(listed?.[0]).toMatchObject({
+      displayNameFallback: "Bright Badger",
+      numberLastFour: "3456",
+      publicId: connectionA,
+    });
+
+    await database.query(
+      `INSERT INTO public.whatsapp_connections (
+         id, personal_account_id, webhook_ingress_id,
+         display_name_fallback, public_id
+       ) VALUES (
+         '20000000-0000-4000-8000-000000000081', $1,
+         '30000000-0000-4000-8000-000000000081', 'Later Otter',
+         'con_123456789012345678904'
+       )`,
+      [accountId],
+    );
+    const afterLater = await tools.listApiKeyConnections({
+      apiKeyGrantId: "50000000-0000-4000-8000-000000000001",
+      observedAt: createdAt,
+      personalAccountId: accountId,
+    });
+    expect(afterLater?.map((row) => row.publicId)).toEqual([connectionA]);
+
+    expect(
+      await createKey({
+        connectionIds: [connectionA, connectionB],
+        id: "50000000-0000-4000-8000-000000000010",
+        name: "Send only",
+        permissions: ["messages:send"],
+        publicId: publicIdFor(10),
+        credentialHint: hintFor(publicIdFor(10)),
+        credentialDigest: otherDigest,
+      }),
+    ).toMatchObject({ outcome: "created" });
+    expect(
+      await tools.listApiKeyConnections({
+        apiKeyGrantId: "50000000-0000-4000-8000-000000000010",
+        observedAt: createdAt,
+        personalAccountId: accountId,
+      }),
+    ).toBeNull();
   });
 
   test("keeps another Personal Account from reading API Keys under RLS", async () => {

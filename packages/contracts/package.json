@@ -12,6 +12,8 @@
     "./mcp-result": "./src/mcp-result.ts",
     "./mcp-schema": "./src/mcp-schema.ts",
     "./onboarding-profile": "./src/onboarding-profile.ts",
+    "./openapi": "./src/openapi.ts",
+    "./rest": "./src/rest.ts",
     "./provider-control": "./src/provider-control.ts",
     "./stored-media-uri": "./src/stored-media-uri.ts"
   },

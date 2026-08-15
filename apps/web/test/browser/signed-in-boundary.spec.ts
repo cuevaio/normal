@@ -221,41 +221,34 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   expect(bootstrapMethod).toBe("POST");
   expect(bootstrapRequests).toBe(1);
 
-  await page.getByRole("link", { name: "Tool Call Logs" }).click();
+  await page.getByRole("link", { name: "Activity Log" }).click();
   await expect(page).toHaveURL(/\/dashboard\/activity$/u);
-  const toolCallLogs = page.getByRole("region", { name: "Tool Call Logs" });
-  await expect(toolCallLogs.getByTestId("tool-call-log")).toContainText(
-    "list connections",
-  );
+  const toolCallLogs = page.getByRole("region", { name: "Activity Log" });
+  const mcpLogs = toolCallLogs.getByTestId("tool-call-log").filter({
+    hasText: "Approved MCP Client",
+  });
+  await expect(mcpLogs).toContainText("list connections");
   await expect(toolCallLogs).toContainText("Approved MCP Client");
   await expect(toolCallLogs).toContainText("success");
   await expect(toolCallLogs).toContainText("1");
   await expect(toolCallLogs).toContainText("120 ms");
   await expect(toolCallLogs).toContainText("mca_123456789012345678901");
-  await expect(toolCallLogs.getByTestId("tool-call-log")).not.toContainText(
-    /message text|phone|provider/iu,
-  );
+  await expect(mcpLogs).not.toContainText(/message text|phone|provider/iu);
   await toolCallLogs.getByRole("button", { name: "Next page" }).click();
-  await expect(toolCallLogs.getByTestId("tool-call-log")).toHaveCount(2);
+  await expect(mcpLogs).toHaveCount(2);
   await expect(toolCallLogs).toContainText("read messages");
   await expect(toolCallLogs).toContainText("Page 1 of 1");
   await toolCallLogs.getByRole("button", { name: "Sort by results" }).click();
-  await expect(toolCallLogs.getByTestId("tool-call-log").first()).toContainText(
-    "list connections",
-  );
+  await expect(mcpLogs.first()).toContainText("list connections");
   await toolCallLogs.getByRole("button", { name: "Sort by results" }).click();
-  await expect(toolCallLogs.getByTestId("tool-call-log").first()).toContainText(
-    "read messages",
-  );
+  await expect(mcpLogs.first()).toContainText("read messages");
   await toolCallLogs
-    .getByLabel("Search Tool Call Logs")
+    .getByLabel("Search Activity Log")
     .fill("list connections");
-  await expect(toolCallLogs.getByTestId("tool-call-log")).toHaveCount(1);
-  await expect(toolCallLogs.getByTestId("tool-call-log")).toContainText(
-    "list connections",
-  );
-  await toolCallLogs.getByLabel("Search Tool Call Logs").fill("");
-  await expect(toolCallLogs.getByTestId("tool-call-log")).toHaveCount(2);
+  await expect(mcpLogs).toHaveCount(1);
+  await expect(mcpLogs).toContainText("list connections");
+  await toolCallLogs.getByLabel("Search Activity Log").fill("");
+  await expect(mcpLogs).toHaveCount(2);
 
   await page.getByRole("link", { name: "WhatsApp Connections" }).click();
   await expect(page).toHaveURL(/\/dashboard\/connections$/u);
@@ -293,7 +286,7 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   await expect(page.getByTestId("connection-setup-status")).toHaveText(
     "Connection Setup started. Preparing your QR code.",
   );
-  await page.getByRole("link", { name: "Tool Call Logs" }).click();
+  await page.getByRole("link", { name: "Activity Log" }).click();
   await page.getByRole("link", { name: "WhatsApp Connections" }).click();
   await expect(
     page.getByRole("heading", { name: "Start Connection Setup" }),

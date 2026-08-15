@@ -1732,7 +1732,7 @@ export function PublicBoundaryJourney({
           ) : null}
           {view === "activity" ? (
             <section
-              aria-label="Tool Call Logs"
+              aria-label="Activity Log"
               className="flex flex-col gap-5"
             >
               <div>
@@ -1745,10 +1745,10 @@ export function PublicBoundaryJourney({
                 </p>
               </div>
               {toolCallLogState === "loading" ? (
-                <p aria-live="polite">Loading Tool Call Logs…</p>
+                <p aria-live="polite">Loading Activity Log…</p>
               ) : toolCallLogState === "unavailable" ? (
                 <p aria-live="polite">
-                  Tool Call Logs are temporarily unavailable.
+                  Activity Log is temporarily unavailable.
                 </p>
               ) : toolCallLogs.length === 0 ? (
                 <p>No tool activity in the last 90 days.</p>
@@ -1757,7 +1757,7 @@ export function PublicBoundaryJourney({
                   <FieldGroup className="flex flex-col gap-2 sm:flex-row">
                     <Field className="sm:max-w-sm">
                       <FieldLabel className="sr-only" htmlFor="log-search">
-                        Search Tool Call Logs
+                        Search Activity Log
                       </FieldLabel>
                       <Input
                         id="log-search"
@@ -1967,7 +1967,7 @@ export function PublicBoundaryJourney({
                               className="h-24 text-center text-muted-foreground"
                               colSpan={6}
                             >
-                              No Tool Call Logs match these filters.
+                              No Activity Log entries match these filters.
                             </TableCell>
                           </TableRow>
                         ) : null}
@@ -2051,7 +2051,7 @@ export function PublicBoundaryJourney({
                 </div>
               )}
               {toolCallLogPageState === "unavailable" ? (
-                <p aria-live="polite">More Tool Call Logs are unavailable.</p>
+                <p aria-live="polite">More Activity Log entries are unavailable.</p>
               ) : null}
             </section>
           ) : null}
