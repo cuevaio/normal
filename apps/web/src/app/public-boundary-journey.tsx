@@ -1731,10 +1731,7 @@ export function PublicBoundaryJourney({
             </section>
           ) : null}
           {view === "activity" ? (
-            <section
-              aria-label="Activity Log"
-              className="flex flex-col gap-5"
-            >
+            <section aria-label="Activity Log" className="flex flex-col gap-5">
               <div>
                 <h2 className="text-xl font-semibold tracking-tight">
                   Recent activity
@@ -2051,7 +2048,9 @@ export function PublicBoundaryJourney({
                 </div>
               )}
               {toolCallLogPageState === "unavailable" ? (
-                <p aria-live="polite">More Activity Log entries are unavailable.</p>
+                <p aria-live="polite">
+                  More Activity Log entries are unavailable.
+                </p>
               ) : null}
             </section>
           ) : null}
