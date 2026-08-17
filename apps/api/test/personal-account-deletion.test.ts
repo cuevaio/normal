@@ -50,6 +50,7 @@ const makeHarness = (known = true, markerFails = false) => {
         known
           ? Effect.sync(() => {
               state = "deleting";
+              calls.push("prepare");
               return {
                 connectionPublicIds: [],
                 personalAccountId: "10000000-0000-4000-8000-000000000001",
@@ -111,7 +112,12 @@ describe("Personal Account Deletion HTTP boundary", () => {
     expect(await response.json()).toEqual({
       personal_account: { state: "deleting" },
     });
-    expect(harness.calls).toEqual(["marker", "finish", "clerk:deleting"]);
+    expect(harness.calls).toEqual([
+      "prepare",
+      "marker",
+      "finish",
+      "clerk:deleting",
+    ]);
   });
 
   test("verified Clerk deletion uses the same idempotent transition", async () => {
@@ -124,7 +130,35 @@ describe("Personal Account Deletion HTTP boundary", () => {
     );
 
     expect(response.status).toBe(204);
-    expect(harness.calls).toEqual(["marker", "finish"]);
+    expect(harness.calls).toEqual(["prepare", "marker", "finish"]);
+  });
+
+  test("replays product and Clerk entry points through the same prepare", async () => {
+    const harness = makeHarness();
+    const product = await harness.handler(
+      new Request("https://api.example.test/v1/personal-account", {
+        headers: { authorization: "Bearer valid", origin: browserOrigin },
+        method: "DELETE",
+      }),
+    );
+    const clerk = await harness.handler(
+      new Request("https://api.example.test/v1/webhooks/clerk", {
+        headers: { "svix-signature": "valid" },
+        method: "POST",
+      }),
+    );
+
+    expect(product.status).toBe(202);
+    expect(clerk.status).toBe(204);
+    expect(harness.calls).toEqual([
+      "prepare",
+      "marker",
+      "finish",
+      "clerk:deleting",
+      "prepare",
+      "marker",
+      "finish",
+    ]);
   });
 
   test("accepts a verified webhook for an unknown identity without creating an account", async () => {
@@ -151,6 +185,6 @@ describe("Personal Account Deletion HTTP boundary", () => {
 
     expect(response.status).toBe(503);
     expect(harness.state()).toBe("deleting");
-    expect(harness.calls).toEqual([]);
+    expect(harness.calls).toEqual(["prepare"]);
   });
 });

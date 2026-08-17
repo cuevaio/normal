@@ -78,6 +78,13 @@
       "when": 1786485600000,
       "tag": "0010_distinguish_send_grant_identities",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786489200000,
+      "tag": "0011_revoke_api_keys_on_personal_account_deletion",
+      "breakpoints": true
     }
   ]
 }
