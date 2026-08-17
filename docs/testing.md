@@ -63,9 +63,10 @@ the same unlinkable Security Records as MCP events. Worker tests never put
 fixture credentials in the production composition root. REST Worker tests prove
 bearer parsing, Problem Details, no-CORS protected JSON, current permission
 checks, immediate revocation without an authorization cache, Directory contact
-paging, REST-only cursors,
-and audit-before-release. Migrated-Postgres tests prove API Key contact listing
-shares MCP ordering, search indexes, and selected-Connection isolation.
+paging, WhatsApp Conversation paging, REST-only cursors, and
+audit-before-release. Migrated-Postgres tests prove API Key contact and
+conversation listing share MCP ordering, selected-Connection isolation,
+Recipient Exclusion, and kind or search filters.
 
 The browser always renders `apps/web/src/app/home-experience.tsx`; there is no
 test component alias or selectable web composition root. Playwright supplies

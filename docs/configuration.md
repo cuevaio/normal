@@ -338,8 +338,8 @@ payloads. MCP-channel rows remain compatible; API-channel rows omit
 telemetry is limited to `mcp.tool_call.completed`, the fixed
 `list_connections` or `list_groups` tool name, an allowlisted outcome, the API service name, and
 the bounded result count on success. REST telemetry is limited to
-`rest.operation.completed`, the fixed `list_connections` or `list_contacts`
-operation name, an allowlisted outcome, the API service name, and the bounded
+`rest.operation.completed`, the fixed `list_connections`, `list_contacts`, or
+`list_chats` operation name, an allowlisted outcome, the API service name, and the bounded
 result count on success. Do not enrich either event with tenant, authorization, client,
 Connection, quota, credential, request, or response fields.
 

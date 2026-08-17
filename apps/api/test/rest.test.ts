@@ -71,6 +71,7 @@ const makeHarness = (options?: {
       ]),
     loadContactReadMaterial: () => Effect.succeed(null),
     listEncryptedContacts: () => Effect.succeed(null),
+    listChats: () => Effect.succeed(null),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&
@@ -334,6 +335,7 @@ const makeContactHarness = (options?: {
     completeToolCall: () => Effect.void,
     listConnections: () => Effect.succeed([]),
     loadContactReadMaterial: () => Effect.succeed(contactMaterial),
+    listChats: () => Effect.succeed(null),
     listEncryptedContacts: () =>
       Effect.succeed({
         asOf: "2026-08-14T12:00:00.000Z",
@@ -552,5 +554,275 @@ describe("REST Directory contacts", () => {
       status: 503,
     });
     expect(JSON.stringify(body)).not.toContain("Ada");
+  });
+});
+
+const chatPage = {
+  accountKey: {
+    ciphertext: "YQ==",
+    keyVersion: 1,
+    kmsKeyId: "arn:aws:kms:us-east-1:111122223333:key/content-root-key",
+    personalAccountId,
+    version: 1 as const,
+  },
+  asOf: "2026-08-14T12:00:00.000Z",
+  chats: [
+    {
+      conversationId: "cvs_123456789012345678901",
+      displayName: {
+        ciphertext: "Zg==",
+        keyVersion: 1,
+        nonce: "BQUFBQUFBQUFBQUF",
+        version: 1 as const,
+      },
+      displayNameEntity: "directory-contact" as const,
+      displayNameRecordId: `di1_${"i".repeat(43)}`,
+      kind: "direct" as const,
+      lastActivityAt: "2026-08-14T11:59:00.000Z",
+      lastActivityDirection: "inbound" as const,
+      phone: {
+        ciphertext: "Zw==",
+        keyVersion: 1,
+        nonce: "BgYGBgYGBgYGBgYG",
+        version: 1 as const,
+      },
+      recipientId: "ctc_123456789012345678901",
+    },
+  ],
+  connectionKey: {
+    accountKeyVersion: 1,
+    ciphertext: "Yg==",
+    connectionId: "20000000-0000-4000-8000-000000000079",
+    keyVersion: 1,
+    nonce: "AwMDAwMDAwMDAwMD",
+    personalAccountId,
+    version: 1 as const,
+  },
+  partial: false,
+  stale: false,
+};
+
+const makeConversationHarness = (options?: {
+  readonly permissions?: ReadonlyArray<
+    "connections:read" | "directory:read" | "messages:read" | "messages:send"
+  >;
+  readonly persistence?: Partial<RestPersistenceService>;
+}) => {
+  const telemetry: Array<SafeTelemetryEvent> = [];
+  const persistence: RestPersistenceService = {
+    beginProtectedOperation: (input) =>
+      Effect.succeed(
+        input.channel === "api" &&
+          input.requiredPermission !== undefined &&
+          !(input.permissions ?? []).includes(input.requiredPermission)
+          ? {
+              auditLogId: input.auditLogId,
+              outcome: "authorization_denied" as const,
+            }
+          : {
+              auditLogId: input.auditLogId,
+              outcome: "started" as const,
+            },
+      ),
+    completeToolCall: () => Effect.void,
+    listConnections: () => Effect.succeed([]),
+    loadContactReadMaterial: () => Effect.succeed(null),
+    listEncryptedContacts: () => Effect.succeed(null),
+    listChats: () => Effect.succeed(chatPage),
+    rejectProtectedOperation: (input) =>
+      Effect.succeed(
+        input.requiredPermission !== undefined &&
+          !input.permissions.includes(input.requiredPermission)
+          ? ("authorization_denied" as const)
+          : ("rejected" as const),
+      ),
+    ...options?.persistence,
+  };
+  const layer = Layer.mergeAll(
+    Layer.succeed(ApiKeyHmac, {
+      digest: () => Effect.succeed(digest),
+    }),
+    Layer.succeed(ApiKeyPersistence, {
+      authenticate: () =>
+        Effect.succeed({
+          connectionIds: [connectionId],
+          expiresAt: null,
+          grantId,
+          id: publicId,
+          name: "CI",
+          permissions: options?.permissions ?? [
+            "connections:read",
+            "messages:read",
+          ],
+          personalAccountId,
+        }),
+      create: () => Effect.succeed({ outcome: "not_found" as const }),
+      list: () => Effect.succeed([]),
+      revoke: () => Effect.succeed(null),
+    }),
+    Layer.succeed(RestClock, { now: Effect.succeed(observedAt) }),
+    Layer.succeed(RestIdentifiers, {
+      nextAuditLogId: Effect.succeed("50000000-0000-4000-8000-000000000080"),
+    }),
+    Layer.succeed(RestCursorCodec, {
+      decode: () => Effect.fail(new RestCursorError()),
+      encode: () => Effect.succeed("rest-cursor"),
+    }),
+    Layer.succeed(RestPersistence, persistence),
+    Layer.succeed(EnvelopeEncryptionService, {
+      createConnectionKey: () => Effect.die("unused"),
+      createPersonalAccountKey: () => Effect.die("unused"),
+      decrypt: () => Effect.die("unused"),
+      decryptMany: (input) =>
+        Effect.succeed(
+          input.items.map((item) =>
+            item.context.fieldOrObjectPurpose === "display-name"
+              ? new TextEncoder().encode("Ada")
+              : new TextEncoder().encode("+12025550199"),
+          ),
+        ),
+      encrypt: () => Effect.die("unused"),
+    }),
+    Layer.succeed(SafeTelemetry, {
+      emit: (event) =>
+        Effect.sync(() => {
+          telemetry.push(event);
+        }),
+    }),
+  );
+  return {
+    handler: createRestHandler(layer, {
+      hourLimit: 3,
+      keyHourLimit: 2,
+      keyMinuteLimit: 1,
+      minuteLimit: 2,
+    }),
+    telemetry,
+  };
+};
+
+describe("REST WhatsApp Conversations", () => {
+  test("pages conversations with safe metadata and no full phone or snippet", async () => {
+    const harness = makeConversationHarness();
+    const response = await harness.handler(
+      request(`/v1/connections/${connectionId}/conversations`),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await response.json()).toEqual({
+      data: [
+        {
+          conversation_id: "cvs_123456789012345678901",
+          display_name: "Ada",
+          kind: "direct",
+          last_activity_at: "2026-08-14T11:59:00.000Z",
+          last_activity_direction: "inbound",
+          phone_last_four: "0199",
+          recipient_id: "ctc_123456789012345678901",
+        },
+      ],
+      meta: {
+        as_of: "2026-08-14T12:00:00.000Z",
+        partial: false,
+        stale: false,
+      },
+      pagination: {
+        has_more: false,
+        next_cursor: null,
+      },
+    });
+    expect(harness.telemetry).toEqual([
+      {
+        event: "rest.operation.completed",
+        operation: "list_chats",
+        outcome: "success",
+        resultCount: 1,
+        service: "api",
+      },
+    ]);
+    expect(JSON.stringify(harness.telemetry)).not.toContain("+12025550199");
+    expect(JSON.stringify(harness.telemetry)).not.toContain(credential);
+  });
+
+  test("requires messages:read and hides unknown Connections", async () => {
+    const forbidden = await makeConversationHarness({
+      permissions: ["connections:read", "messages:send"],
+    }).handler(request(`/v1/connections/${connectionId}/conversations`));
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toMatchObject({
+      code: "insufficient_permission",
+      status: 403,
+    });
+
+    const missing = await makeConversationHarness({
+      persistence: {
+        listChats: () => Effect.succeed(null),
+      },
+    }).handler(request(`/v1/connections/${connectionId}/conversations`));
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+  });
+
+  test("rejects extra query parameters and invalid kind or limit before auth", async () => {
+    const harness = makeConversationHarness();
+    for (const path of [
+      `/v1/connections/${connectionId}/conversations?search=Ada`,
+      `/v1/connections/${connectionId}/conversations?kind=thread`,
+      `/v1/connections/${connectionId}/conversations?limit=0`,
+      `/v1/connections/${connectionId}/conversations?limit=51`,
+    ]) {
+      const response = await harness.handler(request(path));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        code: "invalid_request",
+        status: 400,
+      });
+    }
+    expect(harness.telemetry).toEqual([]);
+  });
+
+  test("rejects MCP cursors and other invalid cursors before quota reservation", async () => {
+    const harness = makeConversationHarness();
+    const response = await harness.handler(
+      request(
+        `/v1/connections/${connectionId}/conversations?cursor=mcp-or-tampered`,
+      ),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      code: "invalid_cursor",
+      status: 400,
+    });
+    expect(harness.telemetry).toEqual([
+      {
+        event: "rest.operation.completed",
+        operation: "list_chats",
+        outcome: "invalid_cursor",
+        service: "api",
+      },
+    ]);
+  });
+
+  test("withholds the page when Activity Log completion fails", async () => {
+    const harness = makeConversationHarness({
+      persistence: {
+        completeToolCall: () => Effect.fail(new RestPersistenceError()),
+      },
+    });
+    const response = await harness.handler(
+      request(`/v1/connections/${connectionId}/conversations`),
+    );
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      code: "unavailable",
+      status: 503,
+    });
+    expect(JSON.stringify(body)).not.toContain("Ada");
+    expect(JSON.stringify(body)).not.toContain("+12025550199");
   });
 });

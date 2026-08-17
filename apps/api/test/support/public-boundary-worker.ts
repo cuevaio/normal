@@ -1045,6 +1045,7 @@ const makeTestLayer = (
         }),
       loadContactReadMaterial: () => Effect.succeed(null),
       listEncryptedContacts: () => Effect.succeed(null),
+      listChats: () => Effect.succeed(null),
       rejectProtectedOperation: (input) =>
         Effect.sync(() => {
           if (

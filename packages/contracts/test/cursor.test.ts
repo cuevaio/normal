@@ -331,6 +331,16 @@ describe("REST authorization-bound cursors", () => {
         verifyRestCursor(
           key,
           restCursor,
+          { ...restContext, operationId: "listConversations" },
+          nowEpochSeconds,
+        ),
+      ),
+    ).toBeInstanceOf(InvalidCursorError);
+    expect(
+      await runError(
+        verifyRestCursor(
+          key,
+          restCursor,
           { ...restContext, operationId: "listGroups" },
           nowEpochSeconds,
         ),
