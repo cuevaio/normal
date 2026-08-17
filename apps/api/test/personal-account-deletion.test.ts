@@ -133,6 +133,34 @@ describe("Personal Account Deletion HTTP boundary", () => {
     expect(harness.calls).toEqual(["prepare", "marker", "finish"]);
   });
 
+  test("replays product and Clerk entry points through the same prepare", async () => {
+    const harness = makeHarness();
+    const product = await harness.handler(
+      new Request("https://api.example.test/v1/personal-account", {
+        headers: { authorization: "Bearer valid", origin: browserOrigin },
+        method: "DELETE",
+      }),
+    );
+    const clerk = await harness.handler(
+      new Request("https://api.example.test/v1/webhooks/clerk", {
+        headers: { "svix-signature": "valid" },
+        method: "POST",
+      }),
+    );
+
+    expect(product.status).toBe(202);
+    expect(clerk.status).toBe(204);
+    expect(harness.calls).toEqual([
+      "prepare",
+      "marker",
+      "finish",
+      "clerk:deleting",
+      "prepare",
+      "marker",
+      "finish",
+    ]);
+  });
+
   test("accepts a verified webhook for an unknown identity without creating an account", async () => {
     const harness = makeHarness(false);
     const response = await harness.handler(

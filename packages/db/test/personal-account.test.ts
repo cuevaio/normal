@@ -8,6 +8,44 @@ import {
 } from "../src/personal-account";
 
 const accountId = "10000000-0000-4000-8000-000000000010";
+const apiKeyPublicId = "apk_aaaaaaaaaaaaaaaaaaaaa";
+const apiKeyDigest = new Uint8Array(32).fill(7);
+
+const insertApiKey = async (
+  database: PGlite,
+  input: {
+    readonly digestHex?: string | null;
+    readonly id: string;
+    readonly name: string;
+    readonly publicId: string;
+    readonly revokedAt?: string;
+  },
+) => {
+  const digestHex =
+    input.digestHex === undefined ? "07".repeat(32) : input.digestHex;
+  await database.query(
+    `INSERT INTO public.api_keys (
+       id, personal_account_id, public_id, name, credential_digest,
+       credential_hint, permissions, state, created_at, reverified_at,
+       revoked_at
+     ) VALUES (
+       $1, $2, $3, $4,
+       CASE WHEN $5::text IS NULL THEN NULL ELSE decode($5, 'hex') END,
+       $6, ARRAY['connections:read'], $7,
+       '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z', $8
+     )`,
+    [
+      input.id,
+      accountId,
+      input.publicId,
+      input.name,
+      digestHex,
+      `normal_${input.publicId}.…wxyz`,
+      input.revokedAt === undefined ? "active" : "revoked",
+      input.revokedAt ?? null,
+    ],
+  );
+};
 
 describe("Personal Account repository", () => {
   let database: PGlite;
@@ -204,6 +242,100 @@ describe("Personal Account repository", () => {
     ]);
   });
 
+  test("revokes every API Key and clears digests before tenant access can continue", async () => {
+    const repository = makePersonalAccountRepository(provider);
+    const apiKeys = makeApiKeyRepository(provider);
+    await repository.create({
+      clerkUserId: "user_deletekeys",
+      keyCiphertext: new Uint8Array([1, 2, 3]),
+      keyVersion: 1,
+      kmsKeyId: "arn:aws:kms:us-east-1:111122223333:key/content-root-key",
+      personalAccountId: accountId,
+    });
+
+    await database.exec("RESET ROLE");
+    await insertApiKey(database, {
+      id: "60000000-0000-4000-8000-000000000001",
+      name: "Billing automation",
+      publicId: apiKeyPublicId,
+    });
+    await insertApiKey(database, {
+      digestHex: null,
+      id: "60000000-0000-4000-8000-000000000002",
+      name: "Already revoked",
+      publicId: "apk_bbbbbbbbbbbbbbbbbbbbb",
+      revokedAt: "2026-08-03T00:30:00Z",
+    });
+    await database.exec("SET ROLE whatsapp_api_runtime");
+
+    await expect(
+      apiKeys.authenticate({
+        digest: apiKeyDigest,
+        publicId: apiKeyPublicId,
+      }),
+    ).resolves.toMatchObject({
+      id: apiKeyPublicId,
+      personalAccountId: accountId,
+    });
+
+    await expect(
+      repository.prepareDeletion({
+        clerkUserId: "user_deletekeys",
+        observedAt: "2026-08-03T01:00:00.000Z",
+      }),
+    ).resolves.toMatchObject({ state: "deleting" });
+    await expect(
+      repository.prepareDeletion({
+        clerkUserId: "user_deletekeys",
+        observedAt: "2026-08-03T02:00:00.000Z",
+      }),
+    ).resolves.toMatchObject({
+      requestedAt: "2026-08-03T01:00:00.000Z",
+      state: "deleting",
+    });
+
+    await expect(
+      apiKeys.authenticate({
+        digest: apiKeyDigest,
+        publicId: apiKeyPublicId,
+      }),
+    ).resolves.toBeNull();
+    await expect(repository.resolve("user_deletekeys")).resolves.toBeNull();
+
+    await database.exec("RESET ROLE");
+    const keys = await database.query<{
+      digest: Uint8Array | null;
+      metadata_expires_at: Date | null;
+      name: string;
+      public_id: string;
+      revoked_at: Date;
+      state: string;
+    }>(
+      `SELECT public_id, name, state, credential_digest AS digest, revoked_at,
+              metadata_expires_at
+       FROM public.api_keys
+       ORDER BY public_id`,
+    );
+    expect(keys.rows).toEqual([
+      {
+        digest: null,
+        metadata_expires_at: new Date("2026-11-01T01:00:00.000Z"),
+        name: "Billing automation",
+        public_id: apiKeyPublicId,
+        revoked_at: new Date("2026-08-03T01:00:00.000Z"),
+        state: "revoked",
+      },
+      {
+        digest: null,
+        metadata_expires_at: null,
+        name: "Already revoked",
+        public_id: "apk_bbbbbbbbbbbbbbbbbbbbb",
+        revoked_at: new Date("2026-08-03T00:30:00.000Z"),
+        state: "revoked",
+      },
+    ]);
+  });
+
   test("purges a deletion-complete account into unlinkable Security Records", async () => {
     const repository = makePersonalAccountRepository(provider);
     await repository.create({
@@ -213,6 +345,13 @@ describe("Personal Account repository", () => {
       kmsKeyId: "arn:aws:kms:us-east-1:111122223333:key/content-root-key",
       personalAccountId: accountId,
     });
+    await database.exec("RESET ROLE");
+    await insertApiKey(database, {
+      id: "60000000-0000-4000-8000-000000000001",
+      name: "Billing automation",
+      publicId: apiKeyPublicId,
+    });
+    await database.exec("SET ROLE whatsapp_api_runtime");
     await repository.prepareDeletion({
       clerkUserId: "user_purge123",
       observedAt: "2026-08-03T01:00:00.000Z",
@@ -224,6 +363,14 @@ describe("Personal Account repository", () => {
     });
 
     await database.exec("RESET ROLE");
+    expect(
+      (
+        await database.query<{
+          digest: Uint8Array | null;
+          state: string;
+        }>(`SELECT state, credential_digest AS digest FROM public.api_keys`)
+      ).rows,
+    ).toEqual([{ digest: null, state: "revoked" }]);
     await database.query(
       `INSERT INTO public.mcp_authorizations (
          id, personal_account_id, oauth_subject, client_id, client_class,
@@ -293,6 +440,13 @@ describe("Personal Account repository", () => {
       (
         await database.query(
           "SELECT count(*)::integer AS count FROM public.personal_accounts",
+        )
+      ).rows,
+    ).toEqual([{ count: 0 }]);
+    expect(
+      (
+        await database.query(
+          "SELECT count(*)::integer AS count FROM public.api_keys",
         )
       ).rows,
     ).toEqual([{ count: 0 }]);
