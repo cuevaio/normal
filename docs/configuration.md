@@ -39,7 +39,7 @@ Secret examples never contain usable key material.
 | `MCP_REQUESTS_PER_HOUR` | Non-secret approved quota | API MCP and REST resource server | Authoritative per-Personal-Account request reservations allowed in an exact rolling hour, shared by MCP and REST. REST also applies the same reviewed value as the per-API-Key hour limit. Set the reviewed integer through `mcp_requests_per_hour`; it must be at least the minute value and has no production default. |
 | `READ_MESSAGE_RECORDS_PER_DAY` | Non-secret approved quota | API MCP resource server | Authoritative per-Personal-Account Stored Message records returned per UTC day. Tombstones count and there is no production default. |
 | `DECRYPTED_MEDIA_BYTES_PER_DAY` | Non-secret approved quota | API MCP resource server | Authoritative per-Personal-Account full plaintext Stored Media bytes reserved per UTC day before decryption. There is no production default. |
-| `MCP_CURSOR_HMAC_SECRET` | Secret | API MCP resource server | Dedicated 32-byte hex HMAC key for authorization-bound pagination cursors. Generate independently with `openssl rand -hex 32`; never reuse OAuth, content, provider-reference, webhook, reservation, or deletion keys. Rotation invalidates outstanding short-lived cursors. |
+| `MCP_CURSOR_HMAC_SECRET` | Secret | API MCP and REST resource server | Dedicated 32-byte hex HMAC key for authorization-bound pagination cursors. REST Directory cursors use a distinct signing document that binds the API Key grant and operation ID, so MCP and REST cursors are not interchangeable. Generate independently with `openssl rand -hex 32`; never reuse OAuth, content, provider-reference, webhook, reservation, or deletion keys. Rotation invalidates outstanding short-lived cursors. |
 | `API_KEY_HMAC_SECRET` | Secret | API API Key management and REST authentication | Dedicated 32-byte hex HMAC key for User-created API Key credential digests. The Worker computes the digest and passes only the public handle and digest to `bootstrap_api_key`. Generate independently with `openssl rand -hex 32`; never reuse OAuth, cursor, content, provider-reference, webhook, reservation, or deletion keys. A Personal Account may retain at most ten active API Keys. Creating an API Key requires Clerk first-factor verification within five minutes. Rotation invalidates every remaining active API Key. |
 | `SEND_FINGERPRINT_HMAC_SECRET` | Secret | API outbound-send workflow | Dedicated 32-byte hex HMAC key for non-reversible exact-request fingerprints retained with idempotency bindings. Generate independently; do not replace it while any 90-day binding remains live. |
 | `SENDS_PER_MINUTE` | Non-secret approved quota | API outbound-send workflow | Per-authorization exact rolling-minute send reservation limit. There is no production default. |
@@ -338,9 +338,9 @@ payloads. MCP-channel rows remain compatible; API-channel rows omit
 telemetry is limited to `mcp.tool_call.completed`, the fixed
 `list_connections` or `list_groups` tool name, an allowlisted outcome, the API service name, and
 the bounded result count on success. REST telemetry is limited to
-`rest.operation.completed`, the fixed `list_connections` operation name, an
-allowlisted outcome, the API service name, and the bounded result count on
-success. Do not enrich either event with tenant, authorization, client,
+`rest.operation.completed`, the fixed `list_connections`, `list_contacts`, or
+`list_chats` operation name, an allowlisted outcome, the API service name, and the bounded
+result count on success. Do not enrich either event with tenant, authorization, client,
 Connection, quota, credential, request, or response fields.
 
 The endpoint returns at most 100 newest-first records at a time. Follow its

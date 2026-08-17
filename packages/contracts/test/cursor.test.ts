@@ -4,8 +4,11 @@ import {
   type CursorContext,
   InvalidCursorError,
   importCursorSigningKey,
+  type RestCursorContext,
   signCursor,
+  signRestCursor,
   verifyCursor,
+  verifyRestCursor,
 } from "../src/cursor";
 import { ConnectionId } from "../src/handles";
 
@@ -201,5 +204,155 @@ describe("authorization-bound cursors", () => {
         _tag: "CursorSigningError",
       });
     }
+  });
+});
+
+const restContext: RestCursorContext = {
+  grantId: "60000000-0000-4000-8000-000000000081",
+  operationId: "listContacts",
+  connectionId,
+  filters: {
+    search: "+12025550199",
+  },
+  pageSize: 20,
+  sortVersion: "contacts-v1",
+};
+
+describe("REST authorization-bound cursors", () => {
+  test("round trips a REST boundary without exposing the grant or search", async () => {
+    const key = await run(importCursorSigningKey(secret));
+    const cursor = await run(
+      signRestCursor(key, {
+        context: restContext,
+        boundary: ["ada", "ctc_123456789012345678901"],
+        expiresAtEpochSeconds,
+      }),
+    );
+    const boundary = await run(
+      verifyRestCursor(key, cursor, restContext, nowEpochSeconds),
+    );
+
+    expect(boundary).toEqual(["ada", "ctc_123456789012345678901"]);
+    const [encodedPayload] = cursor.split(".");
+    const payload = Encoding.decodeBase64UrlString(encodedPayload ?? "");
+    const serializedPayload =
+      payload._tag === "Right" ? payload.right : "decode failed";
+    expect(serializedPayload).not.toContain(restContext.grantId);
+    expect(serializedPayload).not.toContain("+12025550199");
+  });
+
+  test("rejects MCP cursors, parameter changes, expiry, and another grant", async () => {
+    const key = await run(importCursorSigningKey(secret));
+    const restCursor = await run(
+      signRestCursor(key, {
+        context: restContext,
+        boundary: ["ada", "ctc_123456789012345678901"],
+        expiresAtEpochSeconds,
+      }),
+    );
+    const mcpCursor = await run(
+      signCursor(key, {
+        context,
+        boundary: ["ada", "ctc_123456789012345678901"],
+        expiresAtEpochSeconds,
+      }),
+    );
+
+    expect(
+      await runError(
+        verifyRestCursor(key, mcpCursor, restContext, nowEpochSeconds),
+      ),
+    ).toBeInstanceOf(InvalidCursorError);
+    expect(
+      await runError(verifyCursor(key, restCursor, context, nowEpochSeconds)),
+    ).toBeInstanceOf(InvalidCursorError);
+    expect(
+      await runError(
+        verifyRestCursor(
+          key,
+          restCursor,
+          { ...restContext, grantId: "60000000-0000-4000-8000-000000000082" },
+          nowEpochSeconds,
+        ),
+      ),
+    ).toBeInstanceOf(InvalidCursorError);
+    expect(
+      await runError(
+        verifyRestCursor(
+          key,
+          restCursor,
+          {
+            ...restContext,
+            connectionId: Schema.decodeUnknownSync(ConnectionId)(
+              "con_ABCDEFGHIJKLMNO123456",
+            ),
+          },
+          nowEpochSeconds,
+        ),
+      ),
+    ).toBeInstanceOf(InvalidCursorError);
+    expect(
+      await runError(
+        verifyRestCursor(
+          key,
+          restCursor,
+          { ...restContext, filters: { search: "Ada" } },
+          nowEpochSeconds,
+        ),
+      ),
+    ).toBeInstanceOf(InvalidCursorError);
+    expect(
+      await runError(
+        verifyRestCursor(key, restCursor, restContext, expiresAtEpochSeconds),
+      ),
+    ).toBeInstanceOf(InvalidCursorError);
+    expect(
+      await runError(
+        verifyRestCursor(
+          key,
+          restCursor,
+          { ...restContext, pageSize: 50 },
+          nowEpochSeconds,
+        ),
+      ),
+    ).toBeInstanceOf(InvalidCursorError);
+    expect(
+      await runError(
+        verifyRestCursor(
+          key,
+          restCursor,
+          { ...restContext, sortVersion: "contacts-v2" },
+          nowEpochSeconds,
+        ),
+      ),
+    ).toBeInstanceOf(InvalidCursorError);
+    expect(
+      await runError(
+        verifyRestCursor(
+          key,
+          restCursor,
+          { ...restContext, operationId: "listConversations" },
+          nowEpochSeconds,
+        ),
+      ),
+    ).toBeInstanceOf(InvalidCursorError);
+    expect(
+      await runError(
+        verifyRestCursor(
+          key,
+          restCursor,
+          { ...restContext, operationId: "listGroups" },
+          nowEpochSeconds,
+        ),
+      ),
+    ).toBeInstanceOf(InvalidCursorError);
+    const tampered = `${restCursor.slice(0, -1)}${
+      restCursor.endsWith("a") ? "b" : "a"
+    }`;
+    expect(
+      await runError(
+        verifyRestCursor(key, tampered, restContext, nowEpochSeconds),
+      ),
+    ).toBeInstanceOf(InvalidCursorError);
   });
 });

@@ -29,6 +29,20 @@ const CursorContextSchema = Schema.Struct({
 
 export type CursorContext = typeof CursorContextSchema.Type;
 
+const RestCursorContextSchema = Schema.Struct({
+  grantId: Schema.String.pipe(Schema.minLength(1)),
+  operationId: Schema.String.pipe(Schema.pattern(/^[a-z][A-Za-z0-9]*$/)),
+  connectionId: ConnectionId,
+  filters: Schema.Record({
+    key: Schema.String,
+    value: CursorFilterValue,
+  }),
+  pageSize: Schema.Number.pipe(Schema.int(), Schema.between(1, 50)),
+  sortVersion: Schema.String.pipe(Schema.minLength(1)),
+});
+
+export type RestCursorContext = typeof RestCursorContextSchema.Type;
+
 const CursorPayloadSchema = Schema.Struct({
   version: Schema.Literal(1),
   boundary: Schema.Array(CursorScalar).pipe(Schema.minItems(1)),
@@ -62,9 +76,23 @@ const decodeClaims = Schema.decodeUnknownSync(CursorClaimsSchema, {
 const decodeContext = Schema.decodeUnknownSync(CursorContextSchema, {
   onExcessProperty: "error",
 });
+const decodeRestContext = Schema.decodeUnknownSync(RestCursorContextSchema, {
+  onExcessProperty: "error",
+});
 const decodePayload = Schema.decodeUnknownSync(CursorPayloadSchema, {
   onExcessProperty: "error",
 });
+const decodeRestClaims = Schema.decodeUnknownSync(
+  Schema.Struct({
+    context: RestCursorContextSchema,
+    boundary: Schema.Array(CursorScalar).pipe(Schema.minItems(1)),
+    expiresAtEpochSeconds: Schema.Number.pipe(
+      Schema.int(),
+      Schema.nonNegative(),
+    ),
+  }),
+  { onExcessProperty: "error" },
+);
 
 const canonicalFilters = (
   filters: CursorContext["filters"],
@@ -90,6 +118,23 @@ const serializeSigningDocument = (
     version: payload.version,
     authorizationId: context.authorizationId,
     tool: context.tool,
+    connectionId: context.connectionId,
+    filters: canonicalFilters(context.filters),
+    pageSize: context.pageSize,
+    sortVersion: context.sortVersion,
+    boundary: payload.boundary,
+    expiresAtEpochSeconds: payload.expiresAtEpochSeconds,
+  });
+
+const serializeRestSigningDocument = (
+  context: RestCursorContext,
+  payload: CursorPayload,
+): string =>
+  JSON.stringify({
+    version: payload.version,
+    channel: "rest",
+    grantId: context.grantId,
+    operationId: context.operationId,
     connectionId: context.connectionId,
     filters: canonicalFilters(context.filters),
     pageSize: context.pageSize,
@@ -229,6 +274,85 @@ export const verifyCursor = (
             key,
             signature,
             textEncoder.encode(serializeSigningDocument(context, payload)),
+          ),
+        catch: () => new InvalidCursorError(),
+      }).pipe(
+        Effect.filterOrFail(
+          (valid) =>
+            valid &&
+            Number.isInteger(nowEpochSeconds) &&
+            nowEpochSeconds >= 0 &&
+            nowEpochSeconds < payload.expiresAtEpochSeconds,
+          () => new InvalidCursorError(),
+        ),
+        Effect.map(() => payload.boundary),
+      ),
+    ),
+  );
+
+export const signRestCursor = (
+  key: CryptoKey,
+  input: unknown,
+): Effect.Effect<string, CursorSigningError> =>
+  Effect.try({
+    try: () => decodeRestClaims(input),
+    catch: (cause) => new CursorSigningError({ cause }),
+  }).pipe(
+    Effect.flatMap((claims) => {
+      const payload: CursorPayload = {
+        version: 1,
+        boundary: claims.boundary,
+        expiresAtEpochSeconds: claims.expiresAtEpochSeconds,
+      };
+      const serializedPayload = serializePayload(payload);
+
+      return Effect.tryPromise({
+        try: () =>
+          crypto.subtle.sign(
+            "HMAC",
+            key,
+            textEncoder.encode(
+              serializeRestSigningDocument(claims.context, payload),
+            ),
+          ),
+        catch: (cause) => new CursorSigningError({ cause }),
+      }).pipe(
+        Effect.map(
+          (signature) =>
+            `${Encoding.encodeBase64Url(serializedPayload)}.${Encoding.encodeBase64Url(
+              new Uint8Array(signature),
+            )}`,
+        ),
+      );
+    }),
+  );
+
+export const verifyRestCursor = (
+  key: CryptoKey,
+  cursor: string,
+  contextInput: unknown,
+  nowEpochSeconds: number,
+): Effect.Effect<CursorBoundary, InvalidCursorError> =>
+  Effect.try({
+    try: () => {
+      const context = decodeRestContext(contextInput);
+      const parsed = parseCursor(cursor);
+
+      return {
+        context,
+        ...parsed,
+      };
+    },
+    catch: () => new InvalidCursorError(),
+  }).pipe(
+    Effect.flatMap(({ context, payload, signature }) =>
+      Effect.tryPromise({
+        try: () =>
+          crypto.subtle.verify(
+            "HMAC",
+            key,
+            signature,
+            textEncoder.encode(serializeRestSigningDocument(context, payload)),
           ),
         catch: () => new InvalidCursorError(),
       }).pipe(

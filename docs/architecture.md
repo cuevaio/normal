@@ -87,11 +87,14 @@ flowchart LR
   restore-external R2 journal holds the append-only transitions and permanent
   purge cutoffs the restore coordinator replays before traffic reopens.
 * API Keys authenticate through a purpose-specific HMAC digest and a narrow
-  Neon bootstrap. MCP and REST remain separate protocol adapters over shared
-  protected WhatsApp operations, quotas, and Activity Logs. Send Operations
-  admit a protocol-neutral grant identity so MCP Authorization and API Key
-  stay distinct principals. REST creates or exactly replays a text Send
-  Operation at `POST /v1/connections/{connection_id}/send-operations`.
+  Neon bootstrap. Personal Account Deletion revokes every API Key and clears
+  every digest in the same prepare transaction as MCP revocation; active rows
+  later cascade during the bounded Personal Account purge. MCP and REST remain
+  separate protocol adapters over shared protected WhatsApp operations, quotas,
+  and Activity Logs. Send Operations admit a protocol-neutral grant identity so
+  MCP Authorization and API Key stay distinct principals. REST creates or
+  exactly replays a text Send Operation at
+  `POST /v1/connections/{connection_id}/send-operations`.
 
 For exact behavior, read [`CONTEXT.md`](../CONTEXT.md), the
 [MCP contract](mcp-contract.md), the [configuration reference](configuration.md),

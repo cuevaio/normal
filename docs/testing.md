@@ -56,17 +56,24 @@ production migrations under `whatsapp_api_runtime` to prove digest-only
 persistence, the ten-active key limit, unique active names, disconnected
 Connection selection, selected-Connection listing, constant not-found for
 unknown or cross-tenant handles, idempotent revocation that clears the digest,
-and RLS isolation. Worker tests never put fixture credentials in the production
-composition root. REST Worker tests prove bearer parsing, Problem Details,
-no-CORS protected JSON, current permission checks, and immediate revocation
-without an authorization cache. REST Send Operation tests prove
+and RLS isolation. Personal Account Deletion tests prove both the product and
+verified Clerk entry points revoke every API Key, clear every digest, and later
+cascade those rows during the bounded purge while API Activity Logs become
+the same unlinkable Security Records as MCP events. Worker tests never put
+fixture credentials in the production composition root. REST Worker tests prove
+bearer parsing, Problem Details, no-CORS protected JSON, current permission
+checks, immediate revocation without an authorization cache, Directory contact
+paging, WhatsApp Conversation paging, REST-only cursors, and
+audit-before-release. REST Send Operation tests prove
 `POST /v1/connections/{connection_id}/send-operations` requires
 `messages:send`, an `Idempotency-Key`, exact text, and a `ctc_` or `grp_`
 recipient; exact replay and payload conflict stay on the shared send
 operation; failed and unknown post-boundary outcomes remain Send Operation
 resources; and pre-operation failures use Problem Details. MCP and REST share
 that grant-aware send service so fingerprints, quota, and receipts cannot
-diverge by adapter.
+diverge by adapter. Migrated-Postgres tests prove API Key contact and
+conversation listing share MCP ordering, selected-Connection isolation,
+Recipient Exclusion, and kind or search filters.
 
 The browser always renders `apps/web/src/app/home-experience.tsx`; there is no
 test component alias or selectable web composition root. Playwright supplies

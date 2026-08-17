@@ -241,7 +241,9 @@ import {
 import {
   createRestHandler,
   isRestRequest,
+  makeRestCursorCodec,
   RestClock,
+  RestCursorCodec,
   RestIdentifiers,
   RestPersistence,
   RestPersistenceError,
@@ -1194,6 +1196,23 @@ const restPersistenceLayer = (environment: ApiEnvironment) =>
     Layer.succeed(RestIdentifiers, {
       nextAuditLogId: Effect.sync(() => crypto.randomUUID()),
     }),
+    Layer.effect(
+      RestCursorCodec,
+      Effect.gen(function* () {
+        const secret = environment.MCP_CURSOR_HMAC_SECRET;
+        if (typeof secret !== "string" || !/^[a-f0-9]{64}$/u.test(secret)) {
+          return yield* Effect.fail(
+            new Error("MCP_CURSOR_HMAC_SECRET must be a 32-byte hex secret"),
+          );
+        }
+        const key = yield* importCursorSigningKey(
+          Uint8Array.from(secret.match(/../gu) ?? [], (byte) =>
+            Number.parseInt(byte, 16),
+          ),
+        );
+        return makeRestCursorCodec(key);
+      }),
+    ),
     Layer.succeed(RestPersistence, {
       beginProtectedOperation: (input) =>
         Effect.tryPromise({
@@ -1231,6 +1250,61 @@ const restPersistenceLayer = (environment: ApiEnvironment) =>
             return makePgMcpToolRepository(
               connectionString,
             ).listApiKeyConnections(input);
+          },
+          catch: () => new RestPersistenceError(),
+        }),
+      loadContactReadMaterial: (input) =>
+        Effect.tryPromise({
+          try: () => {
+            const connectionString = environment.HYPERDRIVE?.connectionString;
+            if (typeof connectionString !== "string") {
+              throw new Error("database unavailable");
+            }
+            return makePgMcpToolRepository(
+              connectionString,
+            ).loadApiKeyContactReadMaterial(input);
+          },
+          catch: () => new RestPersistenceError(),
+        }),
+      listEncryptedContacts: (input) =>
+        Effect.tryPromise({
+          try: () => {
+            const connectionString = environment.HYPERDRIVE?.connectionString;
+            if (typeof connectionString !== "string") {
+              throw new Error("database unavailable");
+            }
+            return makePgMcpToolRepository(
+              connectionString,
+            ).listApiKeyEncryptedContacts(input);
+          },
+          catch: () => new RestPersistenceError(),
+        }),
+      listChats: (input) =>
+        Effect.tryPromise({
+          try: () => {
+            const connectionString = environment.HYPERDRIVE?.connectionString;
+            if (typeof connectionString !== "string") {
+              throw new Error("database unavailable");
+            }
+            return makePgMcpToolRepository(connectionString).listApiKeyChats(
+              input,
+            );
+          },
+          catch: () => new RestPersistenceError(),
+        }),
+      rejectProtectedOperation: (input) =>
+        Effect.tryPromise({
+          try: () => {
+            const connectionString = environment.HYPERDRIVE?.connectionString;
+            if (typeof connectionString !== "string") {
+              throw new Error("database unavailable");
+            }
+            return makePgMcpToolRepository(
+              connectionString,
+            ).rejectProtectedOperation({
+              ...input,
+              channel: "api",
+            });
           },
           catch: () => new RestPersistenceError(),
         }),

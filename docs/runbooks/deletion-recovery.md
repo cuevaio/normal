@@ -8,11 +8,13 @@ separate workflows, but they must preserve this ordering and authority split.
 
 The product `DELETE /v1/personal-account` and verified Clerk
 `user.deleted` deliveries to `POST /v1/webhooks/clerk` enter the same terminal
-operation. The API first writes the locked Personal Account marker, starts
-Connection Deletion for every retained WhatsApp Connection, then atomically
-marks the Personal Account deleting, cancels incomplete Connection Setups,
-revokes MCP Authorizations and refresh families, and makes the account key
-unavailable. Only the product entry point then calls Clerk to delete the User.
+operation. The API first marks the Personal Account deleting, cancels incomplete
+Connection Setups, revokes MCP Authorizations and refresh families, and revokes
+every API Key and clears every credential digest. It then writes the locked
+Personal Account marker, starts Connection Deletion for every retained WhatsApp
+Connection, and makes the account key unavailable. Active API Key rows remain
+until the bounded Personal Account purge cascades them. Only the product entry
+point then calls Clerk to delete the User.
 
 Configure and rotate `CLERK_SECRET_KEY` and `CLERK_WEBHOOK_SIGNING_SECRET` as
 Cloudflare secrets. Clerk webhook retries are safe for unknown and already
@@ -71,11 +73,14 @@ its locked marker is durable and every WhatsApp Connection row has completed
 Connection Deletion. The restricted purge function transforms each ordinary
 Activity Log into a Security Record containing only category, allowlisted
 client class, outcome, counts, timing, and latency, then deletes the Personal
-Account row so its Clerk identity mapping, onboarding profile, and all remaining tenant rows cascade
-away. Security Records keep the source log's original 90-day expiry. The only
-cleanup audit retains the deletion marker digest and completion time and expires
-90 days after completion; the locked R2 marker remains indefinitely as the
-restore guard.
+Account row so its Clerk identity mapping, onboarding profile, API Keys, and
+all remaining tenant rows cascade away. MCP events keep their allowlisted
+client class; API events use `api_key`. Security Records keep the source log's
+original 90-day expiry and must not retain an API Key, User, Personal Account,
+Connection, network, message, contact, provider, credential, or content
+reference. The only cleanup audit retains the deletion marker digest and
+completion time and expires 90 days after completion; the locked R2 marker
+remains indefinitely as the restore guard.
 
 If a purge candidate approaches 24 hours, treat any remaining Connection
 Deletion or object cleanup as the blocker and use marker-only diagnostics. Do

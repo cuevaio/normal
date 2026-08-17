@@ -519,6 +519,57 @@ export interface McpToolRepository {
       readonly searchKind: "name" | "phone" | null;
     },
   ) => Promise<McpToolEncryptedContactPage | null>;
+  readonly loadApiKeyContactReadMaterial: (input: {
+    readonly apiKeyGrantId: string;
+    readonly connectionPublicId: string;
+    readonly observedAt: Date;
+    readonly personalAccountId: string;
+    readonly permissions: ReadonlyArray<string>;
+  }) => Promise<McpToolContactReadMaterial | null>;
+  readonly listApiKeyEncryptedContacts: (input: {
+    readonly apiKeyGrantId: string;
+    readonly connectionPublicId: string;
+    readonly cursorDisplayNameSort: string | null;
+    readonly cursorPublicId: string | null;
+    readonly limit: number;
+    readonly observedAt: Date;
+    readonly permissions: ReadonlyArray<string>;
+    readonly personalAccountId: string;
+    readonly searchIndex: string | null;
+    readonly searchKind: "name" | "phone" | null;
+  }) => Promise<McpToolEncryptedContactPage | null>;
+  readonly listApiKeyChats: (input: {
+    readonly apiKeyGrantId: string;
+    readonly connectionPublicId: string;
+    readonly cursorActivityAt: string | null;
+    readonly cursorPublicId: string | null;
+    readonly kind: "all" | "direct" | "group";
+    readonly limit: number;
+    readonly observedAt: Date;
+    readonly permissions: ReadonlyArray<string>;
+    readonly personalAccountId: string;
+  }) => Promise<McpToolChatPage | null>;
+  readonly rejectProtectedOperation: (
+    input: {
+      readonly auditLogId: string;
+      readonly connectionPublicId?: string;
+      readonly errorCode: string;
+      readonly observedAt: Date;
+      readonly operationName: string;
+    } & (
+      | {
+          readonly channel: "mcp";
+          readonly authorization: McpAccessAuthorization;
+        }
+      | {
+          readonly channel: "api";
+          readonly apiKey: ApiKeyActivityPrincipal;
+          readonly permissions?: ReadonlyArray<string>;
+          readonly personalAccountId: string;
+          readonly requiredPermission?: string;
+        }
+    ),
+  ) => Promise<RejectToolCallResult>;
   readonly rejectToolCall: (
     input: McpAccessAuthorization & {
       readonly auditLogId: string;
@@ -3264,6 +3315,643 @@ export const makeMcpToolRepository = (
         };
       }),
     ),
+  loadApiKeyContactReadMaterial: (input) =>
+    provider.withConnection((connection) =>
+      withTransaction(connection, async () => {
+        if (
+          (await enterAccountContext(connection, input.personalAccountId)) ===
+          null
+        ) {
+          return null;
+        }
+        if (!input.permissions.includes("directory:read")) return null;
+        const db = makeDatabase(connection);
+        const result = await db.execute<ContactMaterialRow>(sql`
+          SELECT
+            accounts.id AS personal_account_id,
+            connections.id AS whatsapp_connection_id,
+            account_keys.key_version AS account_key_version,
+            account_keys.kms_key_id AS account_kms_key_id,
+            account_keys.ciphertext AS account_key_ciphertext,
+            connection_keys.account_key_version AS connection_key_account_version,
+            connection_keys.key_version AS connection_key_version,
+            connection_keys.nonce AS connection_key_nonce,
+            connection_keys.ciphertext AS connection_key_ciphertext,
+            identity_keys.credential_ciphertext_version AS identity_ciphertext_version,
+            identity_keys.credential_key_version AS identity_key_version,
+            identity_keys.credential_nonce AS identity_nonce,
+            identity_keys.credential_ciphertext AS identity_ciphertext,
+            coalesce(projections.as_of, connections.created_at) AS projection_as_of,
+            coalesce(projections.stale, true) AS projection_stale,
+            coalesce(projections.partial, true) AS projection_partial
+          FROM public.api_keys AS grants
+          JOIN public.personal_accounts AS accounts
+            ON accounts.id = grants.personal_account_id
+          JOIN public.api_key_connections AS selected
+            ON selected.personal_account_id = grants.personal_account_id
+           AND selected.api_key_id = grants.id
+          JOIN public.whatsapp_connections AS connections
+            ON connections.personal_account_id = selected.personal_account_id
+           AND connections.id = selected.whatsapp_connection_id
+          JOIN public.whatsapp_connection_key_envelopes AS connection_keys
+            ON connection_keys.personal_account_id = connections.personal_account_id
+           AND connection_keys.whatsapp_connection_id = connections.id
+          JOIN public.personal_account_key_envelopes AS account_keys
+            ON account_keys.personal_account_id = connections.personal_account_id
+           AND account_keys.key_version = connection_keys.account_key_version
+          JOIN public.whatsapp_connection_secrets AS identity_keys
+            ON identity_keys.personal_account_id = connections.personal_account_id
+           AND identity_keys.whatsapp_connection_id = connections.id
+           AND identity_keys.credential_key_version = connection_keys.key_version
+          LEFT JOIN public.directory_contact_projections AS projections
+            ON projections.personal_account_id = connections.personal_account_id
+           AND projections.whatsapp_connection_id = connections.id
+          WHERE grants.id = ${input.apiKeyGrantId}
+            AND grants.personal_account_id = ${input.personalAccountId}
+            AND grants.state = 'active'
+            AND (grants.expires_at IS NULL OR grants.expires_at > ${input.observedAt})
+            AND 'directory:read' = ANY(grants.permissions)
+            AND connections.public_id = ${input.connectionPublicId}
+            AND connections.state <> 'deleting'
+            AND accounts.state = 'active'
+            AND account_keys.unavailable_at IS NULL
+            AND account_keys.ciphertext IS NOT NULL
+            AND connection_keys.unavailable_at IS NULL
+            AND connection_keys.nonce IS NOT NULL
+            AND connection_keys.ciphertext IS NOT NULL
+        `);
+        return contactReadMaterial(result[0] as ContactMaterialRow | undefined);
+      }),
+    ),
+  listApiKeyEncryptedContacts: (input) =>
+    provider.withConnection((connection) =>
+      withTransaction(connection, async () => {
+        const db = makeDatabase(connection);
+        if (
+          !/^con_[A-Za-z0-9_-]{21}$/u.test(input.connectionPublicId) ||
+          !Number.isSafeInteger(input.limit) ||
+          input.limit < 1 ||
+          input.limit > 51 ||
+          (input.cursorDisplayNameSort === null) !==
+            (input.cursorPublicId === null) ||
+          (input.cursorPublicId !== null &&
+            !/^ctc_[A-Za-z0-9_-]{21}$/u.test(input.cursorPublicId)) ||
+          (input.searchIndex === null) !== (input.searchKind === null) ||
+          (input.searchIndex !== null &&
+            !/^di1_[A-Za-z0-9_-]{43}$/u.test(input.searchIndex))
+        ) {
+          throw new Error("invalid API contact query");
+        }
+        await db.execute(sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`);
+        if (
+          (await enterAccountContext(connection, input.personalAccountId)) ===
+            null ||
+          !input.permissions.includes("directory:read")
+        ) {
+          return null;
+        }
+        const projectionResult = await db.execute<{
+          projection_as_of: unknown;
+          projection_partial: unknown;
+          projection_snapshot_observed_at: unknown;
+          projection_stale: unknown;
+        }>(sql`SELECT
+             coalesce(projections.as_of, connections.created_at)
+               AS projection_as_of,
+             CASE
+               WHEN projections.snapshot_observed_at IS NULL THEN true
+               ELSE public.directory_projection_stale(
+                 connections.personal_account_id,
+                  connections.id,
+                  ${input.observedAt},
+                 projections.snapshot_observed_at,
+                 projections.stale
+               )
+             END AS projection_stale,
+             CASE
+               WHEN projections.snapshot_observed_at IS NULL THEN true
+               ELSE public.directory_projection_partial(
+                 connections.personal_account_id,
+                 connections.id,
+                 projections.snapshot_observed_at,
+                 projections.partial,
+                 projections.retention_limited
+               )
+             END AS projection_partial,
+             projections.snapshot_observed_at
+               AS projection_snapshot_observed_at
+           FROM public.api_key_connections AS selected
+           JOIN public.api_keys AS grants
+             ON grants.personal_account_id = selected.personal_account_id
+            AND grants.id = selected.api_key_id
+           JOIN public.whatsapp_connections AS connections
+             ON connections.personal_account_id = selected.personal_account_id
+            AND connections.id = selected.whatsapp_connection_id
+           LEFT JOIN public.directory_contact_projections AS projections
+             ON projections.personal_account_id = connections.personal_account_id
+            AND projections.whatsapp_connection_id = connections.id
+           WHERE selected.api_key_id = ${input.apiKeyGrantId}
+             AND grants.state = 'active'
+             AND (grants.expires_at IS NULL OR grants.expires_at > ${input.observedAt})
+             AND connections.public_id = ${input.connectionPublicId}
+              AND connections.state <> 'deleting'`);
+        const projection = projectionResult[0];
+        const asOf = timestampString(projection?.projection_as_of);
+        const snapshotObservedAt =
+          projection?.projection_snapshot_observed_at === null
+            ? null
+            : timestampString(projection?.projection_snapshot_observed_at);
+        if (
+          projection === undefined ||
+          asOf === null ||
+          typeof projection.projection_stale !== "boolean" ||
+          typeof projection.projection_partial !== "boolean" ||
+          (projection.projection_snapshot_observed_at !== null &&
+            snapshotObservedAt === null)
+        ) {
+          return null;
+        }
+        const result = await db.execute<{
+          conversation_public_id: unknown;
+          display_name_ciphertext: unknown;
+          display_name_ciphertext_version: unknown;
+          display_name_key_version: unknown;
+          display_name_nonce: unknown;
+          display_name_sort: unknown;
+          phone_ciphertext: unknown;
+          phone_ciphertext_version: unknown;
+          phone_key_version: unknown;
+          phone_nonce: unknown;
+          provider_identity_index: unknown;
+          public_id: unknown;
+        }>(sql`SELECT
+             contacts.public_id,
+             CASE WHEN 'messages:read' = ANY(grants.permissions) THEN (
+               SELECT conversations.public_id
+               FROM public.whatsapp_conversations AS conversations
+               WHERE conversations.personal_account_id = contacts.personal_account_id
+                 AND conversations.whatsapp_connection_id = contacts.whatsapp_connection_id
+                 AND conversations.kind = 'direct'
+                 AND conversations.recipient_locator = contacts.provider_identity_index
+                 AND EXISTS (
+                   SELECT 1 FROM public.stored_messages AS retained
+                   WHERE retained.personal_account_id = conversations.personal_account_id
+                     AND retained.whatsapp_connection_id = conversations.whatsapp_connection_id
+                     AND retained.conversation_id = conversations.id
+                     AND retained.content_expired_at IS NULL
+                 )
+               ORDER BY conversations.created_at
+               LIMIT 1
+             ) ELSE NULL END AS conversation_public_id,
+             contacts.provider_identity_index,
+             contacts.display_name_ciphertext_version,
+             contacts.display_name_key_version,
+             contacts.display_name_nonce,
+             contacts.display_name_ciphertext,
+             contacts.display_name_sort,
+             contacts.phone_ciphertext_version,
+             contacts.phone_key_version,
+             contacts.phone_nonce,
+             contacts.phone_ciphertext
+           FROM public.api_key_connections AS selected
+           JOIN public.api_keys AS grants
+             ON grants.personal_account_id = selected.personal_account_id
+            AND grants.id = selected.api_key_id
+           JOIN public.whatsapp_connections AS connections
+             ON connections.personal_account_id = selected.personal_account_id
+            AND connections.id = selected.whatsapp_connection_id
+           JOIN public.directory_contacts AS contacts
+             ON contacts.personal_account_id = connections.personal_account_id
+            AND contacts.whatsapp_connection_id = connections.id
+           WHERE selected.api_key_id = ${input.apiKeyGrantId}
+             AND grants.state = 'active'
+             AND (grants.expires_at IS NULL OR grants.expires_at > ${input.observedAt})
+             AND connections.public_id = ${input.connectionPublicId}
+             AND connections.state <> 'deleting'
+             AND contacts.active
+             AND NOT public.whatsapp_recipient_excluded(
+               connections.personal_account_id, connections.id, 'contact',
+               contacts.provider_identity_index
+             )
+             AND (
+               ${input.cursorDisplayNameSort}::text IS NULL
+               OR (contacts.display_name_sort, contacts.public_id)
+                 > (${input.cursorDisplayNameSort}::text COLLATE "C", ${input.cursorPublicId}::text)
+             )
+             AND (
+               ${input.searchIndex}::text IS NULL
+               OR (${input.searchKind} = 'phone' AND contacts.phone_index = ${input.searchIndex})
+               OR (
+                 ${input.searchKind} = 'name'
+                 AND contacts.name_prefix_indexes
+                   @> ARRAY[${input.searchIndex}::public.directory_blind_index]
+               )
+             )
+           ORDER BY contacts.display_name_sort, contacts.public_id
+            LIMIT ${input.limit}`);
+        const parseField = (
+          row: (typeof result)[number],
+          prefix: "display_name" | "phone",
+        ): McpToolDirectoryCiphertext | null => {
+          const ciphertext = bytes(row[`${prefix}_ciphertext`]);
+          const nonce = bytes(row[`${prefix}_nonce`]);
+          const version = positiveInteger(row[`${prefix}_key_version`]);
+          const formatVersion = row[`${prefix}_ciphertext_version`];
+          if (
+            ciphertext === null &&
+            nonce === null &&
+            version === null &&
+            formatVersion === null
+          ) {
+            return null;
+          }
+          if (
+            ciphertext === null ||
+            nonce?.byteLength !== 12 ||
+            version === null ||
+            formatVersion !== 1
+          ) {
+            throw new Error("invalid encrypted Directory field");
+          }
+          return {
+            ciphertext: encodeBase64(ciphertext),
+            keyVersion: version,
+            nonce: encodeBase64(nonce),
+            version: 1,
+          };
+        };
+        const contacts = result.map((row) => {
+          if (
+            typeof row.public_id !== "string" ||
+            !/^ctc_[A-Za-z0-9_-]{21}$/u.test(row.public_id) ||
+            typeof row.provider_identity_index !== "string" ||
+            !/^di1_[A-Za-z0-9_-]{43}$/u.test(row.provider_identity_index) ||
+            typeof row.display_name_sort !== "string"
+          ) {
+            throw new Error("invalid persisted Directory contact");
+          }
+          return {
+            conversationPublicId:
+              row.conversation_public_id === null
+                ? null
+                : typeof row.conversation_public_id === "string" &&
+                    /^cvs_[A-Za-z0-9_-]{21}$/u.test(row.conversation_public_id)
+                  ? row.conversation_public_id
+                  : (() => {
+                      throw new Error("invalid contact conversation handle");
+                    })(),
+            displayNameCiphertext: parseField(row, "display_name"),
+            displayNameSort: row.display_name_sort,
+            phoneCiphertext: parseField(row, "phone"),
+            providerIdentityIndex: row.provider_identity_index,
+            publicId: row.public_id,
+          };
+        });
+        return {
+          asOf,
+          contacts,
+          partial: projection.projection_partial,
+          snapshotObservedAt,
+          stale: projection.projection_stale,
+        };
+      }),
+    ),
+  listApiKeyChats: (input) =>
+    provider.withConnection((connection) =>
+      withTransaction(connection, async () => {
+        const db = makeDatabase(connection);
+        if (
+          !/^con_[A-Za-z0-9_-]{21}$/u.test(input.connectionPublicId) ||
+          !Number.isSafeInteger(input.limit) ||
+          input.limit < 1 ||
+          input.limit > 51 ||
+          (input.kind !== "all" &&
+            input.kind !== "direct" &&
+            input.kind !== "group") ||
+          (input.cursorActivityAt === null) !==
+            (input.cursorPublicId === null) ||
+          (input.cursorPublicId !== null &&
+            !/^cvs_[A-Za-z0-9_-]{21}$/u.test(input.cursorPublicId))
+        ) {
+          throw new Error("invalid API conversation query");
+        }
+        if (
+          (await enterAccountContext(connection, input.personalAccountId)) ===
+            null ||
+          !input.permissions.includes("messages:read")
+        ) {
+          return null;
+        }
+        const result = await db.execute<Record<string, unknown>>(sql`
+          WITH projection AS MATERIALIZED (
+            SELECT
+              connections.personal_account_id,
+              connections.id AS connection_id,
+              connections.created_at AS connection_created_at,
+              greatest(
+                coalesce(contacts.as_of, connections.created_at),
+                coalesce(groups.as_of, connections.created_at)
+              ) AS as_of,
+              (coalesce(contacts.stale, true)
+                OR coalesce(groups.stale, true)) AS stale,
+              (coalesce(contacts.partial, true)
+                OR coalesce(groups.partial, true)) AS partial,
+              account_keys.key_version AS account_key_version,
+              account_keys.kms_key_id AS account_kms_key_id,
+              account_keys.ciphertext AS account_key_ciphertext,
+              connection_keys.account_key_version AS connection_key_account_version,
+              connection_keys.key_version AS connection_key_version,
+              connection_keys.nonce AS connection_key_nonce,
+              connection_keys.ciphertext AS connection_key_ciphertext
+            FROM public.api_keys AS grants
+            JOIN public.api_key_connections AS selected
+              ON selected.personal_account_id = grants.personal_account_id
+             AND selected.api_key_id = grants.id
+            JOIN public.whatsapp_connections AS connections
+              ON connections.personal_account_id = selected.personal_account_id
+             AND connections.id = selected.whatsapp_connection_id
+            JOIN public.whatsapp_connection_key_envelopes AS connection_keys
+              ON connection_keys.personal_account_id =
+                  connections.personal_account_id
+             AND connection_keys.whatsapp_connection_id = connections.id
+            JOIN public.personal_account_key_envelopes AS account_keys
+              ON account_keys.personal_account_id =
+                  connections.personal_account_id
+             AND account_keys.key_version = connection_keys.account_key_version
+            LEFT JOIN public.directory_contact_projections AS contacts
+              ON contacts.personal_account_id = connections.personal_account_id
+             AND contacts.whatsapp_connection_id = connections.id
+            LEFT JOIN public.whatsapp_group_directory_states AS groups
+              ON groups.personal_account_id = connections.personal_account_id
+             AND groups.whatsapp_connection_id = connections.id
+            WHERE grants.id = ${input.apiKeyGrantId}
+              AND grants.personal_account_id = ${input.personalAccountId}
+              AND grants.state = 'active'
+              AND (grants.expires_at IS NULL
+                OR grants.expires_at > ${input.observedAt})
+              AND 'messages:read' = ANY(grants.permissions)
+              AND connections.public_id = ${input.connectionPublicId}
+              AND connections.state <> 'deleting'
+              AND account_keys.unavailable_at IS NULL
+              AND account_keys.ciphertext IS NOT NULL
+              AND connection_keys.unavailable_at IS NULL
+              AND connection_keys.nonce IS NOT NULL
+              AND connection_keys.ciphertext IS NOT NULL
+          ), chats AS MATERIALIZED (
+            SELECT
+              conversations.public_id,
+              conversations.kind,
+              coalesce(
+                contacts.public_id,
+                groups.public_id,
+                conversations.recipient_public_id
+              ) AS recipient_public_id,
+              conversations.last_activity_at,
+              conversations.last_activity_direction,
+              coalesce(
+                contacts.provider_identity_index,
+                groups.id::text,
+                conversations.recipient_public_id
+              ) AS recipient_record_id,
+              coalesce(
+                contacts.display_name_ciphertext_version,
+                groups.display_name_ciphertext_version
+              ) AS display_version,
+              coalesce(
+                contacts.display_name_key_version,
+                groups.display_name_key_version
+              ) AS display_key_version,
+              coalesce(
+                contacts.display_name_nonce,
+                groups.display_name_nonce
+              ) AS display_nonce,
+              coalesce(
+                contacts.display_name_ciphertext,
+                groups.display_name_ciphertext
+              ) AS display_ciphertext,
+              contacts.phone_ciphertext_version AS phone_version,
+              contacts.phone_key_version,
+              contacts.phone_nonce,
+              contacts.phone_ciphertext
+            FROM projection
+            JOIN public.whatsapp_conversations conversations
+              ON conversations.personal_account_id =
+                  projection.personal_account_id
+             AND conversations.whatsapp_connection_id =
+                  projection.connection_id
+            LEFT JOIN public.directory_contacts contacts
+              ON conversations.kind = 'direct'
+             AND contacts.personal_account_id =
+                  conversations.personal_account_id
+             AND contacts.whatsapp_connection_id =
+                  conversations.whatsapp_connection_id
+             AND contacts.provider_identity_index =
+                  conversations.recipient_locator
+            LEFT JOIN public.whatsapp_groups groups
+              ON conversations.kind = 'group'
+             AND groups.personal_account_id =
+                  conversations.personal_account_id
+             AND groups.whatsapp_connection_id =
+                  conversations.whatsapp_connection_id
+             AND groups.provider_locator = conversations.recipient_locator
+            WHERE NOT public.whatsapp_recipient_excluded(
+                conversations.personal_account_id,
+                conversations.whatsapp_connection_id,
+                CASE WHEN conversations.kind = 'group' THEN 'group' ELSE 'contact' END,
+                conversations.recipient_locator
+              )
+              AND EXISTS (
+              SELECT 1
+              FROM public.stored_messages retained
+              WHERE retained.personal_account_id =
+                  conversations.personal_account_id
+                AND retained.whatsapp_connection_id =
+                  conversations.whatsapp_connection_id
+                AND retained.conversation_id = conversations.id
+                AND retained.content_expired_at IS NULL
+            )
+              AND (${input.kind} = 'all' OR conversations.kind = ${input.kind})
+              AND (
+                ${input.cursorActivityAt}::timestamptz IS NULL
+                OR conversations.last_activity_at < ${input.cursorActivityAt}
+                OR (
+                  conversations.last_activity_at = ${input.cursorActivityAt}
+                  AND conversations.public_id > ${input.cursorPublicId}
+                )
+              )
+            ORDER BY conversations.last_activity_at DESC,
+              conversations.public_id
+            LIMIT ${input.limit}
+          )
+          SELECT
+            projection.personal_account_id,
+            projection.connection_id,
+            projection.connection_created_at,
+            projection.as_of AS projection_as_of,
+            projection.stale AS projection_stale,
+            projection.partial AS projection_partial,
+            projection.account_key_version,
+            projection.account_kms_key_id,
+            projection.account_key_ciphertext,
+            projection.connection_key_account_version,
+            projection.connection_key_version,
+            projection.connection_key_nonce,
+            projection.connection_key_ciphertext,
+            chats.*
+          FROM projection
+          LEFT JOIN chats ON true
+          ORDER BY chats.last_activity_at DESC, chats.public_id
+        `);
+        const projection = result[0];
+        const asOf = timestampString(
+          projection?.projection_as_of ?? projection?.connection_created_at,
+        );
+        if (
+          projection === undefined ||
+          asOf === null ||
+          typeof projection.projection_stale !== "boolean" ||
+          typeof projection.projection_partial !== "boolean"
+        ) {
+          return null;
+        }
+        const keyMaterial = parseGroupKeyMaterial(projection);
+        const rows = result.filter((row) => typeof row.public_id === "string");
+        const encrypted = (
+          row: Record<string, unknown>,
+          prefix: "display" | "phone",
+        ): McpToolDirectoryCiphertext | null => {
+          const ciphertext = bytes(row[`${prefix}_ciphertext`]);
+          const nonce = bytes(row[`${prefix}_nonce`]);
+          const version = positiveInteger(row[`${prefix}_version`]);
+          const keyVersion = positiveInteger(
+            row[
+              prefix === "display" ? "display_key_version" : "phone_key_version"
+            ],
+          );
+          if (
+            ciphertext === null &&
+            nonce === null &&
+            version === null &&
+            keyVersion === null
+          )
+            return null;
+          if (
+            ciphertext === null ||
+            nonce === null ||
+            version !== 1 ||
+            keyVersion === null
+          )
+            throw new Error("invalid conversation metadata ciphertext");
+          return {
+            ciphertext: base64(ciphertext),
+            nonce: base64(nonce),
+            keyVersion,
+            version: 1,
+          };
+        };
+        return {
+          accountKey: keyMaterial?.accountKey ?? null,
+          asOf,
+          connectionKey: keyMaterial?.connectionKey ?? null,
+          partial: projection.projection_partial,
+          stale: projection.projection_stale,
+          chats: rows.map((row) => {
+            const activity = timestampString(row.last_activity_at);
+            if (
+              typeof row.public_id !== "string" ||
+              typeof row.recipient_public_id !== "string" ||
+              typeof row.recipient_record_id !== "string" ||
+              activity === null ||
+              (row.kind !== "direct" && row.kind !== "group") ||
+              (row.last_activity_direction !== "inbound" &&
+                row.last_activity_direction !== "outbound")
+            )
+              throw new Error("invalid WhatsApp Conversation");
+            return {
+              conversationId: row.public_id,
+              kind: row.kind,
+              recipientId: row.recipient_public_id,
+              displayName: encrypted(row, "display"),
+              displayNameRecordId: row.recipient_record_id,
+              displayNameEntity:
+                row.kind === "direct" ? "directory-contact" : "whatsapp-group",
+              phone: encrypted(row, "phone"),
+              lastActivityAt: activity,
+              lastActivityDirection: row.last_activity_direction,
+            };
+          }),
+        };
+      }),
+    ),
+  rejectProtectedOperation: (input) =>
+    input.channel === "mcp"
+      ? makeMcpToolRepository(provider).rejectToolCall({
+          ...input.authorization,
+          auditLogId: input.auditLogId,
+          errorCode: input.errorCode,
+          observedAt: input.observedAt,
+          toolName: input.operationName as
+            | "list_connections"
+            | "list_contacts"
+            | "search_messages",
+          ...(input.connectionPublicId === undefined
+            ? {}
+            : { connectionPublicId: input.connectionPublicId }),
+        })
+      : provider.withConnection((connection) =>
+          withTransaction(connection, async () => {
+            const personalAccountId = await enterAccountContext(
+              connection,
+              input.personalAccountId,
+            );
+            if (personalAccountId === null)
+              return "authorization_denied" as const;
+            const apiKeyName = input.apiKey.name.trim();
+            if (
+              apiKeyName.length < 1 ||
+              apiKeyName.length > 64 ||
+              !/^apk_[A-Za-z0-9_-]{21}$/u.test(input.apiKey.publicId) ||
+              !/^[a-z][a-z0-9_]{0,63}$/u.test(input.operationName)
+            ) {
+              throw new Error("invalid API Activity Log principal");
+            }
+            if (
+              input.requiredPermission !== undefined &&
+              !(input.permissions ?? []).includes(input.requiredPermission)
+            ) {
+              await insertActivityLog(connection, {
+                apiKey: { ...input.apiKey, name: apiKeyName },
+                auditLogId: input.auditLogId,
+                authorizationId: null,
+                channel: "api",
+                completed: true,
+                connectionPublicId: input.connectionPublicId,
+                errorCode: "authorization_denied",
+                observedAt: input.observedAt,
+                outcome: "authorization_denied",
+                personalAccountId,
+                quotaReserved: false,
+                toolName: input.operationName,
+              });
+              return "authorization_denied" as const;
+            }
+            await insertActivityLog(connection, {
+              apiKey: { ...input.apiKey, name: apiKeyName },
+              auditLogId: input.auditLogId,
+              authorizationId: null,
+              channel: "api",
+              completed: true,
+              connectionPublicId: input.connectionPublicId,
+              errorCode: input.errorCode,
+              observedAt: input.observedAt,
+              outcome: "execution_error",
+              personalAccountId,
+              quotaReserved: false,
+              toolName: input.operationName,
+            });
+            return "rejected" as const;
+          }),
+        ),
   rejectToolCall: (input) =>
     provider.withConnection((connection) =>
       withTransaction(connection, async () => {
