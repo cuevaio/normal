@@ -1,7 +1,6 @@
--- Personal Account Deletion must revoke every API Key and clear every digest
--- in the same prepare transaction that marks the account deleting and revokes
--- MCP access. Active rows remain until the existing bounded purge cascades
--- them with the Personal Account.
+-- Personal Account Deletion revokes every API Key and clears every digest in
+-- the same prepare transition that revokes MCP Authorizations. Active rows
+-- remain until the existing bounded Personal Account purge cascades them.
 CREATE OR REPLACE FUNCTION public.prepare_personal_account_deletion(
   verified_clerk_user_id text,
   observed_at timestamptz
@@ -57,7 +56,7 @@ BEGIN
         observed_at + interval '90 days'
       )
   WHERE keys.personal_account_id = selected_account_id
-    AND (keys.state <> 'revoked' OR keys.credential_digest IS NOT NULL);
+    AND keys.state = 'active';
   RETURN QUERY
   SELECT accounts.id, accounts.state, accounts.deletion_requested_at, connections.public_id
   FROM public.personal_accounts accounts
