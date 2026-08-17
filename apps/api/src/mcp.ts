@@ -35,20 +35,22 @@ import {
   makeStoredMediaUri,
   parseStoredMediaUri,
 } from "@whatsapp-mcp/contracts/stored-media-uri";
-import type {
-  BeginToolCallResult,
-  McpAccessAuthorization,
-  McpToolChatPage,
-  McpToolConnectionRecord,
-  McpToolContactReadMaterial,
-  McpToolEncryptedContactPage,
-  McpToolGroupPage,
-  McpToolGroupSearchMaterial,
-  McpToolMessagePage,
-  McpToolMessageSearchPage,
-  McpToolName,
-  McpToolSendStatusRecord,
-  RejectToolCallResult,
+import {
+  type BeginToolCallResult,
+  type McpAccessAuthorization,
+  type McpToolChatPage,
+  type McpToolConnectionRecord,
+  type McpToolContactReadMaterial,
+  type McpToolEncryptedContactPage,
+  type McpToolGroupPage,
+  type McpToolGroupSearchMaterial,
+  type McpToolMessagePage,
+  type McpToolMessageSearchPage,
+  type McpToolName,
+  type McpToolSendStatusRecord,
+  mcpSendGrant,
+  type RejectToolCallResult,
+  type SendGrantIdentity,
 } from "@whatsapp-mcp/db/mcp-tool";
 import { normalizeWhatsAppConnectionName } from "@whatsapp-mcp/domain/whatsapp-connection";
 import { createMcpHandler } from "agents/mcp/server";
@@ -303,8 +305,9 @@ export type SendTextMessageResult =
 
 export interface SendTextMessageService {
   readonly send: (
-    input: McpAccessAuthorization & {
+    input: {
       readonly connectionId: string;
+      readonly grant: SendGrantIdentity;
       readonly idempotencyKey: string;
       readonly recipientId: string;
       readonly text: string;
@@ -1102,8 +1105,8 @@ const sendTextMessage = (
     const service = yield* SendTextMessage;
     const result = yield* service.send(
       {
-        ...authorization,
         connectionId: input.connection_id,
+        grant: mcpSendGrant(authorization),
         idempotencyKey: input.idempotency_key,
         recipientId: input.recipient_id,
         text: input.text,

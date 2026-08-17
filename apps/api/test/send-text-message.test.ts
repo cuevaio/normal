@@ -1,7 +1,9 @@
-import type {
-  AtomicSendRepository,
-  SendEncryptionMaterial,
-  SendProviderMaterial,
+import {
+  type AtomicSendRepository,
+  apiSendGrant,
+  mcpSendGrant,
+  type SendEncryptionMaterial,
+  type SendProviderMaterial,
 } from "@whatsapp-mcp/db/send";
 import { Effect } from "effect";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -54,11 +56,13 @@ const storedAuthority = JSON.stringify({
 });
 
 const input = {
-  authorizationId: "40000000-0000-4000-8000-000000000047",
-  clientId: "approved-client",
   connectionId: "con_123456789012345678947",
+  grant: mcpSendGrant({
+    authorizationId: "40000000-0000-4000-8000-000000000047",
+    clientId: "approved-client",
+    oauthSubject: "A".repeat(43),
+  }),
   idempotencyKey: "123456789012345678947",
-  oauthSubject: "A".repeat(43),
   recipientId: "ctc_123456789012345678947",
   text: " exact\ne\u0301 ",
 } as const;
@@ -192,14 +196,7 @@ describe("atomic send workflow", () => {
     };
     const repository: AtomicSendRepository = {
       commit: async (request, encrypt) => {
-        expect(request.grant).toEqual({
-          kind: "mcp",
-          authorization: {
-            authorizationId: input.authorizationId,
-            clientId: input.clientId,
-            oauthSubject: input.oauthSubject,
-          },
-        });
+        expect(request.grant).toEqual(input.grant);
         order.push("transaction-open");
         await encrypt(material);
         order.push("commit");
@@ -689,6 +686,58 @@ describe("atomic send workflow", () => {
       receipt: { status: "unknown" },
     });
     expect(providerAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps API Key fingerprints distinct from MCP Authorization fingerprints", async () => {
+    const fingerprints: string[] = [];
+    const grants: unknown[] = [];
+    const repository: AtomicSendRepository = {
+      commit: async (request) => {
+        fingerprints.push(request.fingerprint);
+        grants.push(request.grant);
+        return { outcome: "authorization_denied" };
+      },
+      expireLeases: vi.fn(),
+      recordProviderOutcome: vi.fn(),
+    };
+    const service = makeAtomicSendTextMessageService({
+      encryption: {
+        createConnectionKey: () => Effect.die("unused"),
+        createPersonalAccountKey: () => Effect.die("unused"),
+        decrypt: () => Effect.die("unused"),
+        decryptMany: () => Effect.die("unused"),
+        encrypt: () => Effect.die("unused"),
+      },
+      fingerprintKey: await importSendFingerprintKey("47".repeat(32)),
+      hourRequestLimit: 600,
+      minuteRequestLimit: 60,
+      nextAuditLogId: () => "50000000-0000-4000-8000-000000000047",
+      nextSend: () => ({
+        id: "60000000-0000-4000-8000-000000000047",
+        publicId: "snd_123456789012345678947",
+      }),
+      now: () => new Date("2026-08-03T12:00:01.000Z"),
+      repository,
+      sendDailyLimit: 200,
+      sendPerMinuteLimit: 10,
+      telemetry: () => undefined,
+    });
+    const apiInput = {
+      ...input,
+      grant: apiSendGrant({
+        grantId: "50000000-0000-4000-8000-000000000047",
+        name: "Automation",
+        permissions: ["messages:send"],
+        personalAccountId: "10000000-0000-4000-8000-000000000047",
+        publicId: "apk_123456789012345678947",
+      }),
+    };
+    await Effect.runPromise(service.send(input));
+    await Effect.runPromise(service.send(apiInput));
+    expect(grants).toEqual([input.grant, apiInput.grant]);
+    expect(fingerprints[0]).not.toEqual(fingerprints[1]);
+    expect(fingerprints[0]).toMatch(/^sf1_/);
+    expect(fingerprints[1]).toMatch(/^sf1_/);
   });
 
   test("accepts an uppercase hexadecimal fingerprint key", async () => {

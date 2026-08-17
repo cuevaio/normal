@@ -59,7 +59,14 @@ unknown or cross-tenant handles, idempotent revocation that clears the digest,
 and RLS isolation. Worker tests never put fixture credentials in the production
 composition root. REST Worker tests prove bearer parsing, Problem Details,
 no-CORS protected JSON, current permission checks, and immediate revocation
-without an authorization cache.
+without an authorization cache. REST Send Operation tests prove
+`POST /v1/connections/{connection_id}/send-operations` requires
+`messages:send`, an `Idempotency-Key`, exact text, and a `ctc_` or `grp_`
+recipient; exact replay and payload conflict stay on the shared send
+operation; failed and unknown post-boundary outcomes remain Send Operation
+resources; and pre-operation failures use Problem Details. MCP and REST share
+that grant-aware send service so fingerprints, quota, and receipts cannot
+diverge by adapter.
 
 The browser always renders `apps/web/src/app/home-experience.tsx`; there is no
 test component alias or selectable web composition root. Playwright supplies

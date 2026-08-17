@@ -31,6 +31,7 @@ import {
 } from "../../src/connection-setup-provisioning";
 import { EnvelopeEncryptionService } from "../../src/encryption/envelope";
 import type { Env } from "../../src/index";
+import { SendTextMessage } from "../../src/mcp";
 import {
   McpAuthorizationClock,
   McpAuthorizationPersistence,
@@ -976,6 +977,24 @@ const makeTestLayer = (
     }),
     Layer.succeed(RestIdentifiers, {
       nextAuditLogId: Effect.succeed("50000000-0000-4000-8000-000000000079"),
+    }),
+    Layer.succeed(SendTextMessage, {
+      send: (input) =>
+        Effect.succeed(
+          input.grant.kind === "api" &&
+            input.grant.apiKey.permissions.includes("messages:send")
+            ? {
+                outcome: "receipt" as const,
+                receipt: {
+                  send_id: "snd_123456789012345678901" as never,
+                  status: "processing" as const,
+                  created_at: "2026-08-17T12:00:00.000Z" as never,
+                  status_changed_at: "2026-08-17T12:00:00.000Z" as never,
+                  idempotent_replay: false,
+                },
+              }
+            : { outcome: "authorization_denied" as const },
+        ),
     }),
     Layer.succeed(RestPersistence, {
       beginProtectedOperation: (input) =>

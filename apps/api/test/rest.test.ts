@@ -7,6 +7,7 @@ import {
   type ApiKeyPersistenceService,
 } from "../src/api-key";
 import { EnvelopeEncryptionService } from "../src/encryption/envelope";
+import { SendTextMessage, type SendTextMessageResult } from "../src/mcp";
 import {
   createRestHandler,
   RestClock,
@@ -25,6 +26,14 @@ const personalAccountId = "10000000-0000-4000-8000-000000000079";
 const observedAt = new Date("2026-08-14T12:00:00.000Z");
 const digest = new Uint8Array(32).fill(7);
 
+const receipt = {
+  send_id: "snd_123456789012345678901" as never,
+  status: "processing" as const,
+  created_at: "2026-08-17T12:00:00.000Z" as never,
+  status_changed_at: "2026-08-17T12:00:00.000Z" as never,
+  idempotent_replay: false,
+};
+
 const makeHarness = (options?: {
   readonly authenticate?: ApiKeyPersistenceService["authenticate"];
   readonly begin?: RestPersistenceService["beginProtectedOperation"];
@@ -32,6 +41,16 @@ const makeHarness = (options?: {
   readonly permissions?: ReadonlyArray<
     "connections:read" | "directory:read" | "messages:read" | "messages:send"
   >;
+  readonly send?: (
+    input: {
+      readonly connectionId: string;
+      readonly grant: { readonly kind: "api" | "mcp" };
+      readonly idempotencyKey: string;
+      readonly recipientId: string;
+      readonly text: string;
+    },
+    deferProviderAttempt?: (attempt: Promise<void>) => void,
+  ) => Effect.Effect<SendTextMessageResult, never>;
 }) => {
   const telemetry: Array<SafeTelemetryEvent> = [];
   const persistence: RestPersistenceService = {
@@ -96,6 +115,15 @@ const makeHarness = (options?: {
       nextAuditLogId: Effect.succeed("50000000-0000-4000-8000-000000000080"),
     }),
     Layer.succeed(RestPersistence, persistence),
+    Layer.succeed(SendTextMessage, {
+      send:
+        options?.send ??
+        (() =>
+          Effect.succeed({
+            outcome: "receipt" as const,
+            receipt,
+          })),
+    }),
     Layer.succeed(EnvelopeEncryptionService, {
       createConnectionKey: () => Effect.die("unused"),
       createPersonalAccountKey: () => Effect.die("unused"),
@@ -125,7 +153,10 @@ const request = (
   path = "/v1/connections",
   options: {
     readonly authorization?: string | null;
+    readonly body?: unknown;
     readonly extraAuthorization?: string;
+    readonly extraIdempotencyKey?: string;
+    readonly idempotencyKey?: string | null;
     readonly method?: string;
   } = {},
 ) => {
@@ -139,11 +170,30 @@ const request = (
   if (options.extraAuthorization !== undefined) {
     headers.append("authorization", options.extraAuthorization);
   }
+  if (options.idempotencyKey !== null && options.idempotencyKey !== undefined) {
+    headers.set("idempotency-key", options.idempotencyKey);
+  }
+  if (options.extraIdempotencyKey !== undefined) {
+    headers.append("idempotency-key", options.extraIdempotencyKey);
+  }
+  if (options.body !== undefined) {
+    headers.set("content-type", "application/json");
+  }
   return new Request(`https://api.example.test${path}`, {
+    ...(options.body === undefined
+      ? {}
+      : { body: JSON.stringify(options.body) }),
     headers,
     method: options.method ?? "GET",
   });
 };
+
+const sendPath = `/v1/connections/${connectionId}/send-operations`;
+const sendBody = {
+  recipient_id: "ctc_123456789012345678901",
+  text: "Hello from REST",
+} as const;
+const idempotencyKey = "123456789012345678901";
 
 describe("REST Connections tracer", () => {
   test("lists selected Connections without CORS and without caching", async () => {
@@ -259,6 +309,206 @@ describe("REST Connections tracer", () => {
     expect(await denied.json()).toMatchObject({
       code: "invalid_credentials",
       status: 401,
+    });
+  });
+});
+
+describe("REST Send Operations", () => {
+  test("creates a Send Operation through the shared grant-aware send service", async () => {
+    const deferred: Array<Promise<void>> = [];
+    const harness = makeHarness({
+      permissions: ["messages:send"],
+      send: (input, deferProviderAttempt) => {
+        expect(input.connectionId).toBe(connectionId);
+        expect(input.grant.kind).toBe("api");
+        expect(input.idempotencyKey).toBe(idempotencyKey);
+        expect(input.recipientId).toBe(sendBody.recipient_id);
+        expect(input.text).toBe(sendBody.text);
+        deferProviderAttempt?.(Promise.resolve());
+        return Effect.succeed({
+          outcome: "receipt" as const,
+          receipt,
+        });
+      },
+    });
+    const response = await harness.handler(
+      request(sendPath, {
+        body: sendBody,
+        idempotencyKey,
+        method: "POST",
+      }),
+      (attempt) => {
+        deferred.push(attempt);
+      },
+    );
+    expect(response.status).toBe(201);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await response.json()).toEqual({
+      send_id: receipt.send_id,
+      status: "processing",
+      created_at: receipt.created_at,
+      status_changed_at: receipt.status_changed_at,
+      idempotent_replay: false,
+    });
+    expect(deferred).toHaveLength(1);
+    expect(harness.telemetry).toEqual([
+      {
+        event: "rest.operation.completed",
+        operation: "send_text_message",
+        outcome: "success",
+        resultCount: 1,
+        service: "api",
+      },
+    ]);
+    expect(JSON.stringify(harness.telemetry)).not.toContain(credential);
+    expect(JSON.stringify(harness.telemetry)).not.toContain(sendBody.text);
+  });
+
+  test("replays an exact Send Operation and rejects changed or unaccepted payloads", async () => {
+    const replay = await makeHarness({
+      permissions: ["messages:send"],
+      send: () =>
+        Effect.succeed({
+          outcome: "receipt" as const,
+          receipt: { ...receipt, idempotent_replay: true },
+        }),
+    }).handler(
+      request(sendPath, {
+        body: sendBody,
+        idempotencyKey,
+        method: "POST",
+      }),
+    );
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({
+      send_id: receipt.send_id,
+      idempotent_replay: true,
+    });
+
+    const conflict = await makeHarness({
+      permissions: ["messages:send"],
+      send: () => Effect.succeed({ outcome: "idempotency_conflict" }),
+    }).handler(
+      request(sendPath, {
+        body: sendBody,
+        idempotencyKey,
+        method: "POST",
+      }),
+    );
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({
+      code: "idempotency_conflict",
+      status: 409,
+    });
+
+    const missingKey = await makeHarness({
+      permissions: ["messages:send"],
+    }).handler(
+      request(sendPath, {
+        body: sendBody,
+        method: "POST",
+      }),
+    );
+    expect(missingKey.status).toBe(400);
+    expect(await missingKey.json()).toMatchObject({
+      code: "invalid_request",
+      status: 400,
+    });
+
+    const rejected = await makeHarness({
+      permissions: ["messages:send"],
+    }).handler(
+      request(sendPath, {
+        body: {
+          recipient_id: "+15551234567",
+          text: "hello",
+          confirmed: true,
+          conversation_id: "cvs_123456789012345678901",
+        },
+        idempotencyKey,
+        method: "POST",
+      }),
+    );
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toMatchObject({
+      code: "invalid_request",
+      status: 400,
+    });
+  });
+
+  test("returns Send Operation resources after the provider-attempt boundary", async () => {
+    for (const status of ["failed", "unknown"] as const) {
+      const response = await makeHarness({
+        permissions: ["messages:send"],
+        send: () =>
+          Effect.succeed({
+            outcome: "receipt" as const,
+            receipt: { ...receipt, status },
+          }),
+      }).handler(
+        request(sendPath, {
+          body: sendBody,
+          idempotencyKey,
+          method: "POST",
+        }),
+      );
+      expect(response.status).toBe(201);
+      expect(await response.json()).toMatchObject({
+        send_id: receipt.send_id,
+        status,
+      });
+    }
+  });
+
+  test("maps pre-operation send failures to Problem Details", async () => {
+    const forbidden = await makeHarness({
+      permissions: ["connections:read"],
+      send: () => Effect.succeed({ outcome: "authorization_denied" }),
+    }).handler(
+      request(sendPath, {
+        body: sendBody,
+        idempotencyKey,
+        method: "POST",
+      }),
+    );
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toMatchObject({
+      code: "insufficient_permission",
+      status: 403,
+    });
+
+    const missingRecipient = await makeHarness({
+      permissions: ["messages:send"],
+      send: () => Effect.succeed({ outcome: "recipient_not_found" }),
+    }).handler(
+      request(sendPath, {
+        body: sendBody,
+        idempotencyKey,
+        method: "POST",
+      }),
+    );
+    expect(missingRecipient.status).toBe(404);
+    expect(await missingRecipient.json()).toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+
+    const disconnected = await makeHarness({
+      permissions: ["messages:send"],
+      send: () => Effect.succeed({ outcome: "connection_unavailable" }),
+    }).handler(
+      request(sendPath, {
+        body: sendBody,
+        idempotencyKey,
+        method: "POST",
+      }),
+    );
+    expect(disconnected.status).toBe(409);
+    expect(await disconnected.json()).toMatchObject({
+      code: "connection_unavailable",
+      retryable: true,
+      status: 409,
     });
   });
 });

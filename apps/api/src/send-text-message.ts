@@ -3,11 +3,10 @@ import {
   makeMessageId,
 } from "@whatsapp-mcp/contracts/handles";
 import type { SendTextMessageOutput } from "@whatsapp-mcp/contracts/mcp-schema";
-import {
-  type AtomicSendRepository,
-  mcpSendGrant,
-  type SendEncryptionMaterial,
-  type SendGrantIdentity,
+import type {
+  AtomicSendRepository,
+  SendEncryptionMaterial,
+  SendGrantIdentity,
 } from "@whatsapp-mcp/db/send";
 import {
   makeWasenderRecipientRoute,
@@ -148,11 +147,7 @@ export const makeAtomicSendTextMessageService = (
     Effect.tryPromise(async (): Promise<SendTextMessageResult> => {
       const observedAt = options.now();
       const send = options.nextSend();
-      const grant = mcpSendGrant({
-        authorizationId: input.authorizationId,
-        oauthSubject: input.oauthSubject,
-        ...(input.clientId === undefined ? {} : { clientId: input.clientId }),
-      });
+      const grant = input.grant;
       const requestFingerprint = await fingerprint(options.fingerprintKey, {
         connectionId: input.connectionId,
         grant,

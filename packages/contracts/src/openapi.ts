@@ -1,16 +1,23 @@
 import type { API_KEY_PERMISSIONS } from "./api-key";
-import { ProblemDetailsContract, RestConnectionListContract } from "./rest";
+import {
+  ProblemDetailsContract,
+  RestConnectionListContract,
+  RestCreateSendOperationContract,
+  RestSendOperationContract,
+} from "./rest";
 
 export const REST_API_VERSION = "1.0.0";
 
 export interface RestRouteMetadata {
   readonly description: string;
-  readonly method: "GET";
+  readonly method: "GET" | "POST";
   readonly operationId: string;
-  readonly path: "/v1/connections";
+  readonly path:
+    | "/v1/connections"
+    | "/v1/connections/{connection_id}/send-operations";
   readonly permission: (typeof API_KEY_PERMISSIONS)[number];
   readonly summary: string;
-  readonly tags: readonly ["Connections"];
+  readonly tags: readonly ["Connections"] | readonly ["Send Operations"];
 }
 
 export const restRouteRegistry = [
@@ -23,6 +30,16 @@ export const restRouteRegistry = [
     permission: "connections:read",
     summary: "List selected WhatsApp Connections",
     tags: ["Connections"],
+  },
+  {
+    description:
+      "Create or exactly replay one text Send Operation for a known active `ctc_` or joined `grp_` recipient. Requires `Idempotency-Key`. Raw phone numbers, provider identifiers, conversation identifiers, and self-attested confirmation flags are not accepted. Exact replay returns the existing operation without resending. Failed and unknown post-boundary outcomes remain Send Operation resources.",
+    method: "POST",
+    operationId: "createSendOperation",
+    path: "/v1/connections/{connection_id}/send-operations",
+    permission: "messages:send",
+    summary: "Create or replay a text Send Operation",
+    tags: ["Send Operations"],
   },
 ] as const satisfies ReadonlyArray<RestRouteMetadata>;
 
@@ -50,6 +67,28 @@ const problemExample = {
   type: "https://docs.normal.fast/problems/invalid_credentials",
 };
 
+const sendOperationExample = {
+  send_id: "snd_xxxxxxxxxxxxxxxxxxxxx",
+  status: "processing",
+  created_at: "2026-08-17T12:00:00.000Z",
+  status_changed_at: "2026-08-17T12:00:00.000Z",
+  idempotent_replay: false,
+};
+
+const createSendOperationExample = {
+  recipient_id: "ctc_xxxxxxxxxxxxxxxxxxxxx",
+  text: "Hello from a server-side automation.",
+};
+
+const problemResponse = (description: string) => ({
+  content: {
+    "application/problem+json": {
+      schema: { $ref: "#/components/schemas/ProblemDetails" },
+    },
+  },
+  description,
+});
+
 const jsonSchema = (schema: {
   readonly jsonSchema: unknown;
 }): Record<string, unknown> => schema.jsonSchema as Record<string, unknown>;
@@ -76,6 +115,11 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
       description:
         "WhatsApp Connections explicitly selected for the calling API Key.",
       name: "Connections",
+    },
+    {
+      description:
+        "Idempotent text Send Operations created by the calling API Key. Creating a Send Operation is the caller's explicit action; Client Confirmation is MCP-specific and is not a REST field.",
+      name: "Send Operations",
     },
   ],
   paths: {
@@ -135,11 +179,103 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
         "x-normal-permission": restRouteRegistry[0].permission,
       },
     },
+    "/v1/connections/{connection_id}/send-operations": {
+      post: {
+        description: restRouteRegistry[1].description,
+        operationId: restRouteRegistry[1].operationId,
+        parameters: [
+          {
+            description:
+              "WhatsApp Connection explicitly selected for the calling API Key.",
+            in: "path",
+            name: "connection_id",
+            required: true,
+            schema: { type: "string", pattern: "^con_[A-Za-z0-9_-]{21}$" },
+          },
+          {
+            description:
+              "Caller-generated NanoID-default-alphabet retry identity. Exact replay returns the existing Send Operation. A changed payload returns `idempotency_conflict`.",
+            in: "header",
+            name: "Idempotency-Key",
+            required: true,
+            schema: { type: "string", pattern: "^[A-Za-z0-9_-]{21}$" },
+          },
+        ],
+        requestBody: {
+          content: {
+            "application/json": {
+              example: createSendOperationExample,
+              schema: { $ref: "#/components/schemas/CreateSendOperation" },
+            },
+          },
+          required: true,
+        },
+        responses: {
+          "200": {
+            content: {
+              "application/json": {
+                example: {
+                  ...sendOperationExample,
+                  idempotent_replay: true,
+                },
+                schema: { $ref: "#/components/schemas/SendOperation" },
+              },
+            },
+            description:
+              "Exact replay of an existing Send Operation. The provider is not called again.",
+          },
+          "201": {
+            content: {
+              "application/json": {
+                example: sendOperationExample,
+                schema: { $ref: "#/components/schemas/SendOperation" },
+              },
+            },
+            description:
+              "A new Send Operation after the durable provider-attempt boundary, including `failed` and `unknown`.",
+          },
+          "400": problemResponse(
+            "The request body or `Idempotency-Key` is missing or invalid.",
+          ),
+          "401": {
+            content: {
+              "application/problem+json": {
+                example: problemExample,
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description:
+              "The API Key is missing, malformed, expired, or revoked.",
+          },
+          "403": problemResponse(
+            "The API Key does not include `messages:send`.",
+          ),
+          "404": problemResponse(
+            "The Connection, recipient, or originating grant relationship was not found.",
+          ),
+          "409": problemResponse(
+            "The Idempotency-Key is bound to a different payload, or the Connection is not connected.",
+          ),
+          "429": problemResponse(
+            "Personal Account or API Key request or send quota is exhausted.",
+          ),
+          "503": problemResponse(
+            "Authentication or audit authority is unavailable.",
+          ),
+        },
+        security: [{ apiKey: [] }],
+        summary: restRouteRegistry[1].summary,
+        tags: [...restRouteRegistry[1].tags],
+        "x-normal-permission": restRouteRegistry[1].permission,
+      },
+    },
   },
   components: {
     schemas: {
       ConnectionList: jsonSchema(RestConnectionListContract),
+      CreateSendOperation: jsonSchema(RestCreateSendOperationContract),
       ProblemDetails: jsonSchema(ProblemDetailsContract),
+      SendOperation: jsonSchema(RestSendOperationContract),
     },
     securitySchemes: {
       apiKey: {

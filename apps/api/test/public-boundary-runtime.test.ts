@@ -502,6 +502,58 @@ describe("public-boundary Worker harness", () => {
     expect(JSON.stringify(logBody)).not.toContain(createdBody.credential);
   });
 
+  test("creates a Send Operation with an API Key through the REST adapter", async () => {
+    const created = await exports.default.fetch(
+      new Request("https://api.example.test/v1/api-keys", {
+        body: JSON.stringify({
+          connection_ids: ["con_123456789012345678901"],
+          name: "Send CI",
+          permissions: ["messages:send"],
+        }),
+        headers: {
+          authorization: "Bearer signed-test-user",
+          "content-type": "application/json",
+          origin: "http://127.0.0.1:3000",
+        },
+        method: "POST",
+      }),
+    );
+    expect(created.status).toBe(201);
+    const createdBody = (await created.json()) as {
+      readonly credential: string;
+    };
+
+    const sent = await exports.default.fetch(
+      new Request(
+        "https://api.example.test/v1/connections/con_123456789012345678901/send-operations",
+        {
+          body: JSON.stringify({
+            recipient_id: "ctc_123456789012345678901",
+            text: "Hello from REST",
+          }),
+          headers: {
+            authorization: `Bearer ${createdBody.credential}`,
+            "content-type": "application/json",
+            "idempotency-key": "123456789012345678901",
+          },
+          method: "POST",
+        },
+      ),
+    );
+    expect(sent.status).toBe(201);
+    expect(sent.headers.get("access-control-allow-origin")).toBeNull();
+    expect(sent.headers.get("cache-control")).toBe("no-store");
+    const sentBody = await sent.json();
+    expect(sentBody).toEqual({
+      send_id: "snd_123456789012345678901",
+      status: "processing",
+      created_at: "2026-08-17T12:00:00.000Z",
+      status_changed_at: "2026-08-17T12:00:00.000Z",
+      idempotent_replay: false,
+    });
+    expect(JSON.stringify(sentBody)).not.toContain(createdBody.credential);
+  });
+
   test("injects deterministic external failures only in the test root", async () => {
     const response = await exports.default.fetch(
       new Request("https://api.example.test/v1/personal-account", {

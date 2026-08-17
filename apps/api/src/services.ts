@@ -296,10 +296,11 @@ export interface ApiKeyManagementCompletedEvent {
 
 export interface RestOperationCompletedEvent {
   readonly event: "rest.operation.completed";
-  readonly operation: "list_connections";
+  readonly operation: "list_connections" | "send_text_message";
   readonly outcome:
     | "audit_unavailable"
     | "authorization_denied"
+    | "execution_error"
     | "rate_limited"
     | "success"
     | "unavailable";

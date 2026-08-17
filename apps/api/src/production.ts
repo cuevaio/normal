@@ -2198,7 +2198,7 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
             keyHourLimit: requestQuota.hourLimit,
             keyMinuteLimit: requestQuota.minuteLimit,
             minuteLimit: requestQuota.minuteLimit,
-          })(nextRequest);
+          })(nextRequest, (attempt) => nextContext.waitUntil(attempt));
         }
         if (isActivityLogRequest(nextRequest)) {
           return activityLogHandler(nextRequest);
