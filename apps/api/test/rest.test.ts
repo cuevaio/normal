@@ -1713,6 +1713,49 @@ describe("REST Stored Messages", () => {
     ]);
   });
 
+  test("pages older Stored Messages with a bound REST cursor", async () => {
+    const harness = makeMessageHarness({
+      cursorBoundary: ["2026-08-14T11:58:00.000Z", "msg_111111111111111111111"],
+      persistence: {
+        readMessages: (input) => {
+          expect(input.cursorSentAt).toBe("2026-08-14T11:58:00.000Z");
+          expect(input.cursorPublicId).toBe("msg_111111111111111111111");
+          return Effect.succeed({
+            ...messagePage,
+            hasOlder: false,
+            messages: [
+              messageRecord({
+                publicId: "msg_000000000000000000000",
+                sentAt: "2026-08-14T11:57:00.000Z",
+                text: "oldest",
+              }),
+            ],
+          });
+        },
+      },
+    });
+    const response = await harness.handler(
+      request(
+        `${messagesPath}?cursor=rest-cursor:2026-08-14T11:58:00.000Z:msg_111111111111111111111`,
+      ),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: Array<{ message_id: string; text: string }>;
+      pagination: { has_more: boolean; next_cursor: string | null };
+    };
+    expect(body.data).toEqual([
+      expect.objectContaining({
+        message_id: "msg_000000000000000000000",
+        text: "oldest",
+      }),
+    ]);
+    expect(body.pagination).toEqual({
+      has_more: false,
+      next_cursor: null,
+    });
+  });
+
   test("returns complete Unicode text instead of truncating one Stored Message", async () => {
     const text = `${"e\u0301😀".repeat(200)}tail`;
     const harness = makeMessageHarness({
@@ -1785,6 +1828,35 @@ describe("REST Stored Messages", () => {
     expect(body.meta.size_limited).toBe(true);
     expect(body.pagination.has_more).toBe(true);
     expect(body.pagination.next_cursor).toEqual(expect.any(String));
+    expect(JSON.stringify(body)).not.toContain("text_truncated");
+  });
+
+  test("fails closed when one Stored Message exceeds 1 MiB encoded JSON", async () => {
+    const text = "a".repeat(1_100_000);
+    const harness = makeMessageHarness({
+      persistence: {
+        readMessages: () =>
+          Effect.succeed({
+            ...messagePage,
+            hasOlder: false,
+            messages: [
+              messageRecord({
+                publicId: "msg_999999999999999999999",
+                sentAt: "2026-08-14T11:59:00.000Z",
+                text,
+              }),
+            ],
+          }),
+      },
+    });
+    const response = await harness.handler(request(messagesPath));
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      code: "unavailable",
+      status: 503,
+    });
+    expect(JSON.stringify(body)).not.toContain(text.slice(0, 32));
     expect(JSON.stringify(body)).not.toContain("text_truncated");
   });
 
