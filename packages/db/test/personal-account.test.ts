@@ -471,9 +471,7 @@ describe("Personal Account repository", () => {
         reverifiedAt: new Date("2026-08-02T23:59:00.000Z"),
       }),
     ).toMatchObject({ outcome: "created" });
-    expect(
-      await apiKeys.authenticate({ digest, publicId }),
-    ).not.toBeNull();
+    expect(await apiKeys.authenticate({ digest, publicId })).not.toBeNull();
 
     const first = await repository.prepareDeletion({
       clerkUserId: "user_apikeydelete",
