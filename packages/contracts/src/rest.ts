@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { ConnectionId, ContactId, ConversationId } from "./handles";
+import { ConnectionId, ContactId, ConversationId, GroupId } from "./handles";
 import { makePublicObjectContract, UtcTimestamp } from "./mcp-schema";
 
 export const RestConnectionState = Schema.Literal(
@@ -57,6 +57,30 @@ export const RestContactListContract = makePublicObjectContract({
 });
 export type RestContactList = typeof RestContactListContract.schema.Type;
 
+export const RestConversationKind = Schema.Literal("direct", "group");
+export type RestConversationKind = typeof RestConversationKind.Type;
+
+export const RestConversation = Schema.Struct({
+  conversation_id: ConversationId,
+  display_name: Schema.NullOr(Schema.String),
+  kind: RestConversationKind,
+  last_activity_at: UtcTimestamp,
+  last_activity_direction: Schema.Literal("inbound", "outbound"),
+  phone_last_four: Schema.NullOr(
+    Schema.String.pipe(Schema.pattern(/^[0-9]{4}$/)),
+  ),
+  recipient_id: Schema.Union(ContactId, GroupId),
+});
+export type RestConversation = typeof RestConversation.Type;
+
+export const RestConversationListContract = makePublicObjectContract({
+  data: Schema.Array(RestConversation).pipe(Schema.maxItems(50)),
+  meta: RestDirectoryMeta,
+  pagination: RestPagination,
+});
+export type RestConversationList =
+  typeof RestConversationListContract.schema.Type;
+
 export const ProblemStatus = Schema.Literal(400, 401, 403, 404, 409, 429, 503);
 
 export const ProblemCode = Schema.Literal(
@@ -96,6 +120,11 @@ export const decodeRestConnectionList = Schema.decodeUnknownSync(
 
 export const decodeRestContactList = Schema.decodeUnknownSync(
   RestContactListContract.schema,
+  { onExcessProperty: "error" },
+);
+
+export const decodeRestConversationList = Schema.decodeUnknownSync(
+  RestConversationListContract.schema,
   { onExcessProperty: "error" },
 );
 
