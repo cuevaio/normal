@@ -249,8 +249,8 @@ test("renders expired and revoked API Key dashboard states without recovery", as
   await page.goto("/dashboard/api-keys");
 
   const panel = page.getByRole("region", { name: "API Keys" });
-  await expect(panel.getByText("Temporary")).toBeVisible();
-  await expect(panel.getByText("Retired")).toBeVisible();
+  await expect(panel.getByRole("heading", { name: "Temporary" })).toBeVisible();
+  await expect(panel.getByRole("heading", { name: "Retired" })).toBeVisible();
   await expect(panel.getByTestId("api-key-state")).toHaveText([
     "Expired",
     "Revoked",
@@ -261,6 +261,9 @@ test("renders expired and revoked API Key dashboard states without recovery", as
   await expect(
     panel.getByRole("button", { name: "Revoke Retired" }),
   ).toBeDisabled();
-  await expect(panel).not.toContainText("normal_apk_123456789012345678901.");
   await expect(panel.getByLabel("New API Key credential")).toHaveCount(0);
+  await expect(panel).toContainText("normal_apk_123456789012345678901.…wxyz");
+  await expect(panel).not.toContainText(
+    "normal_apk_123456789012345678901.abcdefghijklmnopqrstuvwxyz0123456789ABC",
+  );
 });
