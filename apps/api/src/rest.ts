@@ -1991,7 +1991,9 @@ const listMessages = (
 
       const encryption = yield* EnvelopeEncryptionService;
       const encryptedContent: Array<{
-        readonly ciphertext: NonNullable<(typeof page.messages)[number]["content"]>;
+        readonly ciphertext: NonNullable<
+          (typeof page.messages)[number]["content"]
+        >;
         readonly context: {
           readonly accountId: string;
           readonly connectionId: string;
@@ -2097,10 +2099,9 @@ const listMessages = (
                                 typeof content !== "object" ||
                                 content === null ||
                                 !("text" in content) ||
-                                ((content as { text: unknown }).text !==
-                                  null &&
-                                  typeof (content as { text: unknown })
-                                    .text !== "string")
+                                ((content as { text: unknown }).text !== null &&
+                                  typeof (content as { text: unknown }).text !==
+                                    "string")
                               ) {
                                 throw new RestPersistenceError();
                               }
@@ -2133,7 +2134,9 @@ const listMessages = (
                                 mimeType: metadata.mimeType,
                               };
                             }
-                            const decodeString = (valueIndex: number | null) => {
+                            const decodeString = (
+                              valueIndex: number | null,
+                            ) => {
                               if (valueIndex === null) return null;
                               const plaintext = values[valueIndex];
                               if (plaintext === undefined) {
@@ -2253,8 +2256,7 @@ const listMessages = (
           },
           pagination: {
             has_more:
-              page.hasOlder ||
-              selectedNewestFirst.length < normalized.length,
+              page.hasOlder || selectedNewestFirst.length < normalized.length,
             next_cursor: nextCursor,
           },
         });
@@ -2263,8 +2265,7 @@ const listMessages = (
           const oldest = selectedNewestFirst.at(-1);
           if (
             oldest === undefined ||
-            (!page.hasOlder &&
-              selectedNewestFirst.length === normalized.length)
+            (!page.hasOlder && selectedNewestFirst.length === normalized.length)
           ) {
             return null;
           }
@@ -2322,11 +2323,9 @@ const listMessages = (
         return problemResponse("unavailable", 503);
       }
       if (completion.right.outcome === "record_quota_exhausted") {
-        return yield* failAfterAudit(
-          "rate_limited",
-          false,
-          { resetsAt: completion.right.resetsAt },
-        );
+        return yield* failAfterAudit("rate_limited", false, {
+          resetsAt: completion.right.resetsAt,
+        });
       }
       yield* emitCompletion(READ_MESSAGES, "success", body.data.length);
       return noStoreJsonResponse(body, 200);

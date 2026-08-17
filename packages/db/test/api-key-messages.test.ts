@@ -204,8 +204,8 @@ describe("API Key Stored Messages", () => {
         new Date("2026-07-01T00:00:00.000Z"),
         new Date("2026-08-17T11:00:00.000Z"),
         observedAt,
-        new Date("2026-06-01T00:00:00.000Z"),
-        new Date("2026-06-02T00:00:00.000Z"),
+        new Date("2026-07-02T00:00:00.000Z"),
+        new Date("2026-07-03T00:00:00.000Z"),
       ],
     );
 
@@ -273,8 +273,7 @@ describe("API Key Stored Messages", () => {
     repository.readApiKeyMessages({
       apiKeyGrantId: apiKeyId,
       connectionPublicId: input.connectionPublicId ?? connectionPublicId,
-      conversationPublicId:
-        input.conversationPublicId ?? conversationPublicId,
+      conversationPublicId: input.conversationPublicId ?? conversationPublicId,
       cursorPublicId: input.cursorPublicId ?? null,
       cursorSentAt: input.cursorSentAt ?? null,
       limit: input.limit ?? 20,

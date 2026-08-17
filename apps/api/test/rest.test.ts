@@ -1298,8 +1298,22 @@ describe("REST WhatsApp Conversations", () => {
 const conversationId = "cvs_123456789012345678901";
 const messagesPath = `/v1/connections/${connectionId}/conversations/${conversationId}/messages`;
 
+const utf8ToBase64 = (value: string) => {
+  const source = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of source) binary += String.fromCharCode(byte);
+  return btoa(binary);
+};
+
+const base64ToUtf8 = (value: string) => {
+  const binary = atob(value);
+  return new TextDecoder().decode(
+    Uint8Array.from(binary, (character) => character.charCodeAt(0)),
+  );
+};
+
 const encryptedJson = (value: unknown) => ({
-  ciphertext: btoa(JSON.stringify(value)),
+  ciphertext: utf8ToBase64(JSON.stringify(value)),
   keyVersion: 1,
   nonce: "AQIDBAUGBwgJCgsM",
   version: 1 as const,
@@ -1310,6 +1324,7 @@ const messageRecord = (input: {
   readonly deleted?: boolean;
   readonly direction?: "inbound" | "outbound";
   readonly media?: {
+    readonly id: string;
     readonly publicId: string;
     readonly state: "failed" | "pending" | "ready" | "rejected";
     readonly plaintextSizeBytes: number | null;
@@ -1324,7 +1339,9 @@ const messageRecord = (input: {
   sentAt: input.sentAt,
   direction: input.direction ?? "inbound",
   conversationKind: "direct" as const,
-  contentType: input.deleted ? ("unknown" as const) : (input.contentType ?? "text"),
+  contentType: input.deleted
+    ? ("unknown" as const)
+    : (input.contentType ?? "text"),
   content:
     input.deleted || input.text === null
       ? null
@@ -1467,15 +1484,16 @@ const makeMessageHarness = (options?: {
       decryptMany: (input) =>
         Effect.succeed(
           input.items.map((item) => {
-            const decoded = JSON.parse(atob(item.ciphertext.ciphertext)) as
-              | { readonly text?: string | null }
-              | string;
+            const decoded = JSON.parse(
+              base64ToUtf8(item.ciphertext.ciphertext),
+            ) as { readonly text?: string | null } | string;
             if (typeof decoded === "string") {
               return new TextEncoder().encode(decoded);
             }
             return new TextEncoder().encode(JSON.stringify(decoded));
           }),
         ),
+      encrypt: () => Effect.die("unused"),
     }),
     Layer.succeed(SafeTelemetry, {
       emit: (event) =>
@@ -1554,7 +1572,8 @@ describe("REST Stored Messages", () => {
       },
       pagination: {
         has_more: true,
-        next_cursor: "rest-cursor:2026-08-14T11:58:00.000Z:msg_111111111111111111111",
+        next_cursor:
+          "rest-cursor:2026-08-14T11:58:00.000Z:msg_111111111111111111111",
       },
     });
     expect(JSON.stringify(body)).not.toContain("text_truncated");
@@ -1583,6 +1602,7 @@ describe("REST Stored Messages", () => {
               messageRecord({
                 contentType: "image",
                 media: {
+                  id: "30000000-0000-4000-8000-000000000044",
                   metadata: encryptedJson({
                     fileName: "photo.jpg",
                     mimeType: "image/jpeg",
