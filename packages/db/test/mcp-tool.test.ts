@@ -180,13 +180,14 @@ describe("MCP tool repository", () => {
     });
 
     await expect(
-      repository.beginToolCall({
-        ...authorization,
+      repository.beginProtectedOperation({
+        channel: "mcp",
+        authorization,
         auditLogId: "50000000-0000-4000-8000-000000000030",
         hourLimit: 3,
         minuteLimit: 2,
         observedAt,
-        toolName: "list_connections",
+        operationName: "list_connections",
       }),
     ).resolves.toEqual({
       auditLogId: "50000000-0000-4000-8000-000000000030",
@@ -214,7 +215,7 @@ describe("MCP tool repository", () => {
       },
     ]);
 
-    await repository.completeToolCall({
+    await repository.completeProtectedOperation({
       auditLogId: "50000000-0000-4000-8000-000000000030",
       completedAt: new Date("2026-07-31T12:00:00.025Z"),
       errorCode: null,
@@ -654,25 +655,27 @@ describe("MCP tool repository", () => {
       [31, "2026-07-31T11:59:45.000Z"],
     ] as const) {
       await expect(
-        repository.beginToolCall({
-          ...authorization,
+        repository.beginProtectedOperation({
+          channel: "mcp",
+          authorization,
           auditLogId: `50000000-0000-4000-8000-0000000000${index}`,
           hourLimit: 3,
           minuteLimit: 2,
           observedAt: new Date(time),
-          toolName: "list_connections",
+          operationName: "list_connections",
         }),
       ).resolves.toMatchObject({ outcome: "started" });
     }
 
     await expect(
-      repository.beginToolCall({
-        ...authorization,
+      repository.beginProtectedOperation({
+        channel: "mcp",
+        authorization,
         auditLogId: "50000000-0000-4000-8000-000000000032",
         hourLimit: 3,
         minuteLimit: 2,
         observedAt,
-        toolName: "list_connections",
+        operationName: "list_connections",
       }),
     ).resolves.toEqual({
       auditLogId: "50000000-0000-4000-8000-000000000032",
@@ -696,13 +699,14 @@ describe("MCP tool repository", () => {
 
   test("audits validation rejection without reserving request quota", async () => {
     await expect(
-      repository.rejectToolCall({
-        ...authorization,
+      repository.rejectProtectedOperation({
+        channel: "mcp",
+        authorization,
         auditLogId: "50000000-0000-4000-8000-000000000033",
         connectionPublicId: connectionA,
         errorCode: "invalid_cursor",
         observedAt,
-        toolName: "list_contacts",
+        operationName: "list_contacts",
       }),
     ).resolves.toBe("rejected");
 
@@ -729,15 +733,16 @@ describe("MCP tool repository", () => {
   test("persists safe connection and send targets with the invocation", async () => {
     const sendPublicId = "snd_123456789012345678901";
     await expect(
-      repository.beginToolCall({
-        ...authorization,
+      repository.beginProtectedOperation({
+        channel: "mcp",
+        authorization,
         auditLogId: "50000000-0000-4000-8000-000000000034",
         connectionPublicId: connectionA,
         hourLimit: 3,
         minuteLimit: 2,
         observedAt,
         sendPublicId,
-        toolName: "get_send_status",
+        operationName: "get_send_status",
       }),
     ).resolves.toMatchObject({ outcome: "started" });
 
@@ -892,25 +897,27 @@ describe("MCP tool repository", () => {
       [42, "2026-07-31T11:59:30.000Z"],
     ] as const) {
       await expect(
-        repository.beginToolCall({
-          ...authorization,
+        repository.beginProtectedOperation({
+          channel: "mcp",
+          authorization,
           auditLogId: `50000000-0000-4000-8000-0000000000${index}`,
           hourLimit: 10,
           minuteLimit: 3,
           observedAt: new Date(time),
-          toolName: "list_connections",
+          operationName: "list_connections",
         }),
       ).resolves.toMatchObject({ outcome: "started" });
     }
 
     await expect(
-      repository.beginToolCall({
-        ...authorization,
+      repository.beginProtectedOperation({
+        channel: "mcp",
+        authorization,
         auditLogId: "50000000-0000-4000-8000-000000000043",
         hourLimit: 10,
         minuteLimit: 2,
         observedAt,
-        toolName: "list_connections",
+        operationName: "list_connections",
       }),
     ).resolves.toEqual({
       auditLogId: "50000000-0000-4000-8000-000000000043",
@@ -1329,13 +1336,14 @@ describe("MCP tool repository", () => {
       [authorizationId],
     );
     await expect(
-      repository.beginToolCall({
-        ...authorization,
+      repository.beginProtectedOperation({
+        channel: "mcp",
+        authorization,
         auditLogId: "50000000-0000-4000-8000-000000000033",
         hourLimit: 3,
         minuteLimit: 2,
         observedAt,
-        toolName: "list_connections",
+        operationName: "list_connections",
       }),
     ).resolves.toMatchObject({ outcome: "authorization_denied" });
 
@@ -1346,13 +1354,14 @@ describe("MCP tool repository", () => {
       [authorizationId],
     );
     await expect(
-      repository.beginToolCall({
-        ...authorization,
+      repository.beginProtectedOperation({
+        channel: "mcp",
+        authorization,
         auditLogId: "50000000-0000-4000-8000-000000000034",
         hourLimit: 3,
         minuteLimit: 2,
         observedAt,
-        toolName: "list_connections",
+        operationName: "list_connections",
       }),
     ).resolves.toMatchObject({ outcome: "started" });
     await database.query(
@@ -1391,13 +1400,14 @@ describe("MCP tool repository", () => {
       ],
     });
     await expect(
-      repository.beginToolCall({
-        ...authorization,
+      repository.beginProtectedOperation({
+        channel: "mcp",
+        authorization,
         auditLogId: "50000000-0000-4000-8000-000000000035",
         hourLimit: 3,
         minuteLimit: 2,
         observedAt,
-        toolName: "list_connections",
+        operationName: "list_connections",
       }),
     ).resolves.toMatchObject({ outcome: "started" });
     await expect(
@@ -1471,13 +1481,14 @@ describe("MCP tool repository", () => {
       [authorizationId],
     );
     await expect(
-      repository.beginToolCall({
-        ...authorization,
+      repository.beginProtectedOperation({
+        channel: "mcp",
+        authorization,
         auditLogId,
         hourLimit: 10,
         minuteLimit: 10,
         observedAt: readAt,
-        toolName: "read_messages",
+        operationName: "read_messages",
       }),
     ).resolves.toMatchObject({ outcome: "started" });
     const result = await repository.readMessages({
@@ -1562,13 +1573,14 @@ describe("MCP tool repository", () => {
     ] as const;
     await Promise.all(
       concurrentAuditLogIds.map((concurrentAuditLogId, index) =>
-        repository.beginToolCall({
-          ...authorization,
+        repository.beginProtectedOperation({
+          channel: "mcp",
+          authorization,
           auditLogId: concurrentAuditLogId,
           hourLimit: 10,
           minuteLimit: 10,
           observedAt: readAt,
-          toolName: index === 0 ? "read_messages" : "search_messages",
+          operationName: index === 0 ? "read_messages" : "search_messages",
         }),
       ),
     );
@@ -1671,14 +1683,15 @@ describe("MCP tool repository", () => {
       );
     }
     const auditLogId = "50000000-0000-4000-8000-000000000046";
-    await repository.beginToolCall({
-      ...authorization,
+    await repository.beginProtectedOperation({
+      channel: "mcp",
+      authorization,
       auditLogId,
       connectionPublicId: connectionA,
       hourLimit: 10,
       minuteLimit: 10,
       observedAt: readAt,
-      toolName: "search_messages",
+      operationName: "search_messages",
     });
     const material = await repository.searchMessages({
       ...authorization,
@@ -2063,13 +2076,14 @@ describe("MCP tool repository", () => {
     );
 
     await expect(
-      repository.beginToolCall({
-        ...authorization,
+      repository.beginProtectedOperation({
+        channel: "mcp",
+        authorization,
         auditLogId: "50000000-0000-4000-8000-000000000039",
         hourLimit: 10,
         minuteLimit: 10,
         observedAt,
-        toolName: "list_groups",
+        operationName: "list_groups",
       }),
     ).resolves.toMatchObject({ outcome: "started" });
     await expect(

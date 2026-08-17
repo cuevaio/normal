@@ -429,13 +429,14 @@ describe("API Key Stored Messages", () => {
     ).resolves.toEqual({ outcome: "success" });
 
     await expect(
-      repository.beginToolCall({
-        ...mcpAuthorization,
+      repository.beginProtectedOperation({
+        authorization: mcpAuthorization,
         auditLogId: mcpAuditLogId,
+        channel: "mcp",
         hourLimit: 10,
         minuteLimit: 10,
         observedAt,
-        toolName: "read_messages",
+        operationName: "read_messages",
       }),
     ).resolves.toMatchObject({ outcome: "started" });
     await expect(
