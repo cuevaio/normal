@@ -21,7 +21,8 @@ const insertApiKey = async (
     readonly revokedAt?: string;
   },
 ) => {
-  const digestHex = input.digestHex === undefined ? "07".repeat(32) : input.digestHex;
+  const digestHex =
+    input.digestHex === undefined ? "07".repeat(32) : input.digestHex;
   await database.query(
     `INSERT INTO public.api_keys (
        id, personal_account_id, public_id, name, credential_digest,
@@ -367,9 +368,7 @@ describe("Personal Account repository", () => {
         await database.query<{
           digest: Uint8Array | null;
           state: string;
-        }>(
-          `SELECT state, credential_digest AS digest FROM public.api_keys`,
-        )
+        }>(`SELECT state, credential_digest AS digest FROM public.api_keys`)
       ).rows,
     ).toEqual([{ digest: null, state: "revoked" }]);
     await database.query(
