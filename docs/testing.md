@@ -56,7 +56,9 @@ production migrations under `whatsapp_api_runtime` to prove digest-only
 persistence, the ten-active key limit, unique active names, disconnected
 Connection selection, selected-Connection listing, constant not-found for
 unknown or cross-tenant handles, idempotent revocation that clears the digest,
-and RLS isolation. Worker tests never put fixture credentials in the production
+RLS isolation, and Personal Account Deletion that revokes every API Key and
+clears every digest before the bounded purge cascades the rows. API Activity
+Logs become the same unlinkable Security Records as MCP events. Worker tests never put fixture credentials in the production
 composition root. REST Worker tests prove bearer parsing, Problem Details,
 no-CORS protected JSON, current permission checks, immediate revocation
 without an authorization cache, Directory contact paging, REST-only cursors,
