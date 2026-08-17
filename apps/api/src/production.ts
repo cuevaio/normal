@@ -1227,16 +1227,16 @@ const restPersistenceLayer = (environment: ApiEnvironment) =>
           },
           catch: () => new RestPersistenceError(),
         }),
-      completeToolCall: (input) =>
+      completeProtectedOperation: (input) =>
         Effect.tryPromise({
           try: () => {
             const connectionString = environment.HYPERDRIVE?.connectionString;
             if (typeof connectionString !== "string") {
               throw new Error("database unavailable");
             }
-            return makePgMcpToolRepository(connectionString).completeToolCall(
-              input,
-            );
+            return makePgMcpToolRepository(
+              connectionString,
+            ).completeProtectedOperation(input);
           },
           catch: () => new RestPersistenceError(),
         }),
@@ -1363,27 +1363,49 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
         },
         catch: () => new McpToolPersistenceError(),
       }),
-    beginToolCall: (input) =>
+    beginProtectedOperation: (input) =>
       Effect.tryPromise({
         try: () => {
           const connectionString = environment.HYPERDRIVE?.connectionString;
           if (typeof connectionString !== "string") {
             throw new Error("database unavailable");
           }
-          return makePgMcpToolRepository(connectionString).beginToolCall(input);
+          return makePgMcpToolRepository(
+            connectionString,
+          ).beginProtectedOperation({
+            channel: "mcp",
+            authorization: {
+              authorizationId: input.authorizationId,
+              oauthSubject: input.oauthSubject,
+              ...(input.clientId === undefined
+                ? {}
+                : { clientId: input.clientId }),
+            },
+            auditLogId: input.auditLogId,
+            hourLimit: input.hourLimit,
+            minuteLimit: input.minuteLimit,
+            observedAt: input.observedAt,
+            operationName: input.operationName,
+            ...(input.connectionPublicId === undefined
+              ? {}
+              : { connectionPublicId: input.connectionPublicId }),
+            ...(input.sendPublicId === undefined
+              ? {}
+              : { sendPublicId: input.sendPublicId }),
+          });
         },
         catch: () => new McpToolPersistenceError(),
       }),
-    completeToolCall: (input) =>
+    completeProtectedOperation: (input) =>
       Effect.tryPromise({
         try: () => {
           const connectionString = environment.HYPERDRIVE?.connectionString;
           if (typeof connectionString !== "string") {
             throw new Error("database unavailable");
           }
-          return makePgMcpToolRepository(connectionString).completeToolCall(
-            input,
-          );
+          return makePgMcpToolRepository(
+            connectionString,
+          ).completeProtectedOperation(input);
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -1531,16 +1553,35 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
         },
         catch: () => new McpToolPersistenceError(),
       }),
-    rejectToolCall: (input) =>
+    rejectProtectedOperation: (input) =>
       Effect.tryPromise({
         try: () => {
           const connectionString = environment.HYPERDRIVE?.connectionString;
           if (typeof connectionString !== "string") {
             throw new Error("database unavailable");
           }
-          return makePgMcpToolRepository(connectionString).rejectToolCall(
-            input,
-          );
+          return makePgMcpToolRepository(
+            connectionString,
+          ).rejectProtectedOperation({
+            channel: "mcp",
+            authorization: {
+              authorizationId: input.authorizationId,
+              oauthSubject: input.oauthSubject,
+              ...(input.clientId === undefined
+                ? {}
+                : { clientId: input.clientId }),
+            },
+            auditLogId: input.auditLogId,
+            errorCode: input.errorCode,
+            observedAt: input.observedAt,
+            operationName: input.operationName,
+            ...(input.connectionPublicId === undefined
+              ? {}
+              : { connectionPublicId: input.connectionPublicId }),
+            ...(input.sendPublicId === undefined
+              ? {}
+              : { sendPublicId: input.sendPublicId }),
+          });
         },
         catch: () => new McpToolPersistenceError(),
       }),

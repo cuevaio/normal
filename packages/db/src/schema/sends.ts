@@ -14,11 +14,11 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { personalAccountsInApp } from "./accounts";
+import { activityLogsInApp } from "./activity-logs";
 import { apiKeysInApp } from "./api-keys";
 import { bytea, publicSchema } from "./common";
 import { whatsappConnectionsInApp } from "./connections";
 import { mcpAuthorizationsInApp } from "./mcp-authorizations";
-import { activityLogsInApp } from "./tool-calls";
 
 export const sendOperationsInApp = publicSchema.table(
   "send_operations",

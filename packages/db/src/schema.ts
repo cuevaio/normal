@@ -1,4 +1,5 @@
 export * from "./schema/accounts";
+export * from "./schema/activity-logs";
 export * from "./schema/api-keys";
 export * from "./schema/common";
 export * from "./schema/connection-setups";
@@ -10,5 +11,4 @@ export * from "./schema/onboarding-profiles";
 export * from "./schema/operations";
 export * from "./schema/recipient-exclusions";
 export * from "./schema/sends";
-export * from "./schema/tool-calls";
 export * from "./schema/webhooks";

@@ -27,14 +27,14 @@ import type {
 } from "@whatsapp-mcp/db/api-key";
 import type {
   BeginProtectedOperationInput,
-  BeginToolCallResult,
+  BeginProtectedOperationResult,
   McpToolChatPage,
   McpToolConnectionRecord,
   McpToolContactReadMaterial,
   McpToolEncryptedContactPage,
   McpToolGroupPage,
   McpToolGroupSearchMaterial,
-  RejectToolCallResult,
+  RejectProtectedOperationResult,
 } from "@whatsapp-mcp/db/mcp-tool";
 import { apiSendGrant } from "@whatsapp-mcp/db/send";
 import { normalizeWhatsAppConnectionName } from "@whatsapp-mcp/domain/whatsapp-connection";
@@ -100,8 +100,8 @@ export class RestPersistenceError extends Data.TaggedError(
 export interface RestPersistenceService {
   readonly beginProtectedOperation: (
     input: BeginProtectedOperationInput,
-  ) => Effect.Effect<BeginToolCallResult, RestPersistenceError>;
-  readonly completeToolCall: (input: {
+  ) => Effect.Effect<BeginProtectedOperationResult, RestPersistenceError>;
+  readonly completeProtectedOperation: (input: {
     readonly auditLogId: string;
     readonly completedAt: Date;
     readonly errorCode: string | null;
@@ -175,7 +175,7 @@ export interface RestPersistenceService {
     readonly permissions: ReadonlyArray<string>;
     readonly personalAccountId: string;
     readonly requiredPermission: string;
-  }) => Effect.Effect<RejectToolCallResult, RestPersistenceError>;
+  }) => Effect.Effect<RejectProtectedOperationResult, RestPersistenceError>;
 }
 
 export const RestPersistence = Context.GenericTag<RestPersistenceService>(
@@ -483,7 +483,7 @@ const listConnections = (
       if (loaded._tag === "Left") {
         const completedAt = yield* clock.now;
         const completed = yield* persistence
-          .completeToolCall({
+          .completeProtectedOperation({
             auditLogId,
             completedAt,
             errorCode: "service_unavailable",
@@ -500,7 +500,7 @@ const listConnections = (
       if (loaded.right === null) {
         const completedAt = yield* clock.now;
         const completed = yield* persistence
-          .completeToolCall({
+          .completeProtectedOperation({
             auditLogId,
             completedAt,
             errorCode: "authorization_denied",
@@ -536,7 +536,7 @@ const listConnections = (
       ) {
         const completedAt = yield* clock.now;
         const completed = yield* persistence
-          .completeToolCall({
+          .completeProtectedOperation({
             auditLogId,
             completedAt,
             errorCode: "service_unavailable",
@@ -566,7 +566,7 @@ const listConnections = (
       });
       const completedAt = yield* clock.now;
       const completed = yield* persistence
-        .completeToolCall({
+        .completeProtectedOperation({
           auditLogId,
           completedAt,
           errorCode: null,
@@ -763,7 +763,7 @@ const listContacts = (
       const failAfterAudit = (errorCode: string, denied = false) =>
         Effect.gen(function* () {
           const completed = yield* persistence
-            .completeToolCall({
+            .completeProtectedOperation({
               auditLogId,
               completedAt: yield* clock.now,
               errorCode,
@@ -958,7 +958,7 @@ const listContacts = (
         },
       });
       const completed = yield* persistence
-        .completeToolCall({
+        .completeProtectedOperation({
           auditLogId,
           completedAt: yield* clock.now,
           errorCode: null,
@@ -1135,7 +1135,7 @@ const listGroups = (
       const failAfterAudit = (errorCode: string, denied = false) =>
         Effect.gen(function* () {
           const completed = yield* persistence
-            .completeToolCall({
+            .completeProtectedOperation({
               auditLogId,
               completedAt: yield* clock.now,
               errorCode,
@@ -1342,7 +1342,7 @@ const listGroups = (
         },
       });
       const completed = yield* persistence
-        .completeToolCall({
+        .completeProtectedOperation({
           auditLogId,
           completedAt: yield* clock.now,
           errorCode: null,
@@ -1509,7 +1509,7 @@ const listConversations = (
       const failAfterAudit = (errorCode: string, denied = false) =>
         Effect.gen(function* () {
           const completed = yield* persistence
-            .completeToolCall({
+            .completeProtectedOperation({
               auditLogId,
               completedAt: yield* clock.now,
               errorCode,
@@ -1722,7 +1722,7 @@ const listConversations = (
         },
       });
       const completed = yield* persistence
-        .completeToolCall({
+        .completeProtectedOperation({
           auditLogId,
           completedAt: yield* clock.now,
           errorCode: null,

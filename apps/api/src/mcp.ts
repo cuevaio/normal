@@ -36,7 +36,7 @@ import {
   parseStoredMediaUri,
 } from "@whatsapp-mcp/contracts/stored-media-uri";
 import {
-  type BeginToolCallResult,
+  type BeginProtectedOperationResult,
   type McpAccessAuthorization,
   type McpToolChatPage,
   type McpToolConnectionRecord,
@@ -49,7 +49,7 @@ import {
   type McpToolName,
   type McpToolSendStatusRecord,
   mcpSendGrant,
-  type RejectToolCallResult,
+  type RejectProtectedOperationResult,
   type SendGrantIdentity,
 } from "@whatsapp-mcp/db/mcp-tool";
 import { normalizeWhatsAppConnectionName } from "@whatsapp-mcp/domain/whatsapp-connection";
@@ -114,7 +114,7 @@ export interface McpToolPersistenceService {
     McpStoredMediaReadMaterial | null,
     McpToolPersistenceError
   >;
-  readonly beginToolCall: (
+  readonly beginProtectedOperation: (
     input: McpAccessAuthorization & {
       readonly auditLogId: string;
       readonly connectionPublicId?: string;
@@ -122,10 +122,10 @@ export interface McpToolPersistenceService {
       readonly minuteLimit: number;
       readonly observedAt: Date;
       readonly sendPublicId?: string;
-      readonly toolName: McpToolName;
+      readonly operationName: McpToolName;
     },
-  ) => Effect.Effect<BeginToolCallResult, McpToolPersistenceError>;
-  readonly completeToolCall: (input: {
+  ) => Effect.Effect<BeginProtectedOperationResult, McpToolPersistenceError>;
+  readonly completeProtectedOperation: (input: {
     readonly auditLogId: string;
     readonly completedAt: Date;
     readonly errorCode: string | null;
@@ -256,19 +256,19 @@ export interface McpToolPersistenceService {
     McpToolEncryptedContactPage | null,
     McpToolPersistenceError
   >;
-  readonly rejectToolCall: (
+  readonly rejectProtectedOperation: (
     input: McpAccessAuthorization & {
       readonly auditLogId: string;
       readonly connectionPublicId?: string;
       readonly errorCode: string;
       readonly observedAt: Date;
       readonly sendPublicId?: string;
-      readonly toolName:
+      readonly operationName:
         | "list_connections"
         | "list_contacts"
         | "search_messages";
     },
-  ) => Effect.Effect<RejectToolCallResult, McpToolPersistenceError>;
+  ) => Effect.Effect<RejectProtectedOperationResult, McpToolPersistenceError>;
 }
 
 export interface McpStoredMediaReadMaterial {
@@ -922,13 +922,13 @@ const listConnections = (
     const auditLogId = yield* identifiers.nextAuditLogId;
     const startedAt = yield* clock.now;
     const started = yield* persistence
-      .beginToolCall({
+      .beginProtectedOperation({
         ...authorization,
         auditLogId,
         hourLimit,
         minuteLimit,
         observedAt: startedAt,
-        toolName: "list_connections",
+        operationName: "list_connections",
       })
       .pipe(Effect.either);
 
@@ -959,7 +959,7 @@ const listConnections = (
     if (loaded._tag === "Left") {
       const completedAt = yield* clock.now;
       const completed = yield* persistence
-        .completeToolCall({
+        .completeProtectedOperation({
           auditLogId,
           completedAt,
           errorCode: "service_unavailable",
@@ -979,7 +979,7 @@ const listConnections = (
     if (loaded.right === null) {
       const completedAt = yield* clock.now;
       const completed = yield* persistence
-        .completeToolCall({
+        .completeProtectedOperation({
           auditLogId,
           completedAt,
           errorCode: "authorization_denied",
@@ -1048,7 +1048,7 @@ const listConnections = (
     ) {
       const completedAt = yield* clock.now;
       const completed = yield* persistence
-        .completeToolCall({
+        .completeProtectedOperation({
           auditLogId,
           completedAt,
           errorCode: "service_unavailable",
@@ -1080,7 +1080,7 @@ const listConnections = (
     const result = buildListConnectionsResult(output);
     const completedAt = yield* clock.now;
     const completed = yield* persistence
-      .completeToolCall({
+      .completeProtectedOperation({
         auditLogId,
         completedAt,
         errorCode: null,
@@ -1153,7 +1153,7 @@ const getSendStatus = (
     const auditLogId = yield* identifiers.nextAuditLogId;
     const observedAt = yield* clock.now;
     const started = yield* persistence
-      .beginToolCall({
+      .beginProtectedOperation({
         ...authorization,
         auditLogId,
         connectionPublicId: input.connection_id,
@@ -1161,7 +1161,7 @@ const getSendStatus = (
         minuteLimit,
         observedAt,
         sendPublicId: input.send_id,
-        toolName: "get_send_status",
+        operationName: "get_send_status",
       })
       .pipe(Effect.either);
     if (started._tag === "Left") return auditUnavailable();
@@ -1187,7 +1187,7 @@ const getSendStatus = (
       .pipe(Effect.either);
     const completedAt = yield* clock.now;
     if (loaded._tag === "Left") {
-      yield* persistence.completeToolCall({
+      yield* persistence.completeProtectedOperation({
         auditLogId,
         completedAt,
         errorCode: "service_unavailable",
@@ -1198,7 +1198,7 @@ const getSendStatus = (
       return serviceUnavailable();
     }
     if (loaded.right === null) {
-      yield* persistence.completeToolCall({
+      yield* persistence.completeProtectedOperation({
         auditLogId,
         completedAt,
         errorCode: "send_not_found",
@@ -1219,7 +1219,7 @@ const getSendStatus = (
         status: loaded.right.status,
         status_changed_at: loaded.right.statusChangedAt,
       });
-    yield* persistence.completeToolCall({
+    yield* persistence.completeProtectedOperation({
       auditLogId,
       completedAt,
       errorCode: null,
@@ -1279,14 +1279,14 @@ const listGroups = (
 
     const auditLogId = yield* identifiers.nextAuditLogId;
     const started = yield* persistence
-      .beginToolCall({
+      .beginProtectedOperation({
         ...authorization,
         auditLogId,
         connectionPublicId: input.connection_id,
         hourLimit,
         minuteLimit,
         observedAt: startedAt,
-        toolName: "list_groups",
+        operationName: "list_groups",
       })
       .pipe(Effect.either);
     if (started._tag === "Left") {
@@ -1311,7 +1311,7 @@ const listGroups = (
       Effect.gen(function* () {
         const denied = errorCode === "authorization_denied";
         const completed = yield* persistence
-          .completeToolCall({
+          .completeProtectedOperation({
             auditLogId,
             completedAt: yield* clock.now,
             errorCode,
@@ -1449,7 +1449,7 @@ const listGroups = (
     ).pipe(Effect.either);
     if (decrypted._tag === "Left") {
       const completed = yield* persistence
-        .completeToolCall({
+        .completeProtectedOperation({
           auditLogId,
           completedAt: yield* clock.now,
           errorCode: "service_unavailable",
@@ -1512,7 +1512,7 @@ const listGroups = (
     });
     const result = buildListGroupsResult(output);
     const completed = yield* persistence
-      .completeToolCall({
+      .completeProtectedOperation({
         auditLogId,
         completedAt: yield* clock.now,
         errorCode: null,
@@ -1589,13 +1589,13 @@ const listContacts = (
       ) {
         const auditLogId = yield* identifiers.nextAuditLogId;
         const rejected = yield* persistence
-          .rejectToolCall({
+          .rejectProtectedOperation({
             ...authorization,
             auditLogId,
             connectionPublicId: input.connection_id,
             errorCode: "invalid_cursor",
             observedAt: startedAt,
-            toolName: "list_contacts",
+            operationName: "list_contacts",
           })
           .pipe(Effect.either);
         const outcome =
@@ -1616,14 +1616,14 @@ const listContacts = (
 
     const auditLogId = yield* identifiers.nextAuditLogId;
     const started = yield* persistence
-      .beginToolCall({
+      .beginProtectedOperation({
         ...authorization,
         auditLogId,
         connectionPublicId: input.connection_id,
         hourLimit,
         minuteLimit,
         observedAt: startedAt,
-        toolName: "list_contacts",
+        operationName: "list_contacts",
       })
       .pipe(Effect.either);
     if (started._tag === "Left") {
@@ -1645,7 +1645,7 @@ const listContacts = (
     const failAfterAudit = (errorCode: string, denied = false) =>
       Effect.gen(function* () {
         const completed = yield* persistence
-          .completeToolCall({
+          .completeProtectedOperation({
             auditLogId,
             completedAt: yield* clock.now,
             errorCode,
@@ -1844,7 +1844,7 @@ const listContacts = (
     }
     const output: ListContactsOutput = decodedOutput.right;
     const completed = yield* persistence
-      .completeToolCall({
+      .completeProtectedOperation({
         auditLogId,
         completedAt: yield* clock.now,
         errorCode: null,
@@ -1994,14 +1994,14 @@ const listChats = (
     }
     const auditLogId = yield* identifiers.nextAuditLogId;
     const begun = yield* persistence
-      .beginToolCall({
+      .beginProtectedOperation({
         ...authorization,
         auditLogId,
         connectionPublicId: input.connection_id,
         hourLimit,
         minuteLimit,
         observedAt: startedAt,
-        toolName: "list_chats",
+        operationName: "list_chats",
       })
       .pipe(Effect.either);
     if (begun._tag === "Left") {
@@ -2018,7 +2018,7 @@ const listChats = (
     }
     if (persistence.listChats === undefined) {
       const completed = yield* persistence
-        .completeToolCall({
+        .completeProtectedOperation({
           auditLogId,
           completedAt: yield* clock.now,
           errorCode: "service_unavailable",
@@ -2057,7 +2057,7 @@ const listChats = (
     ) =>
       Effect.gen(function* () {
         const complete = yield* persistence
-          .completeToolCall({
+          .completeProtectedOperation({
             auditLogId,
             completedAt: yield* clock.now,
             errorCode: code,
@@ -2239,7 +2239,7 @@ const listChats = (
       partial: page.partial,
     });
     const complete = yield* persistence
-      .completeToolCall({
+      .completeProtectedOperation({
         auditLogId,
         completedAt: yield* clock.now,
         errorCode: null,
@@ -2302,14 +2302,14 @@ const readMessages = (
     }
     const auditLogId = yield* identifiers.nextAuditLogId;
     const begun = yield* persistence
-      .beginToolCall({
+      .beginProtectedOperation({
         ...authorization,
         auditLogId,
         connectionPublicId: input.connection_id,
         hourLimit,
         minuteLimit,
         observedAt: startedAt,
-        toolName: "read_messages",
+        operationName: "read_messages",
       })
       .pipe(Effect.either);
     if (begun._tag === "Left") {
@@ -2336,7 +2336,7 @@ const readMessages = (
     ) =>
       Effect.gen(function* () {
         const completed = yield* persistence
-          .completeToolCall({
+          .completeProtectedOperation({
             auditLogId,
             completedAt: yield* clock.now,
             errorCode: code,
@@ -2823,13 +2823,13 @@ const searchMessages = (
         typeof decoded.right[1] !== "string"
       ) {
         const rejected = yield* persistence
-          .rejectToolCall({
+          .rejectProtectedOperation({
             ...authorization,
             auditLogId: yield* identifiers.nextAuditLogId,
             connectionPublicId: input.connection_id,
             errorCode: "invalid_cursor",
             observedAt: startedAt,
-            toolName: "search_messages",
+            operationName: "search_messages",
           })
           .pipe(Effect.either);
         if (rejected._tag === "Left") {
@@ -2853,14 +2853,14 @@ const searchMessages = (
     }
     const auditLogId = yield* identifiers.nextAuditLogId;
     const begun = yield* persistence
-      .beginToolCall({
+      .beginProtectedOperation({
         ...authorization,
         auditLogId,
         connectionPublicId: input.connection_id,
         hourLimit,
         minuteLimit,
         observedAt: startedAt,
-        toolName: "search_messages",
+        operationName: "search_messages",
       })
       .pipe(Effect.either);
     if (begun._tag === "Left") {
@@ -2887,7 +2887,7 @@ const searchMessages = (
     ) =>
       Effect.gen(function* () {
         const completed = yield* persistence
-          .completeToolCall({
+          .completeProtectedOperation({
             auditLogId,
             completedAt: yield* clock.now,
             errorCode: code,
@@ -3353,7 +3353,7 @@ export const createMcpRequestHandler =
                     metadata.fileName === null
                       ? null
                       : sanitizeAttachmentFilename(metadata.fileName);
-                  yield* persistence.completeToolCall({
+                  yield* persistence.completeProtectedOperation({
                     auditLogId,
                     completedAt: yield* clock.now,
                     errorCode: null,

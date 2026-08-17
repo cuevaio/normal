@@ -1,7 +1,7 @@
 import { importCursorSigningKey } from "@whatsapp-mcp/contracts/cursor";
 import { ConnectionId } from "@whatsapp-mcp/contracts/handles";
 import type {
-  BeginToolCallResult,
+  BeginProtectedOperationResult,
   McpToolChatPage,
   McpToolGroupPage,
   McpToolMessagePage,
@@ -118,7 +118,7 @@ const responseMessages = async (
 
 const makeHarness = (
   overrides: {
-    readonly beginResult?: BeginToolCallResult;
+    readonly beginResult?: BeginProtectedOperationResult;
     readonly chatPage?: McpToolChatPage;
     readonly contactPage?: {
       readonly asOf: string;
@@ -236,12 +236,12 @@ const makeHarness = (
         observations.push("fail-media-read");
         return Effect.void;
       },
-      beginToolCall: (input) => {
+      beginProtectedOperation: (input) => {
         observations.push("begin");
         beginTargets.push({
           connectionPublicId: input.connectionPublicId ?? null,
           sendPublicId: input.sendPublicId ?? null,
-          toolName: input.toolName,
+          toolName: input.operationName,
         });
         if (overrides.failBegin) {
           return Effect.fail(new McpToolPersistenceError());
@@ -250,13 +250,13 @@ const makeHarness = (
           return Effect.succeed(overrides.beginResult);
         }
         const requiredScope =
-          input.toolName === "list_connections"
+          input.operationName === "list_connections"
             ? "connections:read"
-            : input.toolName === "get_send_status"
+            : input.operationName === "get_send_status"
               ? "messages:send"
-              : input.toolName === "list_chats" ||
-                  input.toolName === "read_messages" ||
-                  input.toolName === "search_messages"
+              : input.operationName === "list_chats" ||
+                  input.operationName === "read_messages" ||
+                  input.operationName === "search_messages"
                 ? "messages:read"
                 : "directory:read";
         if (
@@ -273,7 +273,7 @@ const makeHarness = (
           outcome: "started" as const,
         });
       },
-      completeToolCall: () => {
+      completeProtectedOperation: () => {
         observations.push("complete");
         return overrides.failComplete
           ? Effect.fail(new McpToolPersistenceError())
@@ -751,15 +751,15 @@ const makeHarness = (
             .slice(0, input.limit),
         });
       },
-      rejectToolCall: (input) => {
+      rejectProtectedOperation: (input) => {
         observations.push("reject");
         if (overrides.failReject) {
           return Effect.fail(new McpToolPersistenceError());
         }
         const requiredScope =
-          input.toolName === "list_connections"
+          input.operationName === "list_connections"
             ? "connections:read"
-            : input.toolName === "search_messages"
+            : input.operationName === "search_messages"
               ? "messages:read"
               : "directory:read";
         return Effect.succeed(

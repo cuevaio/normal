@@ -1051,7 +1051,7 @@ const makeTestLayer = (
             outcome: "started" as const,
           };
         }),
-      completeToolCall: (input) =>
+      completeProtectedOperation: (input) =>
         Effect.sync(() => {
           const existing = apiActivityLogs.find(
             (log) => log.id === input.auditLogId,

@@ -74,7 +74,7 @@ const makeHarness = (options?: {
                 outcome: "started" as const,
               },
         )),
-    completeToolCall: () => Effect.void,
+    completeProtectedOperation: () => Effect.void,
     listConnections:
       options?.listConnections ??
       (() =>
@@ -466,7 +466,7 @@ const makeContactHarness = (options?: {
               outcome: "started" as const,
             },
       ),
-    completeToolCall: () => Effect.void,
+    completeProtectedOperation: () => Effect.void,
     listConnections: () => Effect.succeed([]),
     loadContactReadMaterial: () => Effect.succeed(contactMaterial),
     loadGroupSearchMaterial: () => Effect.succeed(null),
@@ -697,7 +697,8 @@ describe("REST Directory contacts", () => {
   test("withholds the page when Activity Log completion fails", async () => {
     const harness = makeContactHarness({
       persistence: {
-        completeToolCall: () => Effect.fail(new RestPersistenceError()),
+        completeProtectedOperation: () =>
+          Effect.fail(new RestPersistenceError()),
       },
     });
     const response = await harness.handler(
@@ -765,7 +766,7 @@ const makeGroupHarness = (options?: {
               outcome: "started" as const,
             },
       ),
-    completeToolCall: () => Effect.void,
+    completeProtectedOperation: () => Effect.void,
     listConnections: () => Effect.succeed([]),
     loadContactReadMaterial: () => Effect.succeed(null),
     listEncryptedContacts: () => Effect.succeed(null),
@@ -987,7 +988,8 @@ describe("REST Directory groups", () => {
 
     const withheld = await makeGroupHarness({
       persistence: {
-        completeToolCall: () => Effect.fail(new RestPersistenceError()),
+        completeProtectedOperation: () =>
+          Effect.fail(new RestPersistenceError()),
       },
     }).handler(request(`/v1/connections/${connectionId}/groups`));
     expect(withheld.status).toBe(503);
@@ -1067,7 +1069,7 @@ const makeConversationHarness = (options?: {
               outcome: "started" as const,
             },
       ),
-    completeToolCall: () => Effect.void,
+    completeProtectedOperation: () => Effect.void,
     listConnections: () => Effect.succeed([]),
     loadContactReadMaterial: () => Effect.succeed(null),
     listEncryptedContacts: () => Effect.succeed(null),
@@ -1262,7 +1264,8 @@ describe("REST WhatsApp Conversations", () => {
   test("withholds the page when Activity Log completion fails", async () => {
     const harness = makeConversationHarness({
       persistence: {
-        completeToolCall: () => Effect.fail(new RestPersistenceError()),
+        completeProtectedOperation: () =>
+          Effect.fail(new RestPersistenceError()),
       },
     });
     const response = await harness.handler(

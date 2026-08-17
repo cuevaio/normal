@@ -303,9 +303,11 @@ export interface McpToolEncryptedContactPage {
   readonly stale: boolean;
 }
 
-export type RejectToolCallResult = "authorization_denied" | "rejected";
+export type RejectProtectedOperationResult =
+  | "authorization_denied"
+  | "rejected";
 
-export type BeginToolCallResult =
+export type BeginProtectedOperationResult =
   | {
       readonly auditLogId: string;
       readonly outcome: "started" | "authorization_denied";
@@ -392,21 +394,10 @@ export interface McpToolRepository {
       readonly observedAt: Date;
     },
   ) => Promise<McpStoredMediaReadMaterial | null>;
-  readonly beginToolCall: (
-    input: McpAccessAuthorization & {
-      readonly auditLogId: string;
-      readonly connectionPublicId?: string;
-      readonly hourLimit: number;
-      readonly minuteLimit: number;
-      readonly observedAt: Date;
-      readonly sendPublicId?: string;
-      readonly toolName: McpToolName;
-    },
-  ) => Promise<BeginToolCallResult>;
   readonly beginProtectedOperation: (
     input: BeginProtectedOperationInput,
-  ) => Promise<BeginToolCallResult>;
-  readonly completeToolCall: (input: {
+  ) => Promise<BeginProtectedOperationResult>;
+  readonly completeProtectedOperation: (input: {
     readonly auditLogId: string;
     readonly completedAt: Date;
     readonly errorCode: string | null;
@@ -584,20 +575,7 @@ export interface McpToolRepository {
           readonly requiredPermission?: string;
         }
     ),
-  ) => Promise<RejectToolCallResult>;
-  readonly rejectToolCall: (
-    input: McpAccessAuthorization & {
-      readonly auditLogId: string;
-      readonly connectionPublicId?: string;
-      readonly errorCode: string;
-      readonly observedAt: Date;
-      readonly sendPublicId?: string;
-      readonly toolName:
-        | "list_connections"
-        | "list_contacts"
-        | "search_messages";
-    },
-  ) => Promise<RejectToolCallResult>;
+  ) => Promise<RejectProtectedOperationResult>;
 }
 
 const withTransaction = async <Value>(
@@ -1335,6 +1313,189 @@ const requiredScope = (toolName: McpToolName): McpAuthorizationScope =>
           ? "messages:read"
           : "directory:read";
 
+type BeginMcpProtectedOperationInput = McpAccessAuthorization & {
+  readonly auditLogId: string;
+  readonly connectionPublicId?: string;
+  readonly hourLimit: number;
+  readonly minuteLimit: number;
+  readonly observedAt: Date;
+  readonly sendPublicId?: string;
+  readonly operationName: McpToolName;
+};
+
+type RejectMcpProtectedOperationInput = McpAccessAuthorization & {
+  readonly auditLogId: string;
+  readonly connectionPublicId?: string;
+  readonly errorCode: string;
+  readonly observedAt: Date;
+  readonly sendPublicId?: string;
+  readonly operationName:
+    | "list_connections"
+    | "list_contacts"
+    | "search_messages";
+};
+
+const beginMcpProtectedOperation = (
+  provider: McpToolConnectionProvider,
+  input: BeginMcpProtectedOperationInput,
+): Promise<BeginProtectedOperationResult> =>
+  provider.withConnection((connection) =>
+    withTransaction(connection, async () => {
+      if (
+        !Number.isSafeInteger(input.minuteLimit) ||
+        input.minuteLimit < 1 ||
+        !Number.isSafeInteger(input.hourLimit) ||
+        input.hourLimit < input.minuteLimit
+      ) {
+        throw new Error("invalid MCP request quota");
+      }
+      const personalAccountId = await enterAuthorizationContext(
+        connection,
+        input,
+      );
+      if (personalAccountId === null) {
+        return {
+          auditLogId: input.auditLogId,
+          outcome: "authorization_denied" as const,
+        };
+      }
+      const scopes = await loadAuthorizationScopes(connection, input);
+      if (
+        scopes === null ||
+        !scopes.includes(requiredScope(input.operationName))
+      ) {
+        await insertActivityLog(connection, {
+          auditLogId: input.auditLogId,
+          authorizationId: input.authorizationId,
+          completed: true,
+          connectionPublicId: input.connectionPublicId,
+          errorCode: "authorization_denied",
+          observedAt: input.observedAt,
+          outcome: "authorization_denied",
+          personalAccountId,
+          quotaReserved: false,
+          sendPublicId: input.sendPublicId,
+          toolName: input.operationName,
+        });
+        return {
+          auditLogId: input.auditLogId,
+          outcome: "authorization_denied" as const,
+        };
+      }
+
+      const recent = await lockAccountAndListReservedStarts(
+        connection,
+        personalAccountId,
+        input.observedAt,
+      );
+      if (recent === null) {
+        return {
+          auditLogId: input.auditLogId,
+          outcome: "authorization_denied" as const,
+        };
+      }
+      const starts = parseReservedStarts(recent);
+      const resetsAt = requestQuotaExhausted(
+        starts,
+        input.observedAt,
+        input.minuteLimit,
+        input.hourLimit,
+      );
+      if (resetsAt !== null) {
+        await insertActivityLog(connection, {
+          auditLogId: input.auditLogId,
+          authorizationId: input.authorizationId,
+          completed: true,
+          connectionPublicId: input.connectionPublicId,
+          errorCode: "rate_limited",
+          observedAt: input.observedAt,
+          outcome: "rate_limited",
+          personalAccountId,
+          quotaReserved: false,
+          sendPublicId: input.sendPublicId,
+          toolName: input.operationName,
+        });
+        return {
+          auditLogId: input.auditLogId,
+          outcome: "rate_limited" as const,
+          resetsAt,
+          retryAfterSeconds: Math.max(
+            0,
+            Math.ceil(
+              (resetsAt.valueOf() - input.observedAt.valueOf()) / 1_000,
+            ),
+          ),
+        };
+      }
+
+      await insertActivityLog(connection, {
+        auditLogId: input.auditLogId,
+        authorizationId: input.authorizationId,
+        completed: false,
+        connectionPublicId: input.connectionPublicId,
+        errorCode: null,
+        observedAt: input.observedAt,
+        outcome: "started",
+        personalAccountId,
+        quotaReserved: true,
+        sendPublicId: input.sendPublicId,
+        toolName: input.operationName,
+      });
+      return {
+        auditLogId: input.auditLogId,
+        outcome: "started" as const,
+      };
+    }),
+  );
+
+const rejectMcpProtectedOperation = (
+  provider: McpToolConnectionProvider,
+  input: RejectMcpProtectedOperationInput,
+): Promise<RejectProtectedOperationResult> =>
+  provider.withConnection((connection) =>
+    withTransaction(connection, async () => {
+      const personalAccountId = await enterAuthorizationContext(
+        connection,
+        input,
+      );
+      if (personalAccountId === null) return "authorization_denied" as const;
+      const scopes = await loadAuthorizationScopes(connection, input);
+      if (
+        scopes === null ||
+        !scopes.includes(requiredScope(input.operationName))
+      ) {
+        await insertActivityLog(connection, {
+          auditLogId: input.auditLogId,
+          authorizationId: input.authorizationId,
+          completed: true,
+          connectionPublicId: input.connectionPublicId,
+          errorCode: "authorization_denied",
+          observedAt: input.observedAt,
+          outcome: "authorization_denied",
+          personalAccountId,
+          quotaReserved: false,
+          sendPublicId: input.sendPublicId,
+          toolName: input.operationName,
+        });
+        return "authorization_denied" as const;
+      }
+      await insertActivityLog(connection, {
+        auditLogId: input.auditLogId,
+        authorizationId: input.authorizationId,
+        completed: true,
+        connectionPublicId: input.connectionPublicId,
+        errorCode: input.errorCode,
+        observedAt: input.observedAt,
+        outcome: "execution_error",
+        personalAccountId,
+        quotaReserved: false,
+        sendPublicId: input.sendPublicId,
+        toolName: input.operationName,
+      });
+      return "rejected" as const;
+    }),
+  );
+
 export const makeMcpToolRepository = (
   provider: McpToolConnectionProvider,
 ): McpToolRepository => ({
@@ -1497,124 +1658,15 @@ export const makeMcpToolRepository = (
         return scopes === null ? null : { scopes };
       }),
     ),
-  beginToolCall: (input) =>
-    provider.withConnection((connection) =>
-      withTransaction(connection, async () => {
-        if (
-          !Number.isSafeInteger(input.minuteLimit) ||
-          input.minuteLimit < 1 ||
-          !Number.isSafeInteger(input.hourLimit) ||
-          input.hourLimit < input.minuteLimit
-        ) {
-          throw new Error("invalid MCP request quota");
-        }
-        const personalAccountId = await enterAuthorizationContext(
-          connection,
-          input,
-        );
-        if (personalAccountId === null) {
-          return {
-            auditLogId: input.auditLogId,
-            outcome: "authorization_denied" as const,
-          };
-        }
-        const scopes = await loadAuthorizationScopes(connection, input);
-        if (
-          scopes === null ||
-          !scopes.includes(requiredScope(input.toolName))
-        ) {
-          await insertActivityLog(connection, {
-            auditLogId: input.auditLogId,
-            authorizationId: input.authorizationId,
-            completed: true,
-            connectionPublicId: input.connectionPublicId,
-            errorCode: "authorization_denied",
-            observedAt: input.observedAt,
-            outcome: "authorization_denied",
-            personalAccountId,
-            quotaReserved: false,
-            sendPublicId: input.sendPublicId,
-            toolName: input.toolName,
-          });
-          return {
-            auditLogId: input.auditLogId,
-            outcome: "authorization_denied" as const,
-          };
-        }
-
-        const recent = await lockAccountAndListReservedStarts(
-          connection,
-          personalAccountId,
-          input.observedAt,
-        );
-        if (recent === null) {
-          return {
-            auditLogId: input.auditLogId,
-            outcome: "authorization_denied" as const,
-          };
-        }
-        const starts = parseReservedStarts(recent);
-        const resetsAt = requestQuotaExhausted(
-          starts,
-          input.observedAt,
-          input.minuteLimit,
-          input.hourLimit,
-        );
-        if (resetsAt !== null) {
-          await insertActivityLog(connection, {
-            auditLogId: input.auditLogId,
-            authorizationId: input.authorizationId,
-            completed: true,
-            connectionPublicId: input.connectionPublicId,
-            errorCode: "rate_limited",
-            observedAt: input.observedAt,
-            outcome: "rate_limited",
-            personalAccountId,
-            quotaReserved: false,
-            sendPublicId: input.sendPublicId,
-            toolName: input.toolName,
-          });
-          return {
-            auditLogId: input.auditLogId,
-            outcome: "rate_limited" as const,
-            resetsAt,
-            retryAfterSeconds: Math.max(
-              0,
-              Math.ceil(
-                (resetsAt.valueOf() - input.observedAt.valueOf()) / 1_000,
-              ),
-            ),
-          };
-        }
-
-        await insertActivityLog(connection, {
-          auditLogId: input.auditLogId,
-          authorizationId: input.authorizationId,
-          completed: false,
-          connectionPublicId: input.connectionPublicId,
-          errorCode: null,
-          observedAt: input.observedAt,
-          outcome: "started",
-          personalAccountId,
-          quotaReserved: true,
-          sendPublicId: input.sendPublicId,
-          toolName: input.toolName,
-        });
-        return {
-          auditLogId: input.auditLogId,
-          outcome: "started" as const,
-        };
-      }),
-    ),
   beginProtectedOperation: (input) =>
     input.channel === "mcp"
-      ? makeMcpToolRepository(provider).beginToolCall({
+      ? beginMcpProtectedOperation(provider, {
           ...input.authorization,
           auditLogId: input.auditLogId,
           hourLimit: input.hourLimit,
           minuteLimit: input.minuteLimit,
           observedAt: input.observedAt,
-          toolName: input.operationName,
+          operationName: input.operationName,
           ...(input.connectionPublicId === undefined
             ? {}
             : { connectionPublicId: input.connectionPublicId }),
@@ -4102,12 +4154,12 @@ export const makeMcpToolRepository = (
     ),
   rejectProtectedOperation: (input) =>
     input.channel === "mcp"
-      ? makeMcpToolRepository(provider).rejectToolCall({
+      ? rejectMcpProtectedOperation(provider, {
           ...input.authorization,
           auditLogId: input.auditLogId,
           errorCode: input.errorCode,
           observedAt: input.observedAt,
-          toolName: input.operationName as
+          operationName: input.operationName as
             | "list_connections"
             | "list_contacts"
             | "search_messages",
@@ -4169,51 +4221,7 @@ export const makeMcpToolRepository = (
             return "rejected" as const;
           }),
         ),
-  rejectToolCall: (input) =>
-    provider.withConnection((connection) =>
-      withTransaction(connection, async () => {
-        const personalAccountId = await enterAuthorizationContext(
-          connection,
-          input,
-        );
-        if (personalAccountId === null) return "authorization_denied" as const;
-        const scopes = await loadAuthorizationScopes(connection, input);
-        if (
-          scopes === null ||
-          !scopes.includes(requiredScope(input.toolName))
-        ) {
-          await insertActivityLog(connection, {
-            auditLogId: input.auditLogId,
-            authorizationId: input.authorizationId,
-            completed: true,
-            connectionPublicId: input.connectionPublicId,
-            errorCode: "authorization_denied",
-            observedAt: input.observedAt,
-            outcome: "authorization_denied",
-            personalAccountId,
-            quotaReserved: false,
-            sendPublicId: input.sendPublicId,
-            toolName: input.toolName,
-          });
-          return "authorization_denied" as const;
-        }
-        await insertActivityLog(connection, {
-          auditLogId: input.auditLogId,
-          authorizationId: input.authorizationId,
-          completed: true,
-          connectionPublicId: input.connectionPublicId,
-          errorCode: input.errorCode,
-          observedAt: input.observedAt,
-          outcome: "execution_error",
-          personalAccountId,
-          quotaReserved: false,
-          sendPublicId: input.sendPublicId,
-          toolName: input.toolName,
-        });
-        return "rejected" as const;
-      }),
-    ),
-  completeToolCall: (input) =>
+  completeProtectedOperation: (input) =>
     provider.withConnection((connection) =>
       (async () => {
         const db = makeDatabase(connection);
