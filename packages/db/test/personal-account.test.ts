@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PGlite } from "@electric-sql/pglite";
+import { makeApiKeyRepository } from "../src/api-key";
 import { runMigrations } from "../src/migrations";
 import {
   makePersonalAccountRepository,
@@ -327,7 +328,9 @@ describe("Personal Account repository", () => {
       JSON.stringify(
         (await database.query("SELECT * FROM public.security_records")).rows,
       ),
-    ).not.toMatch(/apk_|Billing|personal_account|60000000/iu);
+    ).not.toMatch(
+      /apk_|Billing|personal_account|60000000|user_|clerk|connection|phone|credential|digest|normal_/iu,
+    );
     expect(
       (
         await database.query(
@@ -385,6 +388,199 @@ describe("Personal Account repository", () => {
         `)
       ).rows,
     ).toEqual([{ count: 502 }]);
+  });
+
+  test("revokes every API Key and clears digests before Personal Account purge", async () => {
+    const repository = makePersonalAccountRepository(provider);
+    const apiKeys = makeApiKeyRepository(provider);
+    const secondAccountId = "10000000-0000-4000-8000-000000000011";
+    const connectionPublicId = "con_123456789012345678901";
+    const digest = new Uint8Array(32).fill(7);
+    const otherDigest = new Uint8Array(32).fill(8);
+    const publicId = "apk_aaaaaaaaaaaaaaaaaaaaa";
+    const expiredPublicId = "apk_bbbbbbbbbbbbbbbbbbbbb";
+    const otherPublicId = "apk_ccccccccccccccccccccc";
+    await repository.create({
+      clerkUserId: "user_apikeydelete",
+      keyCiphertext: new Uint8Array([1, 2, 3]),
+      keyVersion: 1,
+      kmsKeyId: "arn:aws:kms:us-east-1:111122223333:key/content-root-key",
+      personalAccountId: accountId,
+    });
+    await repository.create({
+      clerkUserId: "user_otheraccount",
+      keyCiphertext: new Uint8Array([4, 5, 6]),
+      keyVersion: 1,
+      kmsKeyId: "arn:aws:kms:us-east-1:111122223333:key/content-root-key",
+      personalAccountId: secondAccountId,
+    });
+    await database.query(
+      `INSERT INTO public.whatsapp_connections (
+         id, personal_account_id, webhook_ingress_id,
+         display_name_fallback, public_id
+       ) VALUES
+         ('20000000-0000-4000-8000-000000000010', $1,
+          '30000000-0000-4000-8000-000000000010', 'Bright Badger', $2),
+         ('20000000-0000-4000-8000-000000000011', $3,
+          '30000000-0000-4000-8000-000000000011', 'Calm Falcon',
+          'con_123456789012345678902')`,
+      [accountId, connectionPublicId, secondAccountId],
+    );
+    expect(
+      await apiKeys.create({
+        clerkUserId: "user_apikeydelete",
+        connectionIds: [connectionPublicId],
+        createdAt: new Date("2026-08-03T00:00:00.000Z"),
+        credentialDigest: digest,
+        credentialHint: `normal_${publicId}.…wxyz`,
+        expiresAt: null,
+        id: "50000000-0000-4000-8000-000000000001",
+        name: "CI",
+        permissions: ["connections:read"],
+        publicId,
+        reverifiedAt: new Date("2026-08-02T23:59:00.000Z"),
+      }),
+    ).toMatchObject({ outcome: "created" });
+    expect(
+      await apiKeys.create({
+        clerkUserId: "user_apikeydelete",
+        connectionIds: [connectionPublicId],
+        createdAt: new Date("2026-08-03T00:00:00.000Z"),
+        credentialDigest: otherDigest,
+        credentialHint: `normal_${expiredPublicId}.…wxyz`,
+        expiresAt: new Date("2026-08-03T00:30:00.000Z"),
+        id: "50000000-0000-4000-8000-000000000002",
+        name: "Nightly",
+        permissions: ["messages:send"],
+        publicId: expiredPublicId,
+        reverifiedAt: new Date("2026-08-02T23:59:00.000Z"),
+      }),
+    ).toMatchObject({ outcome: "created" });
+    expect(
+      await apiKeys.create({
+        clerkUserId: "user_otheraccount",
+        connectionIds: ["con_123456789012345678902"],
+        createdAt: new Date("2026-08-03T00:00:00.000Z"),
+        credentialDigest: new Uint8Array(32).fill(9),
+        credentialHint: `normal_${otherPublicId}.…wxyz`,
+        expiresAt: null,
+        id: "50000000-0000-4000-8000-000000000003",
+        name: "Other",
+        permissions: ["directory:read"],
+        publicId: otherPublicId,
+        reverifiedAt: new Date("2026-08-02T23:59:00.000Z"),
+      }),
+    ).toMatchObject({ outcome: "created" });
+    expect(await apiKeys.authenticate({ digest, publicId })).not.toBeNull();
+
+    const first = await repository.prepareDeletion({
+      clerkUserId: "user_apikeydelete",
+      observedAt: "2026-08-03T01:00:00.000Z",
+    });
+    const replay = await repository.prepareDeletion({
+      clerkUserId: "user_apikeydelete",
+      observedAt: "2026-08-03T02:00:00.000Z",
+    });
+    expect(first).toMatchObject({
+      personalAccountId: accountId,
+      requestedAt: "2026-08-03T01:00:00.000Z",
+      state: "deleting",
+    });
+    expect(replay).toEqual(first);
+    expect(await apiKeys.authenticate({ digest, publicId })).toBeNull();
+    expect(
+      await apiKeys.authenticate({
+        digest: otherDigest,
+        publicId: expiredPublicId,
+      }),
+    ).toBeNull();
+
+    const revoked = await database.query<{
+      digest: Uint8Array | null;
+      public_id: string;
+      revoked_at: Date;
+      state: string;
+    }>(
+      `SELECT public_id, state, credential_digest AS digest, revoked_at
+       FROM public.api_keys
+       WHERE personal_account_id = $1
+       ORDER BY public_id`,
+      [accountId],
+    );
+    expect(revoked.rows).toEqual([
+      {
+        digest: null,
+        public_id: publicId,
+        revoked_at: new Date("2026-08-03T01:00:00.000Z"),
+        state: "revoked",
+      },
+      {
+        digest: null,
+        public_id: expiredPublicId,
+        revoked_at: new Date("2026-08-03T01:00:00.000Z"),
+        state: "revoked",
+      },
+    ]);
+
+    const other = await database.query<{
+      digest_length: number;
+      state: string;
+    }>(
+      `SELECT state, octet_length(credential_digest)::int AS digest_length
+       FROM public.api_keys
+       WHERE public_id = $1`,
+      [otherPublicId],
+    );
+    expect(other.rows).toEqual([{ digest_length: 32, state: "active" }]);
+
+    await database.query(
+      `UPDATE public.whatsapp_connections
+       SET state = 'deleting',
+           desired_state = 'disconnected',
+           deletion_requested_at = '2026-08-03T01:00:00Z',
+           deletion_marker_id = $2
+       WHERE personal_account_id = $1`,
+      [accountId, "e".repeat(64)],
+    );
+    await repository.finishDeletion({
+      clerkUserId: "user_apikeydelete",
+      deletionMarkerId: "d".repeat(64),
+      requestedAt: "2026-08-03T01:00:00.000Z",
+    });
+    await database.query(
+      "DELETE FROM public.whatsapp_connections WHERE personal_account_id = $1",
+      [accountId],
+    );
+    expect(
+      (
+        await database.query(
+          "SELECT count(*)::integer AS count FROM public.api_keys WHERE personal_account_id = $1",
+          [accountId],
+        )
+      ).rows,
+    ).toEqual([{ count: 2 }]);
+    await expect(
+      repository.purgeDeletion({
+        completedAt: "2026-08-03T03:00:00.000Z",
+        deletionMarkerId: "d".repeat(64),
+      }),
+    ).resolves.toBe(true);
+    expect(
+      (
+        await database.query(
+          "SELECT count(*)::integer AS count FROM public.api_keys WHERE personal_account_id = $1",
+          [accountId],
+        )
+      ).rows,
+    ).toEqual([{ count: 0 }]);
+    expect(
+      (
+        await database.query(
+          "SELECT count(*)::integer AS count FROM public.api_keys WHERE public_id = $1",
+          [otherPublicId],
+        )
+      ).rows,
+    ).toEqual([{ count: 1 }]);
   });
 
   test("admits another Clerk User without reserving provider capacity", async () => {

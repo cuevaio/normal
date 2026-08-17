@@ -303,7 +303,7 @@ export interface ApiKeyRetentionCompletedEvent {
 
 export interface RestOperationCompletedEvent {
   readonly event: "rest.operation.completed";
-  readonly operation: "list_connections" | "list_contacts";
+  readonly operation: "list_connections" | "list_contacts" | "list_chats";
   readonly outcome:
     | "audit_unavailable"
     | "authorization_denied"

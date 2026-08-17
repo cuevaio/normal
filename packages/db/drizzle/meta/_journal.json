@@ -83,7 +83,14 @@
       "idx": 11,
       "version": "7",
       "when": 1786489200000,
-      "tag": "0011_expire_and_purge_api_key_metadata",
+      "tag": "0011_revoke_api_keys_on_personal_account_deletion",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786492800000,
+      "tag": "0012_expire_and_purge_api_key_metadata",
       "breakpoints": true
     }
   ]
