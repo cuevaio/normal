@@ -2966,6 +2966,8 @@ export const createProductionScheduledHandler =
         limit: number,
       ) => Promise<number>;
       readonly purgeExpiredActivityLogs?: (limit: number) => Promise<number>;
+      readonly expireApiKeyCredentials?: (limit: number) => Promise<number>;
+      readonly purgeExpiredApiKeyMetadata?: (limit: number) => Promise<number>;
       readonly purgePersonalAccounts?: (observedAt: string) => Promise<void>;
       readonly now?: () => string;
       readonly retainWebhookSources?: (observedAt: string) => Promise<void>;
@@ -3109,6 +3111,36 @@ export const createProductionScheduledHandler =
         )(500);
         if (count < 500) break;
       }
+      let expiredApiKeyCount = 0;
+      let purgedApiKeyCount = 0;
+      while (true) {
+        const count = await (
+          dependencies.expireApiKeyCredentials ??
+          ((limit) =>
+            makePgApiKeyRepository(connectionString).expireCredentials(limit))
+        )(500);
+        expiredApiKeyCount += count;
+        if (count < 500) break;
+      }
+      while (true) {
+        const count = await (
+          dependencies.purgeExpiredApiKeyMetadata ??
+          ((limit) =>
+            makePgApiKeyRepository(connectionString).purgeExpiredMetadata(
+              limit,
+            ))
+        )(500);
+        purgedApiKeyCount += count;
+        if (count < 500) break;
+      }
+      Effect.runSync(
+        safeTelemetry.emit({
+          event: "api_key.retention.completed",
+          expiredCount: expiredApiKeyCount,
+          purgedCount: purgedApiKeyCount,
+          service: "api",
+        }),
+      );
       await (
         dependencies.purgePersonalAccounts ??
         (async (value) => {

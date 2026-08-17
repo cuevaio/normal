@@ -512,4 +512,220 @@ describe("API Key repository", () => {
       await database.exec("RESET ROLE");
     }
   });
+
+  test("scheduled expiry clears the digest with database time and frees the active slot", async () => {
+    expect(
+      await createKey({
+        expiresAt: new Date("2026-08-14T13:00:00.000Z"),
+      }),
+    ).toMatchObject({ outcome: "created" });
+    await database.query(
+      `UPDATE public.api_keys
+       SET created_at = transaction_timestamp() - interval '2 hours',
+           reverified_at = transaction_timestamp() - interval '2 hours'
+             - interval '1 minute',
+           expires_at = transaction_timestamp() - interval '1 hour'
+       WHERE public_id = $1`,
+      [publicIdFor(1)],
+    );
+    expect(
+      await repository.authenticate({
+        digest,
+        publicId: publicIdFor(1),
+      }),
+    ).toBeNull();
+
+    expect(await repository.expireCredentials(500)).toBe(1);
+    expect(await repository.expireCredentials(500)).toBe(0);
+
+    const persisted = await database.query<{
+      digest: Uint8Array | null;
+      metadata_expires_at: Date;
+      state: string;
+    }>(
+      `SELECT credential_digest AS digest, metadata_expires_at, state
+       FROM public.api_keys
+       WHERE public_id = $1`,
+      [publicIdFor(1)],
+    );
+    expect(persisted.rows[0]?.digest).toBeNull();
+    expect(persisted.rows[0]?.state).toBe("expired");
+    expect(persisted.rows[0]?.metadata_expires_at).toBeInstanceOf(Date);
+
+    const listed = await repository.list(
+      clerkUserId,
+      new Date("2026-08-14T14:00:00.000Z"),
+    );
+    expect(listed).toEqual([
+      expect.objectContaining({
+        id: publicIdFor(1),
+        name: "CI",
+        state: "expired",
+      }),
+    ]);
+    expect(JSON.stringify(listed)).not.toMatch(/credentialDigest|digest/u);
+
+    expect(
+      await createKey({
+        id: "50000000-0000-4000-8000-000000000002",
+        name: "CI",
+        publicId: publicIdFor(2),
+        credentialHint: hintFor(publicIdFor(2)),
+        credentialDigest: otherDigest,
+      }),
+    ).toMatchObject({ outcome: "created" });
+    expect(
+      await repository.authenticate({
+        digest,
+        publicId: publicIdFor(1),
+      }),
+    ).toBeNull();
+  });
+
+  test("keeps expired and revoked metadata for 90 days, then purges it", async () => {
+    expect(await createKey()).toMatchObject({ outcome: "created" });
+    expect(
+      await createKey({
+        expiresAt: new Date("2026-08-14T13:00:00.000Z"),
+        id: "50000000-0000-4000-8000-000000000002",
+        name: "Expiring",
+        publicId: publicIdFor(2),
+        credentialHint: hintFor(publicIdFor(2)),
+        credentialDigest: otherDigest,
+      }),
+    ).toMatchObject({ outcome: "created" });
+    expect(
+      await repository.revoke({
+        clerkUserId,
+        publicId: publicIdFor(1),
+        revokedAt: new Date("2026-08-14T12:05:00.000Z"),
+      }),
+    ).toEqual({ revokedAt: new Date("2026-08-14T12:05:00.000Z") });
+    await database.query(
+      `UPDATE public.api_keys
+       SET created_at = transaction_timestamp() - interval '2 hours',
+           reverified_at = transaction_timestamp() - interval '2 hours'
+             - interval '1 minute',
+           expires_at = transaction_timestamp() - interval '1 hour'
+       WHERE public_id = $1`,
+      [publicIdFor(2)],
+    );
+    expect(await repository.expireCredentials(500)).toBe(1);
+
+    const beforeDeadline = await repository.list(
+      clerkUserId,
+      new Date("2026-08-14T14:00:00.000Z"),
+    );
+    expect(beforeDeadline?.map((key) => key.state).sort()).toEqual([
+      "expired",
+      "revoked",
+    ]);
+
+    await database.query(
+      `UPDATE public.api_keys
+       SET metadata_expires_at = statement_timestamp() - interval '1 hour'
+       WHERE public_id = $1`,
+      [publicIdFor(1)],
+    );
+    const afterRevokedWindow = await repository.list(
+      clerkUserId,
+      new Date("2026-11-13T12:05:00.000Z"),
+    );
+    expect(afterRevokedWindow?.map((key) => key.id)).toEqual([publicIdFor(2)]);
+
+    expect(await repository.purgeExpiredMetadata(500)).toBe(1);
+    expect(await repository.purgeExpiredMetadata(500)).toBe(0);
+    const remaining = await database.query<{ public_id: string }>(
+      `SELECT public_id FROM public.api_keys ORDER BY public_id`,
+    );
+    expect(remaining.rows).toEqual([{ public_id: publicIdFor(2) }]);
+  });
+
+  test("retains Activity Log presentation after API Key metadata purge", async () => {
+    expect(await createKey()).toMatchObject({ outcome: "created" });
+    const startedAt = new Date("2026-08-14T12:01:00.000Z");
+    await database.query(
+      `INSERT INTO public.tool_call_logs (
+         id, personal_account_id, mcp_authorization_id, channel, api_key_id,
+         api_key_public_id, api_key_name, tool_name, started_at, completed_at,
+         outcome, result_count, latency_ms, quota_reserved, expires_at
+       ) VALUES (
+         '50000000-0000-4000-8000-000000000090', $1, NULL, 'api', $2, $3,
+         'CI', 'list_connections', $4, $5, 'success', 1, 12, true,
+         $4::timestamptz + interval '90 days'
+       )`,
+      [
+        accountId,
+        "50000000-0000-4000-8000-000000000001",
+        publicIdFor(1),
+        startedAt,
+        new Date("2026-08-14T12:01:00.012Z"),
+      ],
+    );
+    expect(
+      await repository.revoke({
+        clerkUserId,
+        publicId: publicIdFor(1),
+        revokedAt: new Date("2026-08-14T12:05:00.000Z"),
+      }),
+    ).not.toBeNull();
+    await database.query(
+      `UPDATE public.api_keys
+       SET metadata_expires_at = statement_timestamp() - interval '1 hour'
+       WHERE public_id = $1`,
+      [publicIdFor(1)],
+    );
+    expect(await repository.purgeExpiredMetadata(500)).toBe(1);
+
+    const logs = await database.query<{
+      api_key_name: string | null;
+      api_key_public_id: string | null;
+      expires_at: Date;
+    }>(
+      `SELECT api_key_name, api_key_public_id, expires_at
+       FROM public.tool_call_logs
+       WHERE id = '50000000-0000-4000-8000-000000000090'`,
+    );
+    expect(logs.rows).toEqual([
+      {
+        api_key_name: "CI",
+        api_key_public_id: publicIdFor(1),
+        expires_at: new Date("2026-11-12T12:01:00.000Z"),
+      },
+    ]);
+    expect(await repository.list(clerkUserId, createdAt)).toEqual([]);
+  });
+
+  test("keeps retention functions tenant-safe, bounded, and free of caller cutoffs", async () => {
+    await expect(repository.expireCredentials(0)).rejects.toThrow();
+    await expect(repository.expireCredentials(1001)).rejects.toThrow();
+    await expect(repository.purgeExpiredMetadata(0)).rejects.toThrow();
+    await expect(
+      database.query("SELECT public.expire_api_key_credentials($1, $2)", [
+        new Date("2099-01-01T00:00:00.000Z"),
+        500,
+      ]),
+    ).rejects.toThrow();
+    await expect(
+      database.query("SELECT public.purge_expired_api_key_metadata($1, $2)", [
+        new Date("2099-01-01T00:00:00.000Z"),
+        500,
+      ]),
+    ).rejects.toThrow();
+
+    await database.exec("SET ROLE whatsapp_api_runtime");
+    try {
+      await database.query("BEGIN");
+      await database.query(
+        `SELECT set_config('public.personal_account_id', $1, true)`,
+        [accountId],
+      );
+      await expect(
+        database.query("DELETE FROM public.api_keys"),
+      ).rejects.toThrow();
+      await database.query("ROLLBACK");
+    } finally {
+      await database.exec("RESET ROLE");
+    }
+  });
 });

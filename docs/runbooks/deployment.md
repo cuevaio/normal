@@ -925,10 +925,15 @@ At the first hourly boundary after source expiry, confirm
 whose readable content expired. Investigate repeated failures of the hourly
 schedule. The same run calls the bounded
 `public.purge_expired_tool_call_logs` function until fewer than 500 rows
-remain, ensuring no Activity Log can be listed after its 90-day expiry. Verify
-that the restricted API role can call only the integer-limit function and that
-the function uses database time; never grant that role a caller-controlled
-cutoff or broad cross-tenant table deletion. Do not release retained-media quota manually. The worker first marks
+remain, ensuring no Activity Log can be listed after its 90-day expiry. The
+same hour calls `public.expire_api_key_credentials` and
+`public.purge_expired_api_key_metadata` until each returns fewer than 500
+rows. `api_key.retention.completed` reports only the expired-digest and
+purged-metadata counts. Verify that the restricted API role can call only the
+integer-limit functions and that those functions use database time; never
+grant that role a caller-controlled cutoff or broad cross-tenant table
+deletion. Activity Log rows keep their original 90-day expiry and
+denormalized API Key presentation after key metadata is purged. Do not release retained-media quota manually. The worker first marks
 Stored Media unavailable, deletes its R2 object, and only then releases quota.
 The R2 object, Webhook Event row, quarantine rows, and incident-to-source link
 must be gone, while the content-free Webhook Item deduplication identity

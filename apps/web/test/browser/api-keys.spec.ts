@@ -178,3 +178,89 @@ test("creates, lists, and revokes an API Key across the browser-to-API boundary"
   await expect(page.getByTestId("api-key-state")).toHaveText("Revoked");
   await expect(page.getByRole("button", { name: "Revoke CI" })).toBeDisabled();
 });
+
+test("renders expired and revoked API Key dashboard states without recovery", async ({
+  page,
+}) => {
+  await page.route("https://api.example.test/**", async (route) => {
+    const original = route.request();
+    const requestPath = new URL(original.url()).pathname;
+    if (
+      requestPath === "/v1/whatsapp-connections" &&
+      original.method() === "GET"
+    ) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          whatsapp_connections: [
+            {
+              display_name: "Personal WhatsApp",
+              id: connectionId,
+              number_suffix: "3456",
+              state: "connected",
+              state_changed_at: "2026-08-14T12:00:00.000Z",
+            },
+          ],
+        }),
+      });
+      return;
+    }
+    if (requestPath === "/v1/api-keys" && original.method() === "GET") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          api_keys: [
+            {
+              connection_ids: [connectionId],
+              created_at: "2026-08-14T12:00:00.000Z",
+              credential_hint: "normal_apk_123456789012345678901.…wxyz",
+              expires_at: "2026-08-14T13:00:00.000Z",
+              id: "apk_123456789012345678901",
+              last_used_at: "2026-08-14T12:30:00.000Z",
+              name: "Temporary",
+              permissions: ["connections:read"],
+              revoked_at: null,
+              state: "expired",
+            },
+            {
+              connection_ids: [connectionId],
+              created_at: "2026-08-14T11:00:00.000Z",
+              credential_hint: "normal_apk_123456789012345678902.…abcd",
+              expires_at: null,
+              id: "apk_123456789012345678902",
+              last_used_at: null,
+              name: "Retired",
+              permissions: ["messages:send"],
+              revoked_at: "2026-08-14T12:05:00.000Z",
+              state: "revoked",
+            },
+          ],
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      body: JSON.stringify({ error: "not_found" }),
+      contentType: "application/json",
+      status: 404,
+    });
+  });
+  await installClerkBrowser(page, { signedIn: true });
+  await page.goto("/dashboard/api-keys");
+
+  const panel = page.getByRole("region", { name: "API Keys" });
+  await expect(panel.getByText("Temporary")).toBeVisible();
+  await expect(panel.getByText("Retired")).toBeVisible();
+  await expect(panel.getByTestId("api-key-state")).toHaveText([
+    "Expired",
+    "Revoked",
+  ]);
+  await expect(
+    panel.getByRole("button", { name: "Revoke Temporary" }),
+  ).toBeDisabled();
+  await expect(
+    panel.getByRole("button", { name: "Revoke Retired" }),
+  ).toBeDisabled();
+  await expect(panel).not.toContainText("normal_apk_123456789012345678901.");
+  await expect(panel.getByLabel("New API Key credential")).toHaveCount(0);
+});

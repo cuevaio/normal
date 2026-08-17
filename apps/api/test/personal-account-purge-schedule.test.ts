@@ -17,6 +17,8 @@ describe("Personal Account purge schedule", () => {
         makeGroupRepository: () => ({ claim: async () => [] }),
         purgeExpiredMessages: async () => 0,
         purgeExpiredActivityLogs: async () => 0,
+        expireApiKeyCredentials: async () => 0,
+        purgeExpiredApiKeyMetadata: async () => 0,
         purgePersonalAccounts: purged,
         retainWebhookSources: async () => undefined,
         runMessageSearchBackfill: async () => {
@@ -84,6 +86,8 @@ describe("Personal Account purge schedule", () => {
         recoverRecipientExclusions: async () => undefined,
         purgeExpiredMessages: async () => 0,
         purgeExpiredActivityLogs: async () => 0,
+        expireApiKeyCredentials: async () => 0,
+        purgeExpiredApiKeyMetadata: async () => 0,
         retainWebhookSources: async () => undefined,
         runMessageSearchBackfill: async (observedAt) => {
           backfills.push(observedAt);

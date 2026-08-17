@@ -294,6 +294,13 @@ export interface ApiKeyManagementCompletedEvent {
   readonly service: "api";
 }
 
+export interface ApiKeyRetentionCompletedEvent {
+  readonly event: "api_key.retention.completed";
+  readonly expiredCount: number;
+  readonly purgedCount: number;
+  readonly service: "api";
+}
+
 export interface RestOperationCompletedEvent {
   readonly event: "rest.operation.completed";
   readonly operation: "list_connections" | "list_contacts";
@@ -466,6 +473,7 @@ export type SafeTelemetryEvent =
   | GroupDirectoryReconciliationCompletedEvent
   | HttpCompletedEvent
   | ApiKeyManagementCompletedEvent
+  | ApiKeyRetentionCompletedEvent
   | RestOperationCompletedEvent
   | McpAuthorizationManagementCompletedEvent
   | McpToolCallCompletedEvent

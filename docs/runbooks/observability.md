@@ -35,6 +35,9 @@ Confirm the `alert-delivery-canary` arrives in the ticket destination with only 
 - REST `rest.operation.completed` is an allowlisted Worker telemetry event with
   only operation name, outcome, optional result count, and service. Do not add
   credentials, search terms, message content, raw bodies, or tenant identifiers.
+- API Key retention telemetry is limited to `api_key.retention.completed`, the
+  bounded expired and purged counts, and the API service name. Do not add
+  handles, names, hints, digests, credentials, or tenant identifiers.
 - A five-minute Wasender or WhatsApp outage pages as a dependency incident and remains distinct from first-party SLO reporting.
 
 Retain monthly first-party SLO reports and dependency reports as separate aggregate artifacts. Record objective, achieved availability, error-budget consumption, incident counts, and reporting window only; do not attach raw logs or tenant-level samples.

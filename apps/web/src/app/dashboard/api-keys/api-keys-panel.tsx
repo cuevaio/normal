@@ -532,7 +532,7 @@ export function ApiKeysPanel({
                       {key.connection_ids.join(", ")}
                     </p>
                     <Button
-                      disabled={key.state === "revoked"}
+                      disabled={key.state !== "active"}
                       onClick={() => void revoke(key)}
                       type="button"
                       variant="outline"

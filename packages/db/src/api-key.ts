@@ -74,10 +74,12 @@ export interface ApiKeyRepository {
     readonly publicId: string;
   }) => Promise<AuthenticatedApiKey | null>;
   readonly create: (input: CreateApiKeyInput) => Promise<CreateApiKeyResult>;
+  readonly expireCredentials: (limit: number) => Promise<number>;
   readonly list: (
     clerkUserId: string,
     observedAt: Date,
   ) => Promise<ReadonlyArray<ApiKeySummary> | null>;
+  readonly purgeExpiredMetadata: (limit: number) => Promise<number>;
   readonly revoke: (input: {
     readonly clerkUserId: string;
     readonly publicId: string;
@@ -87,7 +89,6 @@ export interface ApiKeyRepository {
 
 const API_KEY_HANDLE = /^apk_[A-Za-z0-9_-]{21}$/u;
 const ACTIVE_KEY_LIMIT = 10;
-const METADATA_RETENTION_DAYS = 90;
 
 const enterClerkContext = async (
   connection: PersonalAccountConnection,
@@ -129,10 +130,27 @@ const presentationState = (
   observedAt: Date,
 ): ApiKeyPresentationState => {
   if (row.state === "revoked") return "revoked";
-  if (row.expiresAt !== null && new Date(row.expiresAt) <= observedAt) {
+  if (
+    row.state === "expired" ||
+    (row.expiresAt !== null && new Date(row.expiresAt) <= observedAt)
+  ) {
     return "expired";
   }
   return "active";
+};
+
+const boundedRetentionCount = async (
+  connection: PersonalAccountConnection,
+  statement: ReturnType<typeof sql>,
+): Promise<number> => {
+  const result = await makeDatabase(connection).execute<{
+    affected: number | string;
+  }>(statement);
+  const count = Number(result[0]?.affected ?? 0);
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new Error("invalid API Key retention result");
+  }
+  return count;
 };
 
 const loadGrantConnections = async (
@@ -323,6 +341,13 @@ export const makeApiKeyRepository = (
         };
       }),
     ),
+  expireCredentials: (limit) =>
+    provider.withConnection((connection) =>
+      boundedRetentionCount(
+        connection,
+        sql`SELECT public.expire_api_key_credentials(${limit}) AS affected`,
+      ),
+    ),
   list: (clerkUserId, observedAt) =>
     provider.withConnection((connection) =>
       withTransaction(connection, async () => {
@@ -411,6 +436,13 @@ export const makeApiKeyRepository = (
         return [...summaries.values()];
       }),
     ),
+  purgeExpiredMetadata: (limit) =>
+    provider.withConnection((connection) =>
+      boundedRetentionCount(
+        connection,
+        sql`SELECT public.purge_expired_api_key_metadata(${limit}) AS affected`,
+      ),
+    ),
   revoke: (input) =>
     provider.withConnection((connection) =>
       withTransaction(connection, async () => {
@@ -423,10 +455,7 @@ export const makeApiKeyRepository = (
           .update(apiKeysInApp)
           .set({
             credentialDigest: null,
-            metadataExpiresAt: new Date(
-              input.revokedAt.getTime() +
-                METADATA_RETENTION_DAYS * 24 * 60 * 60 * 1000,
-            ).toISOString(),
+            metadataExpiresAt: sql`${input.revokedAt.toISOString()}::timestamptz + interval '90 days'`,
             revokedAt: input.revokedAt.toISOString(),
             state: "revoked",
           })

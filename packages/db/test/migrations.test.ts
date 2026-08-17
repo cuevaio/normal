@@ -50,7 +50,7 @@ describe("production migrations", () => {
         (SELECT count(*)::int FROM public.schema_migrations) AS legacy,
         (SELECT count(*)::int FROM public.drizzle_migrations) AS standard
     `);
-    expect(ledgers.rows).toEqual([{ legacy: 40, standard: 11 }]);
+    expect(ledgers.rows).toEqual([{ legacy: 40, standard: 12 }]);
   });
 
   test("clears only retention limitations superseded by a complete Directory snapshot", async () => {
@@ -636,6 +636,8 @@ describe("production migrations", () => {
           'load_connection_setup_webhook_ingress_for_user',
           'load_connection_setup_webhook_ingress_for_worker',
           'purge_expired_tool_call_logs',
+          'expire_api_key_credentials',
+          'purge_expired_api_key_metadata',
           'resolve_personal_account_for_clerk'
         )
       ORDER BY proname
@@ -693,6 +695,11 @@ describe("production migrations", () => {
       },
       {
         config: ["search_path=pg_catalog, pg_temp"],
+        proname: "expire_api_key_credentials",
+        prosecdef: true,
+      },
+      {
+        config: ["search_path=pg_catalog, pg_temp"],
         proname: "load_connection_setup_failure_code_for_user",
         prosecdef: true,
       },
@@ -704,6 +711,11 @@ describe("production migrations", () => {
       {
         config: ["search_path=pg_catalog, pg_temp"],
         proname: "load_connection_setup_webhook_ingress_for_worker",
+        prosecdef: true,
+      },
+      {
+        config: ["search_path=pg_catalog, pg_temp"],
+        proname: "purge_expired_api_key_metadata",
         prosecdef: true,
       },
       {

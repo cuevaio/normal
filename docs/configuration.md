@@ -40,7 +40,7 @@ Secret examples never contain usable key material.
 | `READ_MESSAGE_RECORDS_PER_DAY` | Non-secret approved quota | API MCP resource server | Authoritative per-Personal-Account Stored Message records returned per UTC day. Tombstones count and there is no production default. |
 | `DECRYPTED_MEDIA_BYTES_PER_DAY` | Non-secret approved quota | API MCP resource server | Authoritative per-Personal-Account full plaintext Stored Media bytes reserved per UTC day before decryption. There is no production default. |
 | `MCP_CURSOR_HMAC_SECRET` | Secret | API MCP and REST resource server | Dedicated 32-byte hex HMAC key for authorization-bound pagination cursors. REST Directory cursors use a distinct signing document that binds the API Key grant and operation ID, so MCP and REST cursors are not interchangeable. Generate independently with `openssl rand -hex 32`; never reuse OAuth, content, provider-reference, webhook, reservation, or deletion keys. Rotation invalidates outstanding short-lived cursors. |
-| `API_KEY_HMAC_SECRET` | Secret | API API Key management and REST authentication | Dedicated 32-byte hex HMAC key for User-created API Key credential digests. The Worker computes the digest and passes only the public handle and digest to `bootstrap_api_key`. Generate independently with `openssl rand -hex 32`; never reuse OAuth, cursor, content, provider-reference, webhook, reservation, or deletion keys. A Personal Account may retain at most ten active API Keys. Creating an API Key requires Clerk first-factor verification within five minutes. Rotation invalidates every remaining active API Key. |
+| `API_KEY_HMAC_SECRET` | Secret | API API Key management and REST authentication | Dedicated 32-byte hex HMAC key for User-created API Key credential digests. The Worker computes the digest and passes only the public handle and digest to `bootstrap_api_key`. Generate independently with `openssl rand -hex 32`; never reuse OAuth, cursor, content, provider-reference, webhook, reservation, or deletion keys. A Personal Account may retain at most ten active API Keys. Creating an API Key requires Clerk first-factor verification within five minutes. Optional expiry is enforced with database time on the next request; hourly scheduled work then clears the digest and later purges safe expired or revoked metadata after 90 days. Rotation invalidates every remaining active API Key. |
 | `SEND_FINGERPRINT_HMAC_SECRET` | Secret | API outbound-send workflow | Dedicated 32-byte hex HMAC key for non-reversible exact-request fingerprints retained with idempotency bindings. Generate independently; do not replace it while any 90-day binding remains live. |
 | `SENDS_PER_MINUTE` | Non-secret approved quota | API outbound-send workflow | Per-authorization exact rolling-minute send reservation limit. There is no production default. |
 | `SENDS_PER_DAY` | Non-secret approved quota | API outbound-send workflow | Per-Personal-Account UTC-day send reservation limit. There is no production default. |
@@ -349,10 +349,18 @@ history. Cursors use dedicated random `tcl_` handles for keyset traversal and
 are not internal database IDs.
 
 The hourly Worker schedule removes expired Activity Logs in bounded batches
-through `public.purge_expired_tool_call_logs`. The runtime role can execute
-that fixed-search-path function, but the function derives its expiry cutoff
-from database time and cannot be directed to delete future or unexpired rows.
-The role has no broad cross-tenant table delete grant.
+through `public.purge_expired_tool_call_logs`. The same hour also expires due
+API Key credentials through `public.expire_api_key_credentials` and then
+purges safe expired or revoked API Key metadata through
+`public.purge_expired_api_key_metadata`. Authentication already denies a key
+on the first request after its configured `expires_at` using database time;
+the scheduled functions only clear the digest and later delete User-visible
+metadata after the independent 90-day history window. The runtime role can
+execute those fixed-search-path functions, but each function derives its
+cutoff from database time and cannot be directed to expire or delete future
+or unexpired rows. The role has no broad cross-tenant table delete grant.
+Retention telemetry is limited to `api_key.retention.completed`, the bounded
+expired and purged counts, and the API service name.
 Review telemetry contains only `activity_log.review.completed`, a bounded log
 count, and the API service name; do not add tenant, Client, authorization,
 Connection, send, network, or capability identifiers.

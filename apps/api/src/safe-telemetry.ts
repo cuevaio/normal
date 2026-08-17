@@ -8,6 +8,7 @@ const common = ["event", "service"] as const;
 /** The complete runtime field allowlist for every production telemetry event. */
 export const safeTelemetryFieldsByEvent = {
   "api_key.management.completed": [...common, "operation", "outcome"],
+  "api_key.retention.completed": [...common, "expiredCount", "purgedCount"],
   "rest.operation.completed": [
     ...common,
     "operation",

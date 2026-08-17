@@ -95,11 +95,11 @@ export const apiKeysInApp = publicSchema.table(
     ),
     check(
       "api_keys_state_check",
-      sql`state = ANY (ARRAY['active'::text, 'revoked'::text])`,
+      sql`state = ANY (ARRAY['active'::text, 'expired'::text, 'revoked'::text])`,
     ),
     check(
       "api_keys_state_revocation",
-      sql`((state = 'active'::text) AND (revoked_at IS NULL) AND (credential_digest IS NOT NULL)) OR ((state = 'revoked'::text) AND (revoked_at IS NOT NULL) AND (credential_digest IS NULL))`,
+      sql`((state = 'active'::text) AND (revoked_at IS NULL) AND (credential_digest IS NOT NULL) AND (metadata_expires_at IS NULL)) OR ((state = 'revoked'::text) AND (revoked_at IS NOT NULL) AND (credential_digest IS NULL) AND (metadata_expires_at IS NOT NULL)) OR ((state = 'expired'::text) AND (revoked_at IS NULL) AND (expires_at IS NOT NULL) AND (credential_digest IS NULL) AND (metadata_expires_at IS NOT NULL))`,
     ),
     check(
       "api_keys_reverified_at_check",
