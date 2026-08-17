@@ -4,6 +4,8 @@ import {
   ContactId,
   ConversationId,
   GroupId,
+  MediaId,
+  MessageId,
   SendId,
 } from "./handles";
 import {
@@ -140,6 +142,107 @@ export const RestConversationListContract = makePublicObjectContract({
 export type RestConversationList =
   typeof RestConversationListContract.schema.Type;
 
+export const RestStoredMediaPath = Schema.String.pipe(
+  Schema.pattern(
+    /^\/v1\/connections\/con_[A-Za-z0-9_-]{21}\/messages\/msg_[A-Za-z0-9_-]{21}\/media\/med_[A-Za-z0-9_-]{21}$/,
+  ),
+);
+export type RestStoredMediaPath = typeof RestStoredMediaPath.Type;
+
+export const restStoredMediaPath = (input: {
+  readonly connectionId: ConnectionId | string;
+  readonly mediaId: MediaId | string;
+  readonly messageId: MessageId | string;
+}): RestStoredMediaPath =>
+  `/v1/connections/${input.connectionId}/messages/${input.messageId}/media/${input.mediaId}` as RestStoredMediaPath;
+
+export const RestMessageSender = Schema.Struct({
+  display_name: Schema.NullOr(Schema.String),
+  kind: Schema.Literal("self", "contact", "group_participant"),
+  phone_last_four: Schema.NullOr(
+    Schema.String.pipe(Schema.pattern(/^[0-9]{4}$/)),
+  ),
+});
+export type RestMessageSender = typeof RestMessageSender.Type;
+
+export const RestMessageMediaUnavailableReason = Schema.Literal(
+  "media_pending",
+  "media_rejected",
+  "media_failed",
+  "too_large",
+);
+export type RestMessageMediaUnavailableReason =
+  typeof RestMessageMediaUnavailableReason.Type;
+
+export const RestMessageMedia = Schema.Struct({
+  file_name: Schema.NullOr(Schema.String),
+  media_id: MediaId,
+  mime_type: Schema.NullOr(Schema.String),
+  path: Schema.NullOr(RestStoredMediaPath),
+  size_bytes: Schema.NullOr(
+    Schema.Number.pipe(Schema.int(), Schema.nonNegative()),
+  ),
+  state: Schema.Literal("pending", "ready", "rejected", "failed"),
+  type: Schema.Literal("image", "audio", "video", "document", "sticker"),
+  unavailable_reason: Schema.NullOr(RestMessageMediaUnavailableReason),
+});
+export type RestMessageMedia = typeof RestMessageMedia.Type;
+
+export const RestMessage = Schema.Struct({
+  content_type: Schema.Literal(
+    "text",
+    "image",
+    "audio",
+    "video",
+    "document",
+    "sticker",
+    "unknown",
+  ),
+  deleted: Schema.Boolean,
+  direction: Schema.Literal("inbound", "outbound"),
+  edited_at: Schema.NullOr(UtcTimestamp),
+  media: Schema.NullOr(RestMessageMedia),
+  message_id: MessageId,
+  sender: RestMessageSender,
+  sent_at: UtcTimestamp,
+  text: Schema.NullOr(Schema.String),
+});
+export type RestMessage = typeof RestMessage.Type;
+
+export const RestIngestionGap = Schema.Struct({
+  cause: Schema.Literal(
+    "connection_unavailable",
+    "webhook_configuration",
+    "ingress_failure",
+    "processing_failure",
+    "restore_loss",
+  ),
+  ends_at: Schema.NullOr(UtcTimestamp),
+  starts_at: UtcTimestamp,
+});
+export type RestIngestionGap = typeof RestIngestionGap.Type;
+
+export const RestMessageListMeta = Schema.Struct({
+  conversation_id: ConversationId,
+  gaps: Schema.Array(RestIngestionGap),
+  history_start_reason: Schema.Literal(
+    "connection_started",
+    "retention_policy",
+  ),
+  history_starts_at: UtcTimestamp,
+  kind: RestConversationKind,
+  recipient_id: Schema.Union(ContactId, GroupId),
+  size_limited: Schema.Boolean,
+});
+export type RestMessageListMeta = typeof RestMessageListMeta.Type;
+
+export const RestMessageListContract = makePublicObjectContract({
+  data: Schema.Array(RestMessage).pipe(Schema.maxItems(50)),
+  meta: RestMessageListMeta,
+  pagination: RestPagination,
+});
+export type RestMessageList = typeof RestMessageListContract.schema.Type;
+
 export const ProblemStatus = Schema.Literal(400, 401, 403, 404, 409, 429, 503);
 
 export const ProblemCode = Schema.Literal(
@@ -207,6 +310,11 @@ export const decodeRestGroupList = Schema.decodeUnknownSync(
 
 export const decodeRestConversationList = Schema.decodeUnknownSync(
   RestConversationListContract.schema,
+  { onExcessProperty: "error" },
+);
+
+export const decodeRestMessageList = Schema.decodeUnknownSync(
+  RestMessageListContract.schema,
   { onExcessProperty: "error" },
 );
 

@@ -564,6 +564,28 @@ export interface McpToolRepository {
     readonly permissions: ReadonlyArray<string>;
     readonly personalAccountId: string;
   }) => Promise<McpToolChatPage | null>;
+  readonly readApiKeyMessages: (input: {
+    readonly apiKeyGrantId: string;
+    readonly connectionPublicId: string;
+    readonly conversationPublicId: string;
+    readonly cursorPublicId: string | null;
+    readonly cursorSentAt: string | null;
+    readonly limit: number;
+    readonly observedAt: Date;
+    readonly permissions: ReadonlyArray<string>;
+    readonly personalAccountId: string;
+  }) => Promise<McpToolMessagePage | null>;
+  readonly completeApiKeyMessageRecordRead: (input: {
+    readonly apiKeyGrantId: string;
+    readonly auditLogId: string;
+    readonly dailyRecordLimit: number;
+    readonly observedAt: Date;
+    readonly personalAccountId: string;
+    readonly resultCount: number;
+  }) => Promise<
+    | { readonly outcome: "success" }
+    | { readonly outcome: "record_quota_exhausted"; readonly resetsAt: Date }
+  >;
   readonly rejectProtectedOperation: (
     input: {
       readonly auditLogId: string;
@@ -823,6 +845,294 @@ const loadGroupProjectionMaterial = async (
     throw new Error("invalid MCP group projection freshness");
   }
   return { ...parsed, partial: row.partial, stale: row.stale };
+};
+
+const mapStoredMessageRow = (
+  message: Record<string, unknown>,
+): McpToolMessageRecord => {
+  const directoryCiphertext = (
+    prefix: "sender_display" | "sender_phone",
+  ): McpToolDirectoryCiphertext | null => {
+    const ciphertext = bytes(message[`${prefix}_ciphertext`]);
+    const nonce = bytes(message[`${prefix}_nonce`]);
+    const version = positiveInteger(message[`${prefix}_version`]);
+    const keyVersion = positiveInteger(message[`${prefix}_key_version`]);
+    if (
+      ciphertext === null &&
+      nonce === null &&
+      version === null &&
+      keyVersion === null
+    )
+      return null;
+    if (
+      ciphertext === null ||
+      nonce?.byteLength !== 12 ||
+      version !== 1 ||
+      keyVersion === null
+    )
+      throw new Error("invalid message sender ciphertext");
+    return {
+      ciphertext: base64(ciphertext),
+      keyVersion,
+      nonce: base64(nonce),
+      version: 1,
+    };
+  };
+  const sentAt = timestampString(message.sent_at);
+  const ciphertext = bytes(message.content_ciphertext);
+  const nonce = bytes(message.content_nonce);
+  const keyVersion = positiveInteger(message.content_key_version);
+  const editedAt =
+    message.edited_at === null ? null : timestampString(message.edited_at);
+  const deleted = timestamp(message.deleted_at) !== null;
+  const mediaState = message.media_state;
+  const mediaCiphertext = bytes(message.metadata_ciphertext);
+  const mediaNonce = bytes(message.metadata_nonce);
+  const mediaKeyVersion = positiveInteger(message.metadata_key_version);
+  const senderRecordId = message.sender_record_id;
+  const sender =
+    message.direction === "inbound" &&
+    message.kind === "direct" &&
+    typeof senderRecordId === "string"
+      ? {
+          displayName: directoryCiphertext("sender_display"),
+          phone: directoryCiphertext("sender_phone"),
+          recordId: senderRecordId,
+        }
+      : null;
+  const media =
+    mediaState === null || mediaState === undefined
+      ? null
+      : typeof message.media_id === "string" &&
+          typeof message.media_public_id === "string" &&
+          (mediaState === "pending" ||
+            mediaState === "ready" ||
+            mediaState === "rejected" ||
+            mediaState === "failed")
+        ? {
+            id: message.media_id,
+            publicId: message.media_public_id,
+            state: mediaState as "failed" | "pending" | "ready" | "rejected",
+            plaintextSizeBytes:
+              message.plaintext_size_bytes === null
+                ? null
+                : Number(message.plaintext_size_bytes),
+            metadata:
+              mediaState === "ready" &&
+              message.metadata_ciphertext_version === 1 &&
+              mediaCiphertext !== null &&
+              mediaNonce !== null &&
+              mediaKeyVersion !== null
+                ? {
+                    ciphertext: base64(mediaCiphertext),
+                    keyVersion: mediaKeyVersion,
+                    nonce: base64(mediaNonce),
+                    version: 1 as const,
+                  }
+                : null,
+          }
+        : (() => {
+            throw new Error("invalid Stored Media");
+          })();
+  if (
+    typeof message.public_id !== "string" ||
+    typeof message.message_identity !== "string" ||
+    sentAt === null ||
+    (message.direction !== "inbound" && message.direction !== "outbound") ||
+    (message.kind !== "direct" && message.kind !== "group") ||
+    (!deleted &&
+      (typeof message.content_type !== "string" ||
+        ![
+          "audio",
+          "document",
+          "image",
+          "sticker",
+          "text",
+          "unknown",
+          "video",
+        ].includes(message.content_type))) ||
+    (!deleted && message.content_ciphertext_version !== 1) ||
+    (!deleted &&
+      (ciphertext === null || nonce === null || keyVersion === null)) ||
+    (message.edited_at !== null && editedAt === null)
+  )
+    throw new Error("invalid Stored Message");
+  return {
+    publicId: message.public_id,
+    messageIdentity: message.message_identity,
+    sentAt,
+    direction: message.direction,
+    conversationKind: message.kind,
+    contentType: deleted
+      ? "unknown"
+      : (message.content_type as McpToolMessageRecord["contentType"]),
+    content: deleted
+      ? null
+      : {
+          ciphertext: base64(ciphertext as Uint8Array),
+          keyVersion: keyVersion as number,
+          nonce: base64(nonce as Uint8Array),
+          version: 1,
+        },
+    editedAt,
+    deleted,
+    sender,
+    media,
+  };
+};
+
+const selectStoredMessageRows = (
+  input: {
+    readonly conversationPublicId: string;
+    readonly cursorPublicId: string | null;
+    readonly cursorSentAt: string | null;
+    readonly historyStart: Date;
+    readonly limit: number;
+  },
+  accountId: string,
+  connectionId: string,
+) => sql`
+           SELECT messages.public_id, messages.message_identity, messages.sent_at, messages.direction,
+             messages.content_type, messages.content_ciphertext_version, messages.content_key_version,
+             messages.content_nonce, messages.content_ciphertext, messages.edited_at,
+             messages.deleted_at, conversations.kind, media.id AS media_id, media.public_id AS media_public_id,
+             media.state AS media_state, media.plaintext_size_bytes,
+             media.metadata_ciphertext_version,media.metadata_key_version,
+             media.metadata_nonce,media.metadata_ciphertext,
+             sender.provider_identity_index AS sender_record_id,
+             sender.display_name_ciphertext_version AS sender_display_version,
+             sender.display_name_key_version AS sender_display_key_version,
+             sender.display_name_nonce AS sender_display_nonce,
+             sender.display_name_ciphertext AS sender_display_ciphertext,
+             sender.phone_ciphertext_version AS sender_phone_version,
+             sender.phone_key_version AS sender_phone_key_version,
+             sender.phone_nonce AS sender_phone_nonce,
+             sender.phone_ciphertext AS sender_phone_ciphertext
+           FROM public.stored_messages messages
+           JOIN public.whatsapp_conversations conversations ON conversations.personal_account_id=messages.personal_account_id AND conversations.whatsapp_connection_id=messages.whatsapp_connection_id AND conversations.id=messages.conversation_id
+           LEFT JOIN public.stored_media media ON media.personal_account_id=messages.personal_account_id
+             AND media.whatsapp_connection_id=messages.whatsapp_connection_id AND media.stored_message_id=messages.id
+           LEFT JOIN public.directory_contacts sender ON messages.direction='inbound'
+             AND conversations.kind='direct'
+             AND sender.personal_account_id=messages.personal_account_id
+             AND sender.whatsapp_connection_id=messages.whatsapp_connection_id
+             AND sender.provider_identity_index=conversations.recipient_locator
+           WHERE messages.personal_account_id=${accountId}
+             AND messages.whatsapp_connection_id=${connectionId}
+             AND messages.content_expired_at IS NULL
+             AND conversations.public_id=${input.conversationPublicId}
+             AND messages.sent_at >= ${input.historyStart}
+             AND (${input.cursorSentAt}::timestamptz IS NULL
+               OR messages.sent_at < ${input.cursorSentAt}
+               OR (messages.sent_at=${input.cursorSentAt}
+                 AND messages.public_id < ${input.cursorPublicId}))
+           ORDER BY messages.sent_at DESC, messages.public_id DESC
+            LIMIT ${input.limit + 1}`;
+
+const takeMessageRows = (
+  rows: ReadonlyArray<Record<string, unknown>>,
+  limit: number,
+  ciphertextBudget: number | null,
+): {
+  readonly hasOlder: boolean;
+  readonly messages: ReadonlyArray<McpToolMessageRecord>;
+  readonly sizeLimited: boolean;
+} => {
+  const candidateRows = rows.slice(0, limit);
+  const returnedRows: Array<Record<string, unknown>> = [];
+  let encryptedBytes = 0;
+  for (const candidate of candidateRows) {
+    const ciphertext = bytes(candidate.content_ciphertext);
+    if (ciphertext === null && candidate.deleted_at === null)
+      throw new Error("invalid Stored Message ciphertext");
+    if (
+      ciphertextBudget !== null &&
+      returnedRows.length > 0 &&
+      encryptedBytes + (ciphertext?.byteLength ?? 0) > ciphertextBudget
+    )
+      break;
+    returnedRows.push(candidate);
+    encryptedBytes += ciphertext?.byteLength ?? 0;
+  }
+  return {
+    hasOlder:
+      rows.length > candidateRows.length ||
+      returnedRows.length < candidateRows.length,
+    messages: returnedRows.map(mapStoredMessageRow),
+    sizeLimited:
+      ciphertextBudget !== null &&
+      (returnedRows.length < candidateRows.length ||
+        encryptedBytes > ciphertextBudget),
+  };
+};
+
+const loadIntersectingGaps = async (
+  db: ReturnType<typeof makeDatabase>,
+  input: {
+    readonly accountId: string;
+    readonly connectionId: string;
+    readonly historyStart: Date;
+    readonly newest: string;
+  },
+): Promise<McpToolMessagePage["gaps"]> => {
+  const gapsResult = await db
+    .select({
+      starts_at: ingestionGapsInApp.startsAt,
+      ends_at: ingestionGapsInApp.endsAt,
+      cause: ingestionGapsInApp.cause,
+    })
+    .from(ingestionGapsInApp)
+    .where(
+      and(
+        eq(ingestionGapsInApp.personalAccountId, input.accountId),
+        eq(ingestionGapsInApp.whatsappConnectionId, input.connectionId),
+        lte(ingestionGapsInApp.startsAt, input.newest),
+        or(
+          isNull(ingestionGapsInApp.endsAt),
+          gte(ingestionGapsInApp.endsAt, input.historyStart.toISOString()),
+        ),
+      ),
+    )
+    .orderBy(asc(ingestionGapsInApp.startsAt), asc(ingestionGapsInApp.id));
+  return gapsResult.map((gap) => {
+    const startsAt = timestampString(gap.starts_at);
+    const endsAt = gap.ends_at === null ? null : timestampString(gap.ends_at);
+    if (
+      startsAt === null ||
+      (gap.ends_at !== null && endsAt === null) ||
+      typeof gap.cause !== "string"
+    )
+      throw new Error("invalid Ingestion Gap");
+    return {
+      startsAt,
+      endsAt,
+      cause: gap.cause as McpToolMessagePage["gaps"][number]["cause"],
+    };
+  });
+};
+
+const historyWindow = (
+  connectionStarted: Date,
+  retentionDays: number | null,
+  observedAt: Date,
+): {
+  readonly historyStart: Date;
+  readonly historyStartReason: McpToolMessagePage["historyStartReason"];
+} => {
+  const retentionStart =
+    retentionDays === null
+      ? connectionStarted
+      : new Date(observedAt.valueOf() - retentionDays * 86_400_000);
+  const historyStart =
+    retentionStart > connectionStarted ? retentionStart : connectionStarted;
+  return {
+    historyStart,
+    historyStartReason:
+      retentionDays !== null &&
+      historyStart.valueOf() === retentionStart.valueOf()
+        ? "retention_policy"
+        : "connection_started",
+  };
 };
 
 const encryptedGroupRecords = (
@@ -2388,250 +2698,32 @@ export const makeMcpToolRepository = (
           !/^(ctc|grp)_[A-Za-z0-9_-]{21}$/u.test(recipientPublicId)
         )
           return null;
-        const retentionStart =
-          retentionDays === null
-            ? connectionStarted
-            : new Date(input.observedAt.valueOf() - retentionDays * 86_400_000);
-        const historyStart =
-          retentionStart > connectionStarted
-            ? retentionStart
-            : connectionStarted;
-        const rows = await db.execute<Record<string, unknown>>(sql`
-           SELECT messages.public_id, messages.message_identity, messages.sent_at, messages.direction,
-             messages.content_type, messages.content_ciphertext_version, messages.content_key_version,
-             messages.content_nonce, messages.content_ciphertext, messages.edited_at,
-             messages.deleted_at, conversations.kind, media.id AS media_id, media.public_id AS media_public_id,
-             media.state AS media_state, media.plaintext_size_bytes,
-             media.metadata_ciphertext_version,media.metadata_key_version,
-             media.metadata_nonce,media.metadata_ciphertext,
-             sender.provider_identity_index AS sender_record_id,
-             sender.display_name_ciphertext_version AS sender_display_version,
-             sender.display_name_key_version AS sender_display_key_version,
-             sender.display_name_nonce AS sender_display_nonce,
-             sender.display_name_ciphertext AS sender_display_ciphertext,
-             sender.phone_ciphertext_version AS sender_phone_version,
-             sender.phone_key_version AS sender_phone_key_version,
-             sender.phone_nonce AS sender_phone_nonce,
-             sender.phone_ciphertext AS sender_phone_ciphertext
-           FROM public.stored_messages messages
-           JOIN public.whatsapp_conversations conversations ON conversations.personal_account_id=messages.personal_account_id AND conversations.whatsapp_connection_id=messages.whatsapp_connection_id AND conversations.id=messages.conversation_id
-           LEFT JOIN public.stored_media media ON media.personal_account_id=messages.personal_account_id
-             AND media.whatsapp_connection_id=messages.whatsapp_connection_id AND media.stored_message_id=messages.id
-           LEFT JOIN public.directory_contacts sender ON messages.direction='inbound'
-             AND conversations.kind='direct'
-             AND sender.personal_account_id=messages.personal_account_id
-             AND sender.whatsapp_connection_id=messages.whatsapp_connection_id
-             AND sender.provider_identity_index=conversations.recipient_locator
-           WHERE messages.personal_account_id=${material.accountKey.personalAccountId}
-             AND messages.whatsapp_connection_id=${material.connectionKey.connectionId}
-             AND messages.content_expired_at IS NULL
-             AND conversations.public_id=${input.conversationPublicId}
-             AND messages.sent_at >= ${historyStart}
-             AND (${input.cursorSentAt}::timestamptz IS NULL
-               OR messages.sent_at < ${input.cursorSentAt}
-               OR (messages.sent_at=${input.cursorSentAt}
-                 AND messages.public_id < ${input.cursorPublicId}))
-           ORDER BY messages.sent_at DESC, messages.public_id DESC
-            LIMIT ${input.limit + 1}`);
-        const candidateRows = rows.slice(0, input.limit);
-        const returnedRows: Array<Record<string, unknown>> = [];
-        let encryptedBytes = 0;
-        for (const candidate of candidateRows) {
-          const ciphertext = bytes(candidate.content_ciphertext);
-          if (ciphertext === null && candidate.deleted_at === null)
-            throw new Error("invalid Stored Message ciphertext");
-          if (
-            returnedRows.length > 0 &&
-            encryptedBytes + (ciphertext?.byteLength ?? 0) > 24_000
-          )
-            break;
-          returnedRows.push(candidate);
-          encryptedBytes += ciphertext?.byteLength ?? 0;
-        }
-        const messages = returnedRows.map((message): McpToolMessageRecord => {
-          const directoryCiphertext = (
-            prefix: "sender_display" | "sender_phone",
-          ): McpToolDirectoryCiphertext | null => {
-            const ciphertext = bytes(message[`${prefix}_ciphertext`]);
-            const nonce = bytes(message[`${prefix}_nonce`]);
-            const version = positiveInteger(message[`${prefix}_version`]);
-            const keyVersion = positiveInteger(
-              message[`${prefix}_key_version`],
-            );
-            if (
-              ciphertext === null &&
-              nonce === null &&
-              version === null &&
-              keyVersion === null
-            )
-              return null;
-            if (
-              ciphertext === null ||
-              nonce?.byteLength !== 12 ||
-              version !== 1 ||
-              keyVersion === null
-            )
-              throw new Error("invalid message sender ciphertext");
-            return {
-              ciphertext: base64(ciphertext),
-              keyVersion,
-              nonce: base64(nonce),
-              version: 1,
-            };
-          };
-          const sentAt = timestampString(message.sent_at);
-          const ciphertext = bytes(message.content_ciphertext);
-          const nonce = bytes(message.content_nonce);
-          const keyVersion = positiveInteger(message.content_key_version);
-          const editedAt =
-            message.edited_at === null
-              ? null
-              : timestampString(message.edited_at);
-          const deleted = timestamp(message.deleted_at) !== null;
-          const mediaState = message.media_state;
-          const mediaCiphertext = bytes(message.metadata_ciphertext);
-          const mediaNonce = bytes(message.metadata_nonce);
-          const mediaKeyVersion = positiveInteger(message.metadata_key_version);
-          const senderRecordId = message.sender_record_id;
-          const sender =
-            message.direction === "inbound" &&
-            message.kind === "direct" &&
-            typeof senderRecordId === "string"
-              ? {
-                  displayName: directoryCiphertext("sender_display"),
-                  phone: directoryCiphertext("sender_phone"),
-                  recordId: senderRecordId,
-                }
-              : null;
-          const media =
-            mediaState === null || mediaState === undefined
-              ? null
-              : typeof message.media_id === "string" &&
-                  typeof message.media_public_id === "string" &&
-                  (mediaState === "pending" ||
-                    mediaState === "ready" ||
-                    mediaState === "rejected" ||
-                    mediaState === "failed")
-                ? {
-                    id: message.media_id,
-                    publicId: message.media_public_id,
-                    state: mediaState as
-                      | "failed"
-                      | "pending"
-                      | "ready"
-                      | "rejected",
-                    plaintextSizeBytes:
-                      message.plaintext_size_bytes === null
-                        ? null
-                        : Number(message.plaintext_size_bytes),
-                    metadata:
-                      mediaState === "ready" &&
-                      message.metadata_ciphertext_version === 1 &&
-                      mediaCiphertext !== null &&
-                      mediaNonce !== null &&
-                      mediaKeyVersion !== null
-                        ? {
-                            ciphertext: base64(mediaCiphertext),
-                            keyVersion: mediaKeyVersion,
-                            nonce: base64(mediaNonce),
-                            version: 1 as const,
-                          }
-                        : null,
-                  }
-                : (() => {
-                    throw new Error("invalid Stored Media");
-                  })();
-          if (
-            typeof message.public_id !== "string" ||
-            typeof message.message_identity !== "string" ||
-            sentAt === null ||
-            (message.direction !== "inbound" &&
-              message.direction !== "outbound") ||
-            (message.kind !== "direct" && message.kind !== "group") ||
-            (!deleted &&
-              (typeof message.content_type !== "string" ||
-                ![
-                  "audio",
-                  "document",
-                  "image",
-                  "sticker",
-                  "text",
-                  "unknown",
-                  "video",
-                ].includes(message.content_type))) ||
-            (!deleted && message.content_ciphertext_version !== 1) ||
-            (!deleted &&
-              (ciphertext === null || nonce === null || keyVersion === null)) ||
-            (message.edited_at !== null && editedAt === null)
-          )
-            throw new Error("invalid Stored Message");
-          return {
-            publicId: message.public_id,
-            messageIdentity: message.message_identity,
-            sentAt,
-            direction: message.direction,
-            conversationKind: message.kind,
-            contentType: deleted
-              ? "unknown"
-              : (message.content_type as McpToolMessageRecord["contentType"]),
-            content: deleted
-              ? null
-              : {
-                  ciphertext: base64(ciphertext as Uint8Array),
-                  keyVersion: keyVersion as number,
-                  nonce: base64(nonce as Uint8Array),
-                  version: 1,
-                },
-            editedAt,
-            deleted,
-            sender,
-            media,
-          };
-        });
-        const newest = messages[0]?.sentAt ?? input.observedAt.toISOString();
-        const gapsResult = await db
-          .select({
-            starts_at: ingestionGapsInApp.startsAt,
-            ends_at: ingestionGapsInApp.endsAt,
-            cause: ingestionGapsInApp.cause,
-          })
-          .from(ingestionGapsInApp)
-          .where(
-            and(
-              eq(
-                ingestionGapsInApp.personalAccountId,
-                material.accountKey.personalAccountId,
-              ),
-              eq(
-                ingestionGapsInApp.whatsappConnectionId,
-                material.connectionKey.connectionId,
-              ),
-              lte(ingestionGapsInApp.startsAt, newest),
-              or(
-                isNull(ingestionGapsInApp.endsAt),
-                gte(ingestionGapsInApp.endsAt, historyStart.toISOString()),
-              ),
-            ),
-          )
-          .orderBy(
-            asc(ingestionGapsInApp.startsAt),
-            asc(ingestionGapsInApp.id),
-          );
-        const gaps = gapsResult.map((gap) => {
-          const startsAt = timestampString(gap.starts_at);
-          const endsAt =
-            gap.ends_at === null ? null : timestampString(gap.ends_at);
-          if (
-            startsAt === null ||
-            (gap.ends_at !== null && endsAt === null) ||
-            typeof gap.cause !== "string"
-          )
-            throw new Error("invalid Ingestion Gap");
-          return {
-            startsAt,
-            endsAt,
-            cause: gap.cause as McpToolMessagePage["gaps"][number]["cause"],
-          };
+        const { historyStart, historyStartReason } = historyWindow(
+          connectionStarted,
+          retentionDays,
+          input.observedAt,
+        );
+        const rows = await db.execute<Record<string, unknown>>(
+          selectStoredMessageRows(
+            {
+              conversationPublicId: input.conversationPublicId,
+              cursorPublicId: input.cursorPublicId,
+              cursorSentAt: input.cursorSentAt,
+              historyStart,
+              limit: input.limit,
+            },
+            material.accountKey.personalAccountId,
+            material.connectionKey.connectionId,
+          ),
+        );
+        const pageRows = takeMessageRows(rows, input.limit, 24_000);
+        const newest =
+          pageRows.messages[0]?.sentAt ?? input.observedAt.toISOString();
+        const gaps = await loadIntersectingGaps(db, {
+          accountId: material.accountKey.personalAccountId,
+          connectionId: material.connectionKey.connectionId,
+          historyStart,
+          newest,
         });
         return {
           outcome: "success" as const,
@@ -2642,19 +2734,11 @@ export const makeMcpToolRepository = (
               publicId: conversationPublicId,
               recipientId: recipientPublicId,
             },
-            messages,
-            hasOlder:
-              rows.length > candidateRows.length ||
-              returnedRows.length < candidateRows.length,
-            sizeLimited:
-              returnedRows.length < candidateRows.length ||
-              encryptedBytes > 24_000,
+            messages: pageRows.messages,
+            hasOlder: pageRows.hasOlder,
+            sizeLimited: pageRows.sizeLimited,
             historyStartsAt: historyStart.toISOString(),
-            historyStartReason:
-              retentionDays !== null &&
-              historyStart.valueOf() === retentionStart.valueOf()
-                ? ("retention_policy" as const)
-                : ("connection_started" as const),
+            historyStartReason,
             gaps,
           },
         };
@@ -4098,6 +4182,297 @@ export const makeMcpToolRepository = (
             };
           }),
         };
+      }),
+    ),
+  readApiKeyMessages: (input) =>
+    provider.withConnection((connection) =>
+      withTransaction(connection, async () => {
+        const db = makeDatabase(connection);
+        if (
+          !/^con_[A-Za-z0-9_-]{21}$/u.test(input.connectionPublicId) ||
+          !/^cvs_[A-Za-z0-9_-]{21}$/u.test(input.conversationPublicId) ||
+          !Number.isSafeInteger(input.limit) ||
+          input.limit < 1 ||
+          input.limit > 51 ||
+          (input.cursorSentAt === null) !== (input.cursorPublicId === null) ||
+          (input.cursorPublicId !== null &&
+            !/^msg_[A-Za-z0-9_-]{21}$/u.test(input.cursorPublicId))
+        ) {
+          throw new Error("invalid API message query");
+        }
+        if (
+          (await enterAccountContext(connection, input.personalAccountId)) ===
+            null ||
+          !input.permissions.includes("messages:read")
+        ) {
+          return null;
+        }
+        const materialResult = await db.execute<Record<string, unknown>>(sql`
+          SELECT
+            connections.id AS connection_id,
+            connections.created_at AS connection_created_at,
+            connections.message_retention_days,
+            connections.personal_account_id,
+            conversations.public_id AS conversation_public_id,
+            conversations.kind AS conversation_kind,
+            coalesce(
+              contacts.public_id,
+              groups.public_id,
+              conversations.recipient_public_id
+            ) AS recipient_public_id,
+            account_keys.key_version AS account_key_version,
+            account_keys.kms_key_id AS account_kms_key_id,
+            account_keys.ciphertext AS account_key_ciphertext,
+            connection_keys.account_key_version AS connection_key_account_version,
+            connection_keys.key_version AS connection_key_version,
+            connection_keys.nonce AS connection_key_nonce,
+            connection_keys.ciphertext AS connection_key_ciphertext
+          FROM public.api_keys AS grants
+          JOIN public.api_key_connections AS selected
+            ON selected.personal_account_id = grants.personal_account_id
+           AND selected.api_key_id = grants.id
+          JOIN public.whatsapp_connections AS connections
+            ON connections.personal_account_id = selected.personal_account_id
+           AND connections.id = selected.whatsapp_connection_id
+          JOIN public.whatsapp_conversations AS conversations
+            ON conversations.personal_account_id = connections.personal_account_id
+           AND conversations.whatsapp_connection_id = connections.id
+          JOIN public.whatsapp_connection_key_envelopes AS connection_keys
+            ON connection_keys.personal_account_id =
+                connections.personal_account_id
+           AND connection_keys.whatsapp_connection_id = connections.id
+          JOIN public.personal_account_key_envelopes AS account_keys
+            ON account_keys.personal_account_id =
+                connections.personal_account_id
+           AND account_keys.key_version = connection_keys.account_key_version
+          LEFT JOIN public.directory_contacts AS contacts
+            ON conversations.kind = 'direct'
+           AND contacts.personal_account_id = conversations.personal_account_id
+           AND contacts.whatsapp_connection_id =
+                conversations.whatsapp_connection_id
+           AND contacts.provider_identity_index =
+                conversations.recipient_locator
+          LEFT JOIN public.whatsapp_groups AS groups
+            ON conversations.kind = 'group'
+           AND groups.personal_account_id = conversations.personal_account_id
+           AND groups.whatsapp_connection_id =
+                conversations.whatsapp_connection_id
+           AND groups.provider_locator = conversations.recipient_locator
+          WHERE grants.id = ${input.apiKeyGrantId}
+            AND grants.personal_account_id = ${input.personalAccountId}
+            AND grants.state = 'active'
+            AND (grants.expires_at IS NULL
+              OR grants.expires_at > ${input.observedAt})
+            AND 'messages:read' = ANY(grants.permissions)
+            AND connections.public_id = ${input.connectionPublicId}
+            AND conversations.public_id = ${input.conversationPublicId}
+            AND connections.state <> 'deleting'
+            AND NOT public.whatsapp_recipient_excluded(
+              conversations.personal_account_id,
+              conversations.whatsapp_connection_id,
+              CASE WHEN conversations.kind = 'group' THEN 'group' ELSE 'contact' END,
+              conversations.recipient_locator
+            )
+            AND account_keys.unavailable_at IS NULL
+            AND account_keys.ciphertext IS NOT NULL
+            AND connection_keys.unavailable_at IS NULL
+            AND connection_keys.nonce IS NOT NULL
+            AND connection_keys.ciphertext IS NOT NULL
+        `);
+        const row = materialResult[0];
+        const accountId =
+          typeof row?.personal_account_id === "string"
+            ? row.personal_account_id
+            : null;
+        const connectionId =
+          typeof row?.connection_id === "string" ? row.connection_id : null;
+        const accountCiphertext = bytes(row?.account_key_ciphertext);
+        const accountKeyVersion = positiveInteger(row?.account_key_version);
+        const connectionAccountKeyVersion = positiveInteger(
+          row?.connection_key_account_version,
+        );
+        const connectionCiphertext = bytes(row?.connection_key_ciphertext);
+        const connectionKeyVersion = positiveInteger(
+          row?.connection_key_version,
+        );
+        const connectionNonce = bytes(row?.connection_key_nonce);
+        const material =
+          accountId === null ||
+          connectionId === null ||
+          typeof row?.account_kms_key_id !== "string" ||
+          accountCiphertext === null ||
+          accountKeyVersion === null ||
+          connectionAccountKeyVersion === null ||
+          connectionCiphertext === null ||
+          connectionKeyVersion === null ||
+          connectionNonce?.byteLength !== 12
+            ? null
+            : {
+                accountKey: {
+                  ciphertext: base64(accountCiphertext),
+                  keyVersion: accountKeyVersion,
+                  kmsKeyId: row.account_kms_key_id,
+                  personalAccountId: accountId,
+                  version: 1 as const,
+                },
+                connectionKey: {
+                  accountKeyVersion: connectionAccountKeyVersion,
+                  ciphertext: base64(connectionCiphertext),
+                  connectionId,
+                  keyVersion: connectionKeyVersion,
+                  nonce: base64(connectionNonce),
+                  personalAccountId: accountId,
+                  version: 1 as const,
+                },
+              };
+        const connectionStarted = timestamp(row?.connection_created_at);
+        const retentionDays =
+          row?.message_retention_days === null
+            ? null
+            : positiveInteger(row?.message_retention_days);
+        const conversationPublicId = row?.conversation_public_id;
+        const conversationKind = row?.conversation_kind;
+        const recipientPublicId = row?.recipient_public_id;
+        if (
+          material === null ||
+          connectionStarted === null ||
+          typeof conversationPublicId !== "string" ||
+          !/^cvs_[A-Za-z0-9_-]{21}$/u.test(conversationPublicId) ||
+          (conversationKind !== "direct" && conversationKind !== "group") ||
+          typeof recipientPublicId !== "string" ||
+          !/^(ctc|grp)_[A-Za-z0-9_-]{21}$/u.test(recipientPublicId)
+        ) {
+          return null;
+        }
+        const { historyStart, historyStartReason } = historyWindow(
+          connectionStarted,
+          retentionDays,
+          input.observedAt,
+        );
+        const rows = await db.execute<Record<string, unknown>>(
+          selectStoredMessageRows(
+            {
+              conversationPublicId: input.conversationPublicId,
+              cursorPublicId: input.cursorPublicId,
+              cursorSentAt: input.cursorSentAt,
+              historyStart,
+              limit: input.limit,
+            },
+            material.accountKey.personalAccountId,
+            material.connectionKey.connectionId,
+          ),
+        );
+        const pageRows = takeMessageRows(rows, input.limit, null);
+        const newest =
+          pageRows.messages[0]?.sentAt ?? input.observedAt.toISOString();
+        const gaps = await loadIntersectingGaps(db, {
+          accountId: material.accountKey.personalAccountId,
+          connectionId: material.connectionKey.connectionId,
+          historyStart,
+          newest,
+        });
+        return {
+          ...material,
+          conversation: {
+            kind: conversationKind,
+            publicId: conversationPublicId,
+            recipientId: recipientPublicId,
+          },
+          messages: pageRows.messages,
+          hasOlder: pageRows.hasOlder,
+          sizeLimited: pageRows.sizeLimited,
+          historyStartsAt: historyStart.toISOString(),
+          historyStartReason,
+          gaps,
+        };
+      }),
+    ),
+  completeApiKeyMessageRecordRead: (input) =>
+    provider.withConnection((connection) =>
+      withTransaction(connection, async () => {
+        const db = makeDatabase(connection);
+        if (
+          !Number.isSafeInteger(input.dailyRecordLimit) ||
+          input.dailyRecordLimit < 1 ||
+          !Number.isSafeInteger(input.resultCount) ||
+          input.resultCount < 0 ||
+          input.resultCount > 50
+        ) {
+          throw new Error("invalid API message completion");
+        }
+        if (
+          (await enterAccountContext(connection, input.personalAccountId)) ===
+          null
+        ) {
+          throw new Error("authorization unavailable");
+        }
+        const accountContext = sql`nullif(
+          current_setting('public.personal_account_id', true), ''
+        )::uuid`;
+        const completion = await db.execute<{
+          completed: unknown;
+          used_count: unknown;
+        }>(sql`
+          WITH locked_account AS MATERIALIZED (
+            SELECT accounts.id
+            FROM public.personal_accounts accounts
+            WHERE accounts.id = ${accountContext}
+            FOR UPDATE
+          ), used AS MATERIALIZED (
+            SELECT coalesce(sum(logs.result_count), 0)::int AS count
+            FROM public.tool_call_logs logs
+            JOIN locked_account ON locked_account.id = logs.personal_account_id
+            WHERE logs.tool_name IN ('read_messages', 'search_messages')
+              AND logs.outcome = 'success'
+              AND logs.started_at >= date_trunc(
+                'day', ${input.observedAt}::timestamptz AT TIME ZONE 'UTC'
+              ) AT TIME ZONE 'UTC'
+              AND logs.started_at < (
+                date_trunc(
+                  'day', ${input.observedAt}::timestamptz AT TIME ZONE 'UTC'
+                ) AT TIME ZONE 'UTC'
+              ) + interval '1 day'
+          ), updated AS (
+            UPDATE public.tool_call_logs logs
+            SET completed_at = ${input.observedAt},
+                outcome = 'success',
+                error_code = NULL,
+                result_count = ${input.resultCount},
+                latency_ms = GREATEST(
+                  0,
+                  floor(extract(epoch FROM (${input.observedAt}::timestamptz - logs.started_at)) * 1000)
+                )::integer
+            FROM used
+            WHERE used.count + ${input.resultCount} <= ${input.dailyRecordLimit}
+              AND logs.id = ${input.auditLogId}
+              AND logs.personal_account_id = ${accountContext}
+              AND logs.api_key_id = ${input.apiKeyGrantId}
+              AND logs.tool_name IN ('read_messages', 'search_messages')
+              AND logs.outcome = 'started'
+            RETURNING logs.id
+          )
+          SELECT used.count AS used_count,
+                 EXISTS (SELECT 1 FROM updated) AS completed
+          FROM used
+        `);
+        const usedCount = Number(completion[0]?.used_count);
+        if (!Number.isSafeInteger(usedCount))
+          throw new Error("invalid returned-record quota");
+        if (usedCount + input.resultCount > input.dailyRecordLimit) {
+          return {
+            outcome: "record_quota_exhausted" as const,
+            resetsAt: new Date(
+              Date.UTC(
+                input.observedAt.getUTCFullYear(),
+                input.observedAt.getUTCMonth(),
+                input.observedAt.getUTCDate() + 1,
+              ),
+            ),
+          };
+        }
+        if (completion[0]?.completed !== true)
+          throw new Error("Activity Log completion unavailable");
+        return { outcome: "success" as const };
       }),
     ),
   rejectProtectedOperation: (input) =>

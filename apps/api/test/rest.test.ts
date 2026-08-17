@@ -96,6 +96,9 @@ const makeHarness = (options?: {
     loadGroupSearchMaterial: () => Effect.succeed(null),
     listGroups: () => Effect.succeed(null),
     listChats: () => Effect.succeed(null),
+    readMessages: () => Effect.succeed(null),
+    completeMessageRecordRead: () =>
+      Effect.succeed({ outcome: "success" as const }),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&
@@ -162,6 +165,7 @@ const makeHarness = (options?: {
   );
   return {
     handler: createRestHandler(layer, {
+      dailyRecordLimit: 10_000,
       hourLimit: 3,
       keyHourLimit: 2,
       keyMinuteLimit: 1,
@@ -472,6 +476,9 @@ const makeContactHarness = (options?: {
     loadGroupSearchMaterial: () => Effect.succeed(null),
     listGroups: () => Effect.succeed(null),
     listChats: () => Effect.succeed(null),
+    readMessages: () => Effect.succeed(null),
+    completeMessageRecordRead: () =>
+      Effect.succeed({ outcome: "success" as const }),
     listEncryptedContacts: () =>
       Effect.succeed({
         asOf: "2026-08-14T12:00:00.000Z",
@@ -569,6 +576,7 @@ const makeContactHarness = (options?: {
   );
   return {
     handler: createRestHandler(layer, {
+      dailyRecordLimit: 10_000,
       hourLimit: 3,
       keyHourLimit: 2,
       keyMinuteLimit: 1,
@@ -777,6 +785,9 @@ const makeGroupHarness = (options?: {
       }),
     listGroups: () => Effect.succeed(groupPage),
     listChats: () => Effect.succeed(null),
+    readMessages: () => Effect.succeed(null),
+    completeMessageRecordRead: () =>
+      Effect.succeed({ outcome: "success" as const }),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&
@@ -849,6 +860,7 @@ const makeGroupHarness = (options?: {
   );
   return {
     handler: createRestHandler(layer, {
+      dailyRecordLimit: 10_000,
       hourLimit: 3,
       keyHourLimit: 2,
       keyMinuteLimit: 1,
@@ -1074,6 +1086,9 @@ const makeConversationHarness = (options?: {
     loadGroupSearchMaterial: () => Effect.succeed(null),
     listGroups: () => Effect.succeed(null),
     listChats: () => Effect.succeed(chatPage),
+    readMessages: () => Effect.succeed(null),
+    completeMessageRecordRead: () =>
+      Effect.succeed({ outcome: "success" as const }),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&
@@ -1144,6 +1159,7 @@ const makeConversationHarness = (options?: {
   );
   return {
     handler: createRestHandler(layer, {
+      dailyRecordLimit: 10_000,
       hourLimit: 3,
       keyHourLimit: 2,
       keyMinuteLimit: 1,
@@ -1275,6 +1291,516 @@ describe("REST WhatsApp Conversations", () => {
       status: 503,
     });
     expect(JSON.stringify(body)).not.toContain("Ada");
+    expect(JSON.stringify(body)).not.toContain("+12025550199");
+  });
+});
+
+const conversationId = "cvs_123456789012345678901";
+const messagesPath = `/v1/connections/${connectionId}/conversations/${conversationId}/messages`;
+
+const encryptedJson = (value: unknown) => ({
+  ciphertext: btoa(JSON.stringify(value)),
+  keyVersion: 1,
+  nonce: "AQIDBAUGBwgJCgsM",
+  version: 1 as const,
+});
+
+const messageRecord = (input: {
+  readonly contentType?: "text" | "image";
+  readonly deleted?: boolean;
+  readonly direction?: "inbound" | "outbound";
+  readonly media?: {
+    readonly publicId: string;
+    readonly state: "failed" | "pending" | "ready" | "rejected";
+    readonly plaintextSizeBytes: number | null;
+    readonly metadata: ReturnType<typeof encryptedJson> | null;
+  } | null;
+  readonly publicId: string;
+  readonly sentAt: string;
+  readonly text: string | null;
+}) => ({
+  publicId: input.publicId,
+  messageIdentity: `wi1_${input.publicId.slice(4).padEnd(43, "x")}`,
+  sentAt: input.sentAt,
+  direction: input.direction ?? "inbound",
+  conversationKind: "direct" as const,
+  contentType: input.deleted ? ("unknown" as const) : (input.contentType ?? "text"),
+  content:
+    input.deleted || input.text === null
+      ? null
+      : encryptedJson({ text: input.text, mediaSource: null }),
+  editedAt: null,
+  deleted: input.deleted ?? false,
+  sender:
+    (input.direction ?? "inbound") === "inbound"
+      ? {
+          displayName: encryptedJson("Ada"),
+          phone: encryptedJson("+12025550199"),
+          recordId: `di1_${"i".repeat(43)}`,
+        }
+      : null,
+  media: input.media ?? null,
+});
+
+const messagePage = {
+  accountKey: chatPage.accountKey,
+  connectionKey: chatPage.connectionKey,
+  conversation: {
+    kind: "direct" as const,
+    publicId: conversationId,
+    recipientId: "ctc_123456789012345678901",
+  },
+  messages: [
+    messageRecord({
+      publicId: "msg_222222222222222222222",
+      sentAt: "2026-08-14T11:59:00.000Z",
+      text: "newest",
+    }),
+    messageRecord({
+      direction: "outbound",
+      publicId: "msg_111111111111111111111",
+      sentAt: "2026-08-14T11:58:00.000Z",
+      text: "older",
+    }),
+  ],
+  hasOlder: true,
+  sizeLimited: false,
+  historyStartsAt: "2026-07-15T12:00:00.000Z",
+  historyStartReason: "retention_policy" as const,
+  gaps: [
+    {
+      startsAt: "2026-08-14T11:00:00.000Z",
+      endsAt: null,
+      cause: "processing_failure" as const,
+    },
+  ],
+};
+
+const makeMessageHarness = (options?: {
+  readonly permissions?: ReadonlyArray<
+    "connections:read" | "directory:read" | "messages:read" | "messages:send"
+  >;
+  readonly persistence?: Partial<RestPersistenceService>;
+  readonly cursorBoundary?: readonly [string, string];
+}) => {
+  const telemetry: Array<SafeTelemetryEvent> = [];
+  const persistence: RestPersistenceService = {
+    beginProtectedOperation: (input) =>
+      Effect.succeed(
+        input.channel === "api" &&
+          input.requiredPermission !== undefined &&
+          !(input.permissions ?? []).includes(input.requiredPermission)
+          ? {
+              auditLogId: input.auditLogId,
+              outcome: "authorization_denied" as const,
+            }
+          : {
+              auditLogId: input.auditLogId,
+              outcome: "started" as const,
+            },
+      ),
+    completeToolCall: () => Effect.void,
+    listConnections: () => Effect.succeed([]),
+    loadContactReadMaterial: () => Effect.succeed(null),
+    listEncryptedContacts: () => Effect.succeed(null),
+    loadGroupSearchMaterial: () => Effect.succeed(null),
+    listGroups: () => Effect.succeed(null),
+    listChats: () => Effect.succeed(null),
+    readMessages: () => Effect.succeed(messagePage),
+    completeMessageRecordRead: () =>
+      Effect.succeed({ outcome: "success" as const }),
+    rejectProtectedOperation: (input) =>
+      Effect.succeed(
+        input.requiredPermission !== undefined &&
+          !input.permissions.includes(input.requiredPermission)
+          ? ("authorization_denied" as const)
+          : ("rejected" as const),
+      ),
+    ...options?.persistence,
+  };
+  const layer = Layer.mergeAll(
+    Layer.succeed(ApiKeyHmac, {
+      digest: () => Effect.succeed(digest),
+    }),
+    Layer.succeed(ApiKeyPersistence, {
+      authenticate: () =>
+        Effect.succeed({
+          connectionIds: [connectionId],
+          expiresAt: null,
+          grantId,
+          id: publicId,
+          name: "CI",
+          permissions: options?.permissions ?? [
+            "connections:read",
+            "messages:read",
+          ],
+          personalAccountId,
+        }),
+      create: () => Effect.succeed({ outcome: "not_found" as const }),
+      list: () => Effect.succeed([]),
+      revoke: () => Effect.succeed(null),
+    }),
+    Layer.succeed(RestClock, { now: Effect.succeed(observedAt) }),
+    Layer.succeed(RestIdentifiers, {
+      nextAuditLogId: Effect.succeed("50000000-0000-4000-8000-000000000080"),
+    }),
+    Layer.succeed(RestCursorCodec, {
+      decode: () =>
+        options?.cursorBoundary === undefined
+          ? Effect.fail(new RestCursorError())
+          : Effect.succeed([...options.cursorBoundary]),
+      encode: ({ boundary }) =>
+        Effect.succeed(`rest-cursor:${boundary.join(":")}`),
+    }),
+    Layer.succeed(SendTextMessage, {
+      send: () =>
+        Effect.succeed({
+          outcome: "receipt" as const,
+          receipt,
+        }),
+    }),
+    Layer.succeed(RestPersistence, persistence),
+    Layer.succeed(EnvelopeEncryptionService, {
+      createConnectionKey: () => Effect.die("unused"),
+      createPersonalAccountKey: () => Effect.die("unused"),
+      decrypt: () => Effect.die("unused"),
+      decryptMany: (input) =>
+        Effect.succeed(
+          input.items.map((item) => {
+            const decoded = JSON.parse(atob(item.ciphertext.ciphertext)) as
+              | { readonly text?: string | null }
+              | string;
+            if (typeof decoded === "string") {
+              return new TextEncoder().encode(decoded);
+            }
+            return new TextEncoder().encode(JSON.stringify(decoded));
+          }),
+        ),
+    }),
+    Layer.succeed(SafeTelemetry, {
+      emit: (event) =>
+        Effect.sync(() => {
+          telemetry.push(event);
+        }),
+    }),
+  );
+  return {
+    handler: createRestHandler(layer, {
+      dailyRecordLimit: 10_000,
+      hourLimit: 3,
+      keyHourLimit: 2,
+      keyMinuteLimit: 1,
+      minuteLimit: 2,
+    }),
+    telemetry,
+  };
+};
+
+describe("REST Stored Messages", () => {
+  test("returns the newest page chronologically with complete text and history coverage", async () => {
+    const harness = makeMessageHarness();
+    const response = await harness.handler(request(messagesPath));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    const body = await response.json();
+    expect(body).toEqual({
+      data: [
+        {
+          content_type: "text",
+          deleted: false,
+          direction: "outbound",
+          edited_at: null,
+          media: null,
+          message_id: "msg_111111111111111111111",
+          sender: {
+            display_name: null,
+            kind: "self",
+            phone_last_four: null,
+          },
+          sent_at: "2026-08-14T11:58:00.000Z",
+          text: "older",
+        },
+        {
+          content_type: "text",
+          deleted: false,
+          direction: "inbound",
+          edited_at: null,
+          media: null,
+          message_id: "msg_222222222222222222222",
+          sender: {
+            display_name: "Ada",
+            kind: "contact",
+            phone_last_four: "0199",
+          },
+          sent_at: "2026-08-14T11:59:00.000Z",
+          text: "newest",
+        },
+      ],
+      meta: {
+        conversation_id: conversationId,
+        gaps: [
+          {
+            cause: "processing_failure",
+            ends_at: null,
+            starts_at: "2026-08-14T11:00:00.000Z",
+          },
+        ],
+        history_start_reason: "retention_policy",
+        history_starts_at: "2026-07-15T12:00:00.000Z",
+        kind: "direct",
+        recipient_id: "ctc_123456789012345678901",
+        size_limited: false,
+      },
+      pagination: {
+        has_more: true,
+        next_cursor: "rest-cursor:2026-08-14T11:58:00.000Z:msg_111111111111111111111",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("text_truncated");
+    expect(JSON.stringify(body)).not.toContain("whatsapp-media://");
+    expect(JSON.stringify(body)).not.toContain("+12025550199");
+    expect(harness.telemetry).toEqual([
+      {
+        event: "rest.operation.completed",
+        operation: "read_messages",
+        outcome: "success",
+        resultCount: 2,
+        service: "api",
+      },
+    ]);
+    expect(JSON.stringify(harness.telemetry)).not.toContain(credential);
+  });
+
+  test("returns tombstones and authenticated media paths without MCP URIs", async () => {
+    const harness = makeMessageHarness({
+      persistence: {
+        readMessages: () =>
+          Effect.succeed({
+            ...messagePage,
+            hasOlder: false,
+            messages: [
+              messageRecord({
+                contentType: "image",
+                media: {
+                  metadata: encryptedJson({
+                    fileName: "photo.jpg",
+                    mimeType: "image/jpeg",
+                  }),
+                  plaintextSizeBytes: 1024,
+                  publicId: "med_444444444444444444444",
+                  state: "ready",
+                },
+                publicId: "msg_444444444444444444444",
+                sentAt: "2026-08-14T11:59:00.000Z",
+                text: "caption",
+              }),
+              messageRecord({
+                deleted: true,
+                publicId: "msg_333333333333333333333",
+                sentAt: "2026-08-14T11:58:00.000Z",
+                text: null,
+              }),
+            ],
+          }),
+      },
+    });
+    const body = (await (
+      await harness.handler(request(messagesPath))
+    ).json()) as {
+      data: Array<Record<string, unknown>>;
+    };
+    expect(body.data).toEqual([
+      expect.objectContaining({
+        deleted: true,
+        media: null,
+        message_id: "msg_333333333333333333333",
+        text: null,
+      }),
+      expect.objectContaining({
+        media: {
+          file_name: "photo.jpg",
+          media_id: "med_444444444444444444444",
+          mime_type: "image/jpeg",
+          path: `/v1/connections/${connectionId}/messages/msg_444444444444444444444/media/med_444444444444444444444`,
+          size_bytes: 1024,
+          state: "ready",
+          type: "image",
+          unavailable_reason: null,
+        },
+        text: "caption",
+      }),
+    ]);
+    expect(JSON.stringify(body)).not.toContain("whatsapp-media://");
+  });
+
+  test("requires messages:read and hides unknown or excluded conversations", async () => {
+    const forbidden = await makeMessageHarness({
+      permissions: ["connections:read", "messages:send"],
+    }).handler(request(messagesPath));
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toMatchObject({
+      code: "insufficient_permission",
+      status: 403,
+    });
+
+    const missing = await makeMessageHarness({
+      persistence: {
+        readMessages: () => Effect.succeed(null),
+      },
+    }).handler(request(messagesPath));
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+  });
+
+  test("rejects extra query parameters and invalid limits before auth", async () => {
+    const harness = makeMessageHarness();
+    for (const path of [
+      `${messagesPath}?search=Ada`,
+      `${messagesPath}?limit=0`,
+      `${messagesPath}?limit=51`,
+    ]) {
+      const response = await harness.handler(request(path));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        code: "invalid_request",
+        status: 400,
+      });
+    }
+    expect(harness.telemetry).toEqual([]);
+  });
+
+  test("rejects MCP cursors before quota reservation", async () => {
+    const harness = makeMessageHarness();
+    const response = await harness.handler(
+      request(`${messagesPath}?cursor=mcp-or-tampered`),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      code: "invalid_cursor",
+      status: 400,
+    });
+    expect(harness.telemetry).toEqual([
+      {
+        event: "rest.operation.completed",
+        operation: "read_messages",
+        outcome: "invalid_cursor",
+        service: "api",
+      },
+    ]);
+  });
+
+  test("returns complete Unicode text instead of truncating one Stored Message", async () => {
+    const text = `${"e\u0301😀".repeat(200)}tail`;
+    const harness = makeMessageHarness({
+      persistence: {
+        readMessages: () =>
+          Effect.succeed({
+            ...messagePage,
+            hasOlder: false,
+            messages: [
+              messageRecord({
+                publicId: "msg_555555555555555555555",
+                sentAt: "2026-08-14T11:59:00.000Z",
+                text,
+              }),
+            ],
+          }),
+      },
+    });
+    const body = (await (
+      await harness.handler(request(messagesPath))
+    ).json()) as {
+      data: Array<{ text: string }>;
+    };
+    expect(body.data[0]?.text).toBe(text);
+    expect(JSON.stringify(body)).not.toContain("text_truncated");
+  });
+
+  test("reduces page records to stay within 1 MiB without splitting a Stored Message", async () => {
+    const large = "a".repeat(400_000);
+    const harness = makeMessageHarness({
+      persistence: {
+        readMessages: () =>
+          Effect.succeed({
+            ...messagePage,
+            hasOlder: false,
+            messages: [
+              messageRecord({
+                publicId: "msg_888888888888888888888",
+                sentAt: "2026-08-14T11:59:00.000Z",
+                text: large,
+              }),
+              messageRecord({
+                publicId: "msg_777777777777777777777",
+                sentAt: "2026-08-14T11:58:00.000Z",
+                text: large,
+              }),
+              messageRecord({
+                publicId: "msg_666666666666666666666",
+                sentAt: "2026-08-14T11:57:00.000Z",
+                text: large,
+              }),
+            ],
+          }),
+      },
+    });
+    const response = await harness.handler(request(`${messagesPath}?limit=3`));
+    const raw = await response.text();
+    expect(response.status).toBe(200);
+    expect(new TextEncoder().encode(raw).byteLength).toBeLessThanOrEqual(
+      1_048_576,
+    );
+    const body = JSON.parse(raw) as {
+      data: Array<{ message_id: string; text: string }>;
+      meta: { size_limited: boolean };
+      pagination: { has_more: boolean; next_cursor: string | null };
+    };
+    expect(body.data.length).toBeLessThan(3);
+    expect(body.data.length).toBeGreaterThan(0);
+    expect(body.data.every((message) => message.text === large)).toBe(true);
+    expect(body.meta.size_limited).toBe(true);
+    expect(body.pagination.has_more).toBe(true);
+    expect(body.pagination.next_cursor).toEqual(expect.any(String));
+    expect(JSON.stringify(body)).not.toContain("text_truncated");
+  });
+
+  test("shares returned-record quota exhaustion as a rate limit", async () => {
+    const harness = makeMessageHarness({
+      persistence: {
+        completeMessageRecordRead: () =>
+          Effect.succeed({
+            outcome: "record_quota_exhausted" as const,
+            resetsAt: new Date("2026-08-15T00:00:00.000Z"),
+          }),
+      },
+    });
+    const response = await harness.handler(request(messagesPath));
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({
+      code: "rate_limited",
+      status: 429,
+    });
+  });
+
+  test("withholds the page when Activity Log completion fails", async () => {
+    const harness = makeMessageHarness({
+      persistence: {
+        completeMessageRecordRead: () =>
+          Effect.fail(new RestPersistenceError()),
+      },
+    });
+    const response = await harness.handler(request(messagesPath));
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      code: "unavailable",
+      status: 503,
+    });
+    expect(JSON.stringify(body)).not.toContain("newest");
     expect(JSON.stringify(body)).not.toContain("+12025550199");
   });
 });

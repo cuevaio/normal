@@ -94,8 +94,10 @@ flowchart LR
   later cascade during the bounded Personal Account purge. MCP and REST remain
   separate protocol adapters over shared protected WhatsApp operations, quotas,
   and Activity Logs. Send Operations admit a protocol-neutral grant identity so
-  MCP Authorization and API Key stay distinct principals. REST creates or
-  exactly replays a text Send Operation at
+  MCP Authorization and API Key stay distinct principals. REST pages complete
+  retained Stored Messages at
+  `GET /v1/connections/{connection_id}/conversations/{conversation_id}/messages`
+  and creates or exactly replays a text Send Operation at
   `POST /v1/connections/{connection_id}/send-operations`.
 
 For exact behavior, read [`CONTEXT.md`](../CONTEXT.md), the

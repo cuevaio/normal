@@ -8,6 +8,7 @@ import {
   decodeRestConversationList,
   decodeRestCreateSendOperation,
   decodeRestGroupList,
+  decodeRestMessageList,
   decodeRestSendOperation,
   ProblemDetailsContract,
   problemType,
@@ -16,6 +17,7 @@ import {
   RestConversationListContract,
   RestCreateSendOperationContract,
   RestGroupListContract,
+  RestMessageListContract,
   RestSendOperationContract,
 } from "../src/rest";
 
@@ -245,6 +247,111 @@ describe("REST contracts", () => {
     ).toThrow();
   });
 
+  test("keeps message pages closed with complete text and authenticated media paths", () => {
+    const messages = {
+      data: [
+        {
+          content_type: "image",
+          deleted: false,
+          direction: "inbound",
+          edited_at: null,
+          media: {
+            file_name: "photo.jpg",
+            media_id: "med_xxxxxxxxxxxxxxxxxxxxx",
+            mime_type: "image/jpeg",
+            path: "/v1/connections/con_xxxxxxxxxxxxxxxxxxxxx/messages/msg_xxxxxxxxxxxxxxxxxxxxx/media/med_xxxxxxxxxxxxxxxxxxxxx",
+            size_bytes: 245123,
+            state: "ready",
+            type: "image",
+            unavailable_reason: null,
+          },
+          message_id: "msg_xxxxxxxxxxxxxxxxxxxxx",
+          sender: {
+            display_name: "Ada",
+            kind: "contact",
+            phone_last_four: "0199",
+          },
+          sent_at: "2026-08-14T11:58:00.000Z",
+          text: "A caption",
+        },
+      ],
+      meta: {
+        conversation_id: "cvs_xxxxxxxxxxxxxxxxxxxxx",
+        gaps: [
+          {
+            cause: "connection_unavailable",
+            ends_at: "2026-08-14T11:08:00.000Z",
+            starts_at: "2026-08-14T11:00:00.000Z",
+          },
+        ],
+        history_start_reason: "retention_policy",
+        history_starts_at: "2026-07-15T12:00:00.000Z",
+        kind: "direct",
+        recipient_id: "ctc_xxxxxxxxxxxxxxxxxxxxx",
+        size_limited: false,
+      },
+      pagination: {
+        has_more: true,
+        next_cursor: "opaque-rest-cursor",
+      },
+    } as const;
+    expect(decodeRestMessageList(messages) as unknown).toEqual(messages);
+    expect(() =>
+      decodeRestMessageList({
+        ...messages,
+        data: [
+          {
+            ...messages.data[0],
+            text_truncated: true,
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeRestMessageList({
+        ...messages,
+        data: [
+          {
+            ...messages.data[0],
+            media: {
+              ...messages.data[0].media,
+              resource_uri:
+                "whatsapp-media://connections/con_xxxxxxxxxxxxxxxxxxxxx/messages/msg_xxxxxxxxxxxxxxxxxxxxx/media/med_xxxxxxxxxxxxxxxxxxxxx",
+            },
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeRestMessageList({
+        ...messages,
+        data: [
+          {
+            ...messages.data[0],
+            sender: {
+              ...messages.data[0].sender,
+              phone: "+12025550199",
+            },
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeRestMessageList({
+        ...messages,
+        data: [
+          {
+            ...messages.data[0],
+            media: {
+              ...messages.data[0].media,
+              path: "https://media.example.test/photo.jpg",
+            },
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   test("generates a partial OpenAPI 3.1 document with stable operation IDs", () => {
     expect(openApiDocument.openapi).toBe("3.1.0");
     expect(restRouteRegistry).toEqual([
@@ -273,6 +380,12 @@ describe("REST contracts", () => {
         permission: "messages:read",
       }),
       expect.objectContaining({
+        method: "GET",
+        operationId: "listMessages",
+        path: "/v1/connections/{connection_id}/conversations/{conversation_id}/messages",
+        permission: "messages:read",
+      }),
+      expect.objectContaining({
         method: "POST",
         operationId: "createSendOperation",
         path: "/v1/connections/{connection_id}/send-operations",
@@ -284,7 +397,16 @@ describe("REST contracts", () => {
     expect(serialized).toContain('"operationId":"listContacts"');
     expect(serialized).toContain('"operationId":"listGroups"');
     expect(serialized).toContain('"operationId":"listConversations"');
+    expect(serialized).toContain('"operationId":"listMessages"');
     expect(serialized).toContain('"operationId":"createSendOperation"');
+    expect(serialized).toContain(
+      "/v1/connections/{connection_id}/conversations/{conversation_id}/messages",
+    );
+    expect(serialized).toContain(
+      "/v1/connections/con_xxxxxxxxxxxxxxxxxxxxx/messages/msg_xxxxxxxxxxxxxxxxxxxxx/media/med_xxxxxxxxxxxxxxxxxxxxx",
+    );
+    expect(serialized).not.toContain("whatsapp-media://");
+    expect(serialized).not.toContain("text_truncated");
     expect(serialized).toContain('"Idempotency-Key"');
     expect(serialized).toContain('"type":"http"');
     expect(serialized).toContain('"scheme":"bearer"');
@@ -311,6 +433,7 @@ describe("REST contracts", () => {
     expect(schemas.ConversationList).toEqual(
       RestConversationListContract.jsonSchema,
     );
+    expect(schemas.MessageList).toEqual(RestMessageListContract.jsonSchema);
     expect(schemas.CreateSendOperation).toEqual(
       RestCreateSendOperationContract.jsonSchema,
     );

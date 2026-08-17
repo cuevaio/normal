@@ -127,9 +127,12 @@ or content-encryption key. The versioned full HMAC-SHA-256 tokens are bound to
 the internal Connection identifier, so equal words cannot be correlated across
 Connections from Neon alone.
 
-`search_messages` requires `messages:read`, reserves from the same
-`READ_MESSAGE_RECORDS_PER_DAY` quota as `read_messages`, and uses the existing
-authoritative MCP minute and hour request quotas. Its query is limited to 256
+`search_messages` and `GET /v1/connections/{connection_id}/conversations/{conversation_id}/messages`
+require `messages:read`, reserve from the same
+`READ_MESSAGE_RECORDS_PER_DAY` quota as `read_messages`, and use the existing
+authoritative Personal Account request quotas. REST message pages return
+complete retained text and reduce record count to stay within 1 MiB encoded
+JSON instead of applying MCP's duplicated-text cap. Its query is limited to 256
 Unicode scalar values and eight unique normalized terms; result limits default
 to and cannot exceed 20. Plaintext queries, normalized terms, HMAC values,
 message text, and snippets are prohibited from Activity Logs, telemetry,

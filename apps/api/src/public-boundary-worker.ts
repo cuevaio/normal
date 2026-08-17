@@ -234,6 +234,7 @@ export const createPublicBoundaryWorker = (
 
       if (isRestRequest(request)) {
         return createRestHandler(options.layerFor(request, environment), {
+          dailyRecordLimit: 10_000,
           hourLimit: 60,
           keyHourLimit: 60,
           keyMinuteLimit: 20,

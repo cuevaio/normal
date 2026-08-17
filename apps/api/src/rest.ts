@@ -12,6 +12,7 @@ import {
   decodeRestConversationList,
   decodeRestCreateSendOperation,
   decodeRestGroupList,
+  decodeRestMessageList,
   decodeRestSendOperation,
   type ProblemCode,
   type ProblemDetails,
@@ -20,6 +21,8 @@ import {
   type RestContactList,
   type RestConversationList,
   type RestGroupList,
+  type RestMessageList,
+  restStoredMediaPath,
 } from "@whatsapp-mcp/contracts/rest";
 import type {
   ApiKeyPermission,
@@ -34,6 +37,7 @@ import type {
   McpToolEncryptedContactPage,
   McpToolGroupPage,
   McpToolGroupSearchMaterial,
+  McpToolMessagePage,
   RejectToolCallResult,
 } from "@whatsapp-mcp/db/mcp-tool";
 import { apiSendGrant } from "@whatsapp-mcp/db/send";
@@ -73,6 +77,8 @@ const CONTACTS_PATH = /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/contacts$/u;
 const GROUPS_PATH = /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/groups$/u;
 const CONVERSATIONS_PATH =
   /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/conversations$/u;
+const MESSAGES_PATH =
+  /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/conversations\/(cvs_[A-Za-z0-9_-]{21})\/messages$/u;
 const SEND_OPERATIONS_PATH =
   /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/send-operations$/u;
 const MAX_AUTHORIZATION_LENGTH = 128;
@@ -83,15 +89,20 @@ const LIST_CONNECTIONS = "list_connections";
 const LIST_CONTACTS = "list_contacts";
 const LIST_GROUPS = "list_groups";
 const LIST_CHATS = "list_chats";
+const READ_MESSAGES = "read_messages";
 const LIST_CONTACTS_OPERATION_ID = "listContacts";
 const LIST_GROUPS_OPERATION_ID = "listGroups";
 const LIST_CONVERSATIONS_OPERATION_ID = "listConversations";
+const LIST_MESSAGES_OPERATION_ID = "listMessages";
 const CONTACT_SORT_VERSION = "contacts-v1";
 const GROUP_SORT_VERSION = "groups-v1";
 const CONVERSATION_SORT_VERSION = "conversations-v1";
+const MESSAGE_SORT_VERSION = "messages-sent-v1";
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
 const CURSOR_TTL_SECONDS = 900;
+const REST_MESSAGE_PAGE_MAX_JSON_BYTES = 1_048_576;
+const READY_MEDIA_BYTE_LIMIT = 16_777_216;
 
 export class RestPersistenceError extends Data.TaggedError(
   "RestPersistenceError",
@@ -161,6 +172,29 @@ export interface RestPersistenceService {
     readonly permissions: ReadonlyArray<string>;
     readonly personalAccountId: string;
   }) => Effect.Effect<McpToolChatPage | null, RestPersistenceError>;
+  readonly readMessages: (input: {
+    readonly apiKeyGrantId: string;
+    readonly connectionPublicId: string;
+    readonly conversationPublicId: string;
+    readonly cursorPublicId: string | null;
+    readonly cursorSentAt: string | null;
+    readonly limit: number;
+    readonly observedAt: Date;
+    readonly permissions: ReadonlyArray<string>;
+    readonly personalAccountId: string;
+  }) => Effect.Effect<McpToolMessagePage | null, RestPersistenceError>;
+  readonly completeMessageRecordRead: (input: {
+    readonly apiKeyGrantId: string;
+    readonly auditLogId: string;
+    readonly dailyRecordLimit: number;
+    readonly observedAt: Date;
+    readonly personalAccountId: string;
+    readonly resultCount: number;
+  }) => Effect.Effect<
+    | { readonly outcome: "success" }
+    | { readonly outcome: "record_quota_exhausted"; readonly resetsAt: Date },
+    RestPersistenceError
+  >;
   readonly rejectProtectedOperation: (input: {
     readonly apiKey: {
       readonly grantId: string;
@@ -244,6 +278,7 @@ type RestRequirements =
   | SendTextMessageService;
 
 export interface RestHandlerOptions {
+  readonly dailyRecordLimit: number;
   readonly hourLimit: number;
   readonly keyHourLimit: number;
   readonly keyMinuteLimit: number;
@@ -368,6 +403,7 @@ const emitCompletion = (
     | "list_contacts"
     | "list_groups"
     | "list_chats"
+    | "read_messages"
     | "send_text_message",
   outcome:
     | "audit_unavailable"
@@ -1748,6 +1784,564 @@ const listConversations = (
     ),
   );
 
+const listMessages = (
+  request: Request,
+  connectionPublicId: string,
+  conversationPublicId: string,
+  options: RestHandlerOptions,
+  layer: Layer.Layer<RestRequirements, unknown>,
+): Promise<Response> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const url = new URL(request.url);
+      const queryKeys = [...url.searchParams.keys()];
+      if (
+        queryKeys.some((key) => key !== "cursor" && key !== "limit") ||
+        url.searchParams.getAll("cursor").length > 1 ||
+        url.searchParams.getAll("limit").length > 1
+      ) {
+        return problemResponse("invalid_request", 400);
+      }
+      const limit = parseContactLimit(url.searchParams.get("limit"));
+      const cursor = url.searchParams.get("cursor");
+      if (
+        limit === "invalid" ||
+        (cursor !== null && (cursor.length < 1 || cursor.length > 4_096))
+      ) {
+        return problemResponse("invalid_request", 400);
+      }
+
+      const grant = yield* authenticate(request);
+      const clock = yield* RestClock;
+      const identifiers = yield* RestIdentifiers;
+      const persistence = yield* RestPersistence;
+      const cursors = yield* RestCursorCodec;
+      const startedAt = yield* clock.now;
+      const cursorContext: RestCursorContext = {
+        connectionId:
+          Schema.decodeUnknownSync(ConnectionId)(connectionPublicId),
+        filters: { conversation_id: conversationPublicId },
+        grantId: grant.grantId,
+        operationId: LIST_MESSAGES_OPERATION_ID,
+        pageSize: limit,
+        sortVersion: MESSAGE_SORT_VERSION,
+      };
+      let boundary: readonly [string, string] | null = null;
+      if (cursor !== null) {
+        const decoded = yield* cursors
+          .decode({
+            context: cursorContext,
+            cursor,
+            nowEpochSeconds: Math.floor(startedAt.valueOf() / 1_000),
+          })
+          .pipe(Effect.either);
+        if (
+          decoded._tag === "Left" ||
+          decoded.right.length !== 2 ||
+          typeof decoded.right[0] !== "string" ||
+          typeof decoded.right[1] !== "string" ||
+          !/^msg_[A-Za-z0-9_-]{21}$/u.test(decoded.right[1])
+        ) {
+          const auditLogId = yield* identifiers.nextAuditLogId;
+          const rejected = yield* persistence
+            .rejectProtectedOperation({
+              apiKey: {
+                grantId: grant.grantId,
+                name: grant.name,
+                publicId: grant.id,
+              },
+              auditLogId,
+              connectionPublicId,
+              errorCode: "invalid_cursor",
+              observedAt: startedAt,
+              operationName: READ_MESSAGES,
+              permissions: grant.permissions,
+              personalAccountId: grant.personalAccountId,
+              requiredPermission: "messages:read",
+            })
+            .pipe(Effect.either);
+          if (rejected._tag === "Left") {
+            yield* emitCompletion(READ_MESSAGES, "audit_unavailable");
+            return problemResponse("unavailable", 503);
+          }
+          if (rejected.right === "authorization_denied") {
+            yield* emitCompletion(READ_MESSAGES, "authorization_denied");
+            return grant.permissions.includes("messages:read")
+              ? problemResponse("invalid_credentials", 401)
+              : problemResponse("insufficient_permission", 403);
+          }
+          yield* emitCompletion(READ_MESSAGES, "invalid_cursor");
+          return problemResponse("invalid_cursor", 400);
+        }
+        boundary = [decoded.right[0], decoded.right[1]];
+      }
+
+      const auditLogId = yield* identifiers.nextAuditLogId;
+      const started = yield* persistence
+        .beginProtectedOperation({
+          apiKey: {
+            grantId: grant.grantId,
+            name: grant.name,
+            publicId: grant.id,
+          },
+          auditLogId,
+          channel: "api",
+          connectionPublicId,
+          hourLimit: options.hourLimit,
+          keyHourLimit: options.keyHourLimit,
+          keyMinuteLimit: options.keyMinuteLimit,
+          minuteLimit: options.minuteLimit,
+          observedAt: startedAt,
+          operationName: READ_MESSAGES,
+          permissions: grant.permissions,
+          personalAccountId: grant.personalAccountId,
+          requiredPermission: "messages:read" satisfies ApiKeyPermission,
+        })
+        .pipe(Effect.either);
+      if (started._tag === "Left") {
+        yield* emitCompletion(READ_MESSAGES, "audit_unavailable");
+        return problemResponse("unavailable", 503);
+      }
+      if (started.right.outcome === "authorization_denied") {
+        yield* emitCompletion(READ_MESSAGES, "authorization_denied");
+        return grant.permissions.includes("messages:read")
+          ? problemResponse("invalid_credentials", 401)
+          : problemResponse("insufficient_permission", 403);
+      }
+      if (started.right.outcome === "rate_limited") {
+        yield* emitCompletion(READ_MESSAGES, "rate_limited");
+        return problemResponse("rate_limited", 429, {
+          retry_after_seconds: started.right.retryAfterSeconds,
+          retryable: true,
+          resets_at:
+            started.right.resetsAt.toISOString() as ProblemDetails["resets_at"],
+        });
+      }
+
+      const failAfterAudit = (
+        errorCode: string,
+        denied = false,
+        rateLimited?: { readonly resetsAt: Date },
+      ) =>
+        Effect.gen(function* () {
+          const completed = yield* persistence
+            .completeToolCall({
+              auditLogId,
+              completedAt: yield* clock.now,
+              errorCode,
+              outcome: denied
+                ? "authorization_denied"
+                : rateLimited !== undefined
+                  ? "execution_error"
+                  : "execution_error",
+              resultCount: null,
+            })
+            .pipe(Effect.either);
+          yield* emitCompletion(
+            READ_MESSAGES,
+            completed._tag === "Left"
+              ? "audit_unavailable"
+              : denied
+                ? "authorization_denied"
+                : rateLimited !== undefined
+                  ? "rate_limited"
+                  : "unavailable",
+          );
+          if (completed._tag === "Left") {
+            return problemResponse("unavailable", 503);
+          }
+          if (denied) return problemResponse("not_found", 404);
+          if (rateLimited !== undefined) {
+            return problemResponse("rate_limited", 429, {
+              retry_after_seconds: Math.max(
+                0,
+                Math.ceil(
+                  (rateLimited.resetsAt.valueOf() - startedAt.valueOf()) /
+                    1_000,
+                ),
+              ),
+              retryable: true,
+              resets_at:
+                rateLimited.resetsAt.toISOString() as ProblemDetails["resets_at"],
+            });
+          }
+          return problemResponse("unavailable", 503);
+        });
+
+      const loaded = yield* persistence
+        .readMessages({
+          apiKeyGrantId: grant.grantId,
+          connectionPublicId,
+          conversationPublicId,
+          cursorPublicId: boundary?.[1] ?? null,
+          cursorSentAt: boundary?.[0] ?? null,
+          limit,
+          observedAt: yield* clock.now,
+          permissions: grant.permissions,
+          personalAccountId: grant.personalAccountId,
+        })
+        .pipe(Effect.either);
+      if (loaded._tag === "Left") {
+        return yield* failAfterAudit("service_unavailable");
+      }
+      const page = loaded.right;
+      if (page === null) {
+        return yield* failAfterAudit("authorization_denied", true);
+      }
+
+      const encryption = yield* EnvelopeEncryptionService;
+      const encryptedContent: Array<{
+        readonly ciphertext: NonNullable<(typeof page.messages)[number]["content"]>;
+        readonly context: {
+          readonly accountId: string;
+          readonly connectionId: string;
+          readonly entity: string;
+          readonly fieldOrObjectPurpose: string;
+          readonly recordId: string;
+        };
+      }> = [];
+      const contentIndexes = page.messages.map((message) => {
+        const add = (
+          ciphertext: (typeof page.messages)[number]["content"],
+          entity: string,
+          purpose: string,
+          recordId: string,
+        ): number | null => {
+          if (ciphertext == null) return null;
+          encryptedContent.push({
+            ciphertext,
+            context: {
+              accountId: page.accountKey.personalAccountId,
+              connectionId: page.connectionKey.connectionId,
+              entity,
+              fieldOrObjectPurpose: purpose,
+              recordId,
+            },
+          });
+          return encryptedContent.length - 1;
+        };
+        return {
+          content: add(
+            message.content,
+            "stored-message",
+            "content",
+            message.messageIdentity,
+          ),
+          mediaMetadata: add(
+            message.media?.metadata ?? null,
+            "stored-media",
+            "metadata",
+            message.media?.id ?? "",
+          ),
+          senderDisplayName: add(
+            message.sender?.displayName ?? null,
+            "directory-contact",
+            "display-name",
+            message.sender?.recordId ?? "",
+          ),
+          senderPhone: add(
+            message.sender?.phone ?? null,
+            "directory-contact",
+            "phone-number",
+            message.sender?.recordId ?? "",
+          ),
+        };
+      });
+      const decrypted =
+        encryptedContent.length === 0
+          ? {
+              _tag: "Right" as const,
+              right: page.messages.map((message) => ({
+                mediaMetadata: null as {
+                  readonly fileName: string | null;
+                  readonly mimeType: string;
+                } | null,
+                message,
+                senderDisplayName: null as string | null,
+                senderPhone: null as string | null,
+                text: null as string | null,
+              })),
+            }
+          : yield* encryption
+              .decryptMany({
+                accountKey: page.accountKey,
+                connectionKey: page.connectionKey,
+                items: encryptedContent,
+              })
+              .pipe(
+                Effect.flatMap((plaintexts) =>
+                  Effect.acquireUseRelease(
+                    Effect.succeed(plaintexts),
+                    (values) =>
+                      Effect.try({
+                        try: () => {
+                          const decoder = new TextDecoder("utf-8", {
+                            fatal: true,
+                            ignoreBOM: false,
+                          });
+                          return page.messages.map((message, index) => {
+                            const indexes = contentIndexes[index];
+                            if (indexes === undefined) {
+                              throw new RestPersistenceError();
+                            }
+                            let text: string | null = null;
+                            if (indexes.content !== null) {
+                              const plaintext = values[indexes.content];
+                              if (plaintext === undefined) {
+                                throw new RestPersistenceError();
+                              }
+                              const content = JSON.parse(
+                                decoder.decode(plaintext),
+                              ) as unknown;
+                              if (
+                                typeof content !== "object" ||
+                                content === null ||
+                                !("text" in content) ||
+                                ((content as { text: unknown }).text !==
+                                  null &&
+                                  typeof (content as { text: unknown })
+                                    .text !== "string")
+                              ) {
+                                throw new RestPersistenceError();
+                              }
+                              text = (content as { text: string | null }).text;
+                            }
+                            let mediaMetadata: {
+                              readonly fileName: string | null;
+                              readonly mimeType: string;
+                            } | null = null;
+                            if (indexes.mediaMetadata !== null) {
+                              const plaintext = values[indexes.mediaMetadata];
+                              if (plaintext === undefined) {
+                                throw new RestPersistenceError();
+                              }
+                              const metadata = JSON.parse(
+                                decoder.decode(plaintext),
+                              ) as {
+                                fileName?: unknown;
+                                mimeType?: unknown;
+                              };
+                              if (
+                                (metadata.fileName !== null &&
+                                  typeof metadata.fileName !== "string") ||
+                                typeof metadata.mimeType !== "string"
+                              ) {
+                                throw new RestPersistenceError();
+                              }
+                              mediaMetadata = {
+                                fileName: metadata.fileName as string | null,
+                                mimeType: metadata.mimeType,
+                              };
+                            }
+                            const decodeString = (valueIndex: number | null) => {
+                              if (valueIndex === null) return null;
+                              const plaintext = values[valueIndex];
+                              if (plaintext === undefined) {
+                                throw new RestPersistenceError();
+                              }
+                              return decoder.decode(plaintext);
+                            };
+                            return {
+                              mediaMetadata,
+                              message,
+                              senderDisplayName: decodeString(
+                                indexes.senderDisplayName,
+                              ),
+                              senderPhone: decodeString(indexes.senderPhone),
+                              text,
+                            };
+                          });
+                        },
+                        catch: () => new RestPersistenceError(),
+                      }),
+                    (values) =>
+                      Effect.sync(() => {
+                        for (const value of values) value.fill(0);
+                      }),
+                  ),
+                ),
+                Effect.either,
+              );
+      if (decrypted._tag === "Left") {
+        return yield* failAfterAudit("service_unavailable");
+      }
+
+      const normalized = decrypted.right.map(
+        ({ message, text, mediaMetadata, senderDisplayName, senderPhone }) => ({
+          content_type: message.contentType,
+          deleted: message.deleted ?? false,
+          direction: message.direction,
+          edited_at: message.editedAt ?? null,
+          media:
+            message.media == null
+              ? null
+              : {
+                  file_name: mediaMetadata?.fileName ?? null,
+                  media_id: message.media.publicId,
+                  mime_type: mediaMetadata?.mimeType ?? null,
+                  path:
+                    message.media.state === "ready" &&
+                    (message.media.plaintextSizeBytes ??
+                      Number.POSITIVE_INFINITY) <= READY_MEDIA_BYTE_LIMIT
+                      ? restStoredMediaPath({
+                          connectionId: connectionPublicId,
+                          mediaId: message.media.publicId,
+                          messageId: message.publicId,
+                        })
+                      : null,
+                  size_bytes: message.media.plaintextSizeBytes,
+                  state: message.media.state,
+                  type: message.contentType as
+                    | "image"
+                    | "audio"
+                    | "video"
+                    | "document"
+                    | "sticker",
+                  unavailable_reason:
+                    message.media.state === "pending"
+                      ? ("media_pending" as const)
+                      : message.media.state === "rejected"
+                        ? ("media_rejected" as const)
+                        : message.media.state === "failed"
+                          ? ("media_failed" as const)
+                          : (message.media.plaintextSizeBytes ??
+                                Number.POSITIVE_INFINITY) >
+                              READY_MEDIA_BYTE_LIMIT
+                            ? ("too_large" as const)
+                            : null,
+                },
+          message_id: message.publicId,
+          sender: {
+            display_name:
+              message.direction === "inbound" ? senderDisplayName : null,
+            kind:
+              message.direction === "outbound"
+                ? ("self" as const)
+                : message.conversationKind === "group"
+                  ? ("group_participant" as const)
+                  : ("contact" as const),
+            phone_last_four:
+              message.direction === "inbound" && senderPhone !== null
+                ? senderPhone.replace(/\D/gu, "").slice(-4) || null
+                : null,
+          },
+          sent_at: message.sentAt,
+          text,
+        }),
+      );
+
+      const encoder = new TextEncoder();
+      const makeBody = (
+        selectedNewestFirst: typeof normalized,
+        nextCursor: string | null,
+        sizeLimited: boolean,
+      ): RestMessageList =>
+        decodeRestMessageList({
+          data: [...selectedNewestFirst].reverse(),
+          meta: {
+            conversation_id: page.conversation.publicId,
+            gaps: page.gaps.map((gap) => ({
+              cause: gap.cause,
+              ends_at: gap.endsAt,
+              starts_at: gap.startsAt,
+            })),
+            history_start_reason: page.historyStartReason,
+            history_starts_at: page.historyStartsAt,
+            kind: page.conversation.kind,
+            recipient_id: page.conversation.recipientId,
+            size_limited: sizeLimited,
+          },
+          pagination: {
+            has_more:
+              page.hasOlder ||
+              selectedNewestFirst.length < normalized.length,
+            next_cursor: nextCursor,
+          },
+        });
+      const cursorFor = (selectedNewestFirst: typeof normalized) =>
+        Effect.gen(function* () {
+          const oldest = selectedNewestFirst.at(-1);
+          if (
+            oldest === undefined ||
+            (!page.hasOlder &&
+              selectedNewestFirst.length === normalized.length)
+          ) {
+            return null;
+          }
+          return yield* cursors.encode({
+            boundary: [oldest.sent_at, oldest.message_id],
+            context: cursorContext,
+            expiresAtEpochSeconds:
+              Math.floor(startedAt.valueOf() / 1_000) + CURSOR_TTL_SECONDS,
+          });
+        });
+
+      let selected = normalized;
+      let body: RestMessageList | null = null;
+      while (selected.length > 0) {
+        const olderCursor = yield* cursorFor(selected).pipe(Effect.either);
+        if (olderCursor._tag === "Left") {
+          return yield* failAfterAudit("service_unavailable");
+        }
+        const candidate = makeBody(
+          selected,
+          olderCursor.right,
+          page.sizeLimited || selected.length < normalized.length,
+        );
+        if (
+          encoder.encode(JSON.stringify(candidate)).byteLength <=
+            REST_MESSAGE_PAGE_MAX_JSON_BYTES ||
+          selected.length === 1
+        ) {
+          body = candidate;
+          break;
+        }
+        selected = selected.slice(0, -1);
+      }
+      if (body === null) {
+        body = makeBody([], null, page.sizeLimited);
+      } else if (
+        encoder.encode(JSON.stringify(body)).byteLength >
+        REST_MESSAGE_PAGE_MAX_JSON_BYTES
+      ) {
+        return yield* failAfterAudit("service_unavailable");
+      }
+
+      const completion = yield* persistence
+        .completeMessageRecordRead({
+          apiKeyGrantId: grant.grantId,
+          auditLogId,
+          dailyRecordLimit: options.dailyRecordLimit,
+          observedAt: yield* clock.now,
+          personalAccountId: grant.personalAccountId,
+          resultCount: body.data.length,
+        })
+        .pipe(Effect.either);
+      if (completion._tag === "Left") {
+        yield* emitCompletion(READ_MESSAGES, "audit_unavailable");
+        return problemResponse("unavailable", 503);
+      }
+      if (completion.right.outcome === "record_quota_exhausted") {
+        return yield* failAfterAudit(
+          "rate_limited",
+          false,
+          { resetsAt: completion.right.resetsAt },
+        );
+      }
+      yield* emitCompletion(READ_MESSAGES, "success", body.data.length);
+      return noStoreJsonResponse(body, 200);
+    }).pipe(
+      Effect.provide(layer),
+      Effect.match({
+        onFailure: (failure) =>
+          failure instanceof Response
+            ? failure
+            : problemResponse("unavailable", 503),
+        onSuccess: (response) => response,
+      }),
+    ),
+  );
+
 const headerCount = (request: Request, name: string): number => {
   let count = 0;
   for (const [header] of request.headers) {
@@ -1897,6 +2491,20 @@ export const createRestHandler =
     const conversationsMatch = CONVERSATIONS_PATH.exec(path);
     if (request.method === "GET" && conversationsMatch?.[1] !== undefined) {
       return listConversations(request, conversationsMatch[1], options, layer);
+    }
+    const messagesMatch = MESSAGES_PATH.exec(path);
+    if (
+      request.method === "GET" &&
+      messagesMatch?.[1] !== undefined &&
+      messagesMatch[2] !== undefined
+    ) {
+      return listMessages(
+        request,
+        messagesMatch[1],
+        messagesMatch[2],
+        options,
+        layer,
+      );
     }
     const sendMatch = SEND_OPERATIONS_PATH.exec(path);
     if (request.method === "POST" && sendMatch?.[1] !== undefined) {

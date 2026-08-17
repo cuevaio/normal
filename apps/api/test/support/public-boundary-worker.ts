@@ -1067,6 +1067,9 @@ const makeTestLayer = (
       loadGroupSearchMaterial: () => Effect.succeed(null),
       listGroups: () => Effect.succeed(null),
       listChats: () => Effect.succeed(null),
+      readMessages: () => Effect.succeed(null),
+      completeMessageRecordRead: () =>
+        Effect.succeed({ outcome: "success" as const }),
       rejectProtectedOperation: (input) =>
         Effect.sync(() => {
           if (

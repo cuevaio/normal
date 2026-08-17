@@ -1318,6 +1318,32 @@ const restPersistenceLayer = (environment: ApiEnvironment) =>
           },
           catch: () => new RestPersistenceError(),
         }),
+      readMessages: (input) =>
+        Effect.tryPromise({
+          try: () => {
+            const connectionString = environment.HYPERDRIVE?.connectionString;
+            if (typeof connectionString !== "string") {
+              throw new Error("database unavailable");
+            }
+            return makePgMcpToolRepository(connectionString).readApiKeyMessages(
+              input,
+            );
+          },
+          catch: () => new RestPersistenceError(),
+        }),
+      completeMessageRecordRead: (input) =>
+        Effect.tryPromise({
+          try: () => {
+            const connectionString = environment.HYPERDRIVE?.connectionString;
+            if (typeof connectionString !== "string") {
+              throw new Error("database unavailable");
+            }
+            return makePgMcpToolRepository(
+              connectionString,
+            ).completeApiKeyMessageRecordRead(input);
+          },
+          catch: () => new RestPersistenceError(),
+        }),
       rejectProtectedOperation: (input) =>
         Effect.tryPromise({
           try: () => {
@@ -2294,6 +2320,7 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
         }
         if (isRestRequest(nextRequest)) {
           return createRestHandler(layer, {
+            dailyRecordLimit: requestQuota.dailyRecordLimit,
             hourLimit: requestQuota.hourLimit,
             keyHourLimit: requestQuota.hourLimit,
             keyMinuteLimit: requestQuota.minuteLimit,

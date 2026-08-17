@@ -6,6 +6,7 @@ import {
   RestConversationListContract,
   RestCreateSendOperationContract,
   RestGroupListContract,
+  RestMessageListContract,
   RestSendOperationContract,
 } from "./rest";
 
@@ -20,6 +21,7 @@ export interface RestRouteMetadata {
     | "/v1/connections/{connection_id}/contacts"
     | "/v1/connections/{connection_id}/groups"
     | "/v1/connections/{connection_id}/conversations"
+    | "/v1/connections/{connection_id}/conversations/{conversation_id}/messages"
     | "/v1/connections/{connection_id}/send-operations";
   readonly permission: (typeof API_KEY_PERMISSIONS)[number];
   readonly summary: string;
@@ -27,6 +29,7 @@ export interface RestRouteMetadata {
     | readonly ["Connections"]
     | readonly ["Conversations"]
     | readonly ["Directory"]
+    | readonly ["Messages"]
     | readonly ["Send Operations"];
 }
 
@@ -70,6 +73,16 @@ export const restRouteRegistry = [
     permission: "messages:read",
     summary: "Page WhatsApp Conversations",
     tags: ["Conversations"],
+  },
+  {
+    description:
+      "Page complete retained Stored Messages for one WhatsApp Conversation owned by an explicitly selected WhatsApp Connection. The newest page is selected first; records inside each page are chronological. The REST cursor supports deterministic older traversal and binds the calling API Key, this operation, the Connection, conversation, limit, and sort version for 15 minutes. Responses include complete retained text, Deleted Message Tombstones, sender metadata, the Message History Window, and intersecting Ingestion Gaps. The encoded JSON response never exceeds 1 MiB: the server returns fewer records rather than truncating or splitting a Stored Message. Eligible Stored Media is represented by an authenticated nested path, never an MCP URI or public URL.",
+    method: "GET",
+    operationId: "listMessages",
+    path: "/v1/connections/{connection_id}/conversations/{conversation_id}/messages",
+    permission: "messages:read",
+    summary: "Page complete Stored Messages",
+    tags: ["Messages"],
   },
   {
     description:
@@ -160,6 +173,54 @@ const conversationListExample = {
   },
 };
 
+const messageListExample = {
+  data: [
+    {
+      content_type: "image",
+      deleted: false,
+      direction: "inbound",
+      edited_at: null,
+      media: {
+        file_name: "photo.jpg",
+        media_id: "med_xxxxxxxxxxxxxxxxxxxxx",
+        mime_type: "image/jpeg",
+        path: "/v1/connections/con_xxxxxxxxxxxxxxxxxxxxx/messages/msg_xxxxxxxxxxxxxxxxxxxxx/media/med_xxxxxxxxxxxxxxxxxxxxx",
+        size_bytes: 245123,
+        state: "ready",
+        type: "image",
+        unavailable_reason: null,
+      },
+      message_id: "msg_xxxxxxxxxxxxxxxxxxxxx",
+      sender: {
+        display_name: "Ada",
+        kind: "contact",
+        phone_last_four: "0199",
+      },
+      sent_at: "2026-08-14T11:58:00.000Z",
+      text: "A caption",
+    },
+  ],
+  meta: {
+    conversation_id: "cvs_xxxxxxxxxxxxxxxxxxxxx",
+    gaps: [
+      {
+        cause: "connection_unavailable",
+        ends_at: "2026-08-14T11:08:00.000Z",
+        starts_at: "2026-08-14T11:00:00.000Z",
+      },
+    ],
+    history_start_reason: "retention_policy",
+    history_starts_at: "2026-07-15T12:00:00.000Z",
+    kind: "direct",
+    recipient_id: "ctc_xxxxxxxxxxxxxxxxxxxxx",
+    size_limited: false,
+  },
+  pagination: {
+    has_more: true,
+    next_cursor: "opaque-rest-cursor",
+  },
+};
+
 const problemExample = {
   code: "invalid_credentials",
   detail: "The API Key is missing, malformed, expired, or revoked.",
@@ -226,6 +287,11 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
       description:
         "WhatsApp Conversations with observed Stored Message activity for one selected WhatsApp Connection.",
       name: "Conversations",
+    },
+    {
+      description:
+        "Complete retained Stored Messages for one WhatsApp Conversation. REST pages are not constrained by MCP's duplicated-text response cap.",
+      name: "Messages",
     },
     {
       description:
@@ -616,10 +682,118 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
         "x-normal-permission": restRouteRegistry[3].permission,
       },
     },
-    "/v1/connections/{connection_id}/send-operations": {
-      post: {
+    "/v1/connections/{connection_id}/conversations/{conversation_id}/messages": {
+      get: {
         description: restRouteRegistry[4].description,
         operationId: restRouteRegistry[4].operationId,
+        parameters: [
+          {
+            description:
+              "Opaque handle of the explicitly selected WhatsApp Connection.",
+            in: "path",
+            name: "connection_id",
+            required: true,
+            schema: { type: "string", pattern: "^con_[A-Za-z0-9_-]{21}$" },
+          },
+          {
+            description:
+              "Opaque handle of a WhatsApp Conversation owned by that Connection.",
+            in: "path",
+            name: "conversation_id",
+            required: true,
+            schema: { type: "string", pattern: "^cvs_[A-Za-z0-9_-]{21}$" },
+          },
+          {
+            description: "Page size from 1 through 50. Defaults to 20.",
+            in: "query",
+            name: "limit",
+            required: false,
+            schema: { type: "integer", minimum: 1, maximum: 50, default: 20 },
+          },
+          {
+            description:
+              "Opaque REST cursor from a prior call with identical bound inputs. Traverses older Stored Messages.",
+            in: "query",
+            name: "cursor",
+            required: false,
+            schema: { type: "string", minLength: 1, maxLength: 4096 },
+          },
+        ],
+        responses: {
+          "200": {
+            content: {
+              "application/json": {
+                example: messageListExample,
+                schema: { $ref: "#/components/schemas/MessageList" },
+              },
+            },
+            description:
+              "A chronological page of complete retained Stored Messages, newest page first.",
+          },
+          "400": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description:
+              "The cursor is expired, tampered, bound to another grant or query, or an MCP cursor.",
+          },
+          "401": {
+            content: {
+              "application/problem+json": {
+                example: problemExample,
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description:
+              "The API Key is missing, malformed, expired, or revoked.",
+          },
+          "403": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description: "The API Key does not include `messages:read`.",
+          },
+          "404": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description:
+              "The WhatsApp Connection or Conversation is unknown, unselected, deleted, excluded, or not visible to this key.",
+          },
+          "429": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description:
+              "Personal Account request or returned-record quota is exhausted.",
+          },
+          "503": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description: "Authentication or audit authority is unavailable.",
+          },
+        },
+        security: [{ apiKey: [] }],
+        summary: restRouteRegistry[4].summary,
+        tags: [...restRouteRegistry[4].tags],
+        "x-normal-permission": restRouteRegistry[4].permission,
+      },
+    },
+    "/v1/connections/{connection_id}/send-operations": {
+      post: {
+        description: restRouteRegistry[5].description,
+        operationId: restRouteRegistry[5].operationId,
         parameters: [
           {
             description:
@@ -701,9 +875,9 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
           ),
         },
         security: [{ apiKey: [] }],
-        summary: restRouteRegistry[4].summary,
-        tags: [...restRouteRegistry[4].tags],
-        "x-normal-permission": restRouteRegistry[4].permission,
+        summary: restRouteRegistry[5].summary,
+        tags: [...restRouteRegistry[5].tags],
+        "x-normal-permission": restRouteRegistry[5].permission,
       },
     },
   },
@@ -714,6 +888,7 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
       ConversationList: jsonSchema(RestConversationListContract),
       CreateSendOperation: jsonSchema(RestCreateSendOperationContract),
       GroupList: jsonSchema(RestGroupListContract),
+      MessageList: jsonSchema(RestMessageListContract),
       ProblemDetails: jsonSchema(ProblemDetailsContract),
       SendOperation: jsonSchema(RestSendOperationContract),
     },
