@@ -35,7 +35,9 @@ describe("API Key restore invalidation", () => {
     });
 
   const createKey = (
-    overrides: Partial<Parameters<ReturnType<typeof repository>["create"]>[0]> = {},
+    overrides: Partial<
+      Parameters<ReturnType<typeof repository>["create"]>[0]
+    > = {},
   ) =>
     repository().create({
       clerkUserId,

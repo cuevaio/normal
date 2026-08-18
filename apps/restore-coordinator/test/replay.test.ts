@@ -351,7 +351,8 @@ describe("restore replay", () => {
       finishObjectDeletion: async () => undefined,
       invalidateApiKeys: async () => {
         const next = batchSizes.shift();
-        if (next === undefined) throw new Error("unexpected extra invalidation");
+        if (next === undefined)
+          throw new Error("unexpected extra invalidation");
         return next;
       },
       listObjectDeletions: async () => [],

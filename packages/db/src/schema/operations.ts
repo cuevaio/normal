@@ -191,7 +191,9 @@ export const restoreReplayAuditInAppPrivate = publicSchema.table(
     deletedEntityCount: integer("deleted_entity_count").notNull(),
     expiredRecordCount: integer("expired_record_count").notNull(),
     apiKeysRevoked: integer("api_keys_revoked").default(0).notNull(),
-    apiKeyDigestsCleared: integer("api_key_digests_cleared").default(0).notNull(),
+    apiKeyDigestsCleared: integer("api_key_digests_cleared")
+      .default(0)
+      .notNull(),
   },
   (_table) => [
     check(
@@ -207,7 +209,10 @@ export const restoreReplayAuditInAppPrivate = publicSchema.table(
       "restore_replay_audit_expired_record_count_check",
       sql`expired_record_count >= 0`,
     ),
-    check("restore_replay_audit_api_keys_revoked_check", sql`api_keys_revoked >= 0`),
+    check(
+      "restore_replay_audit_api_keys_revoked_check",
+      sql`api_keys_revoked >= 0`,
+    ),
     check(
       "restore_replay_audit_api_key_digests_cleared_check",
       sql`api_key_digests_cleared >= 0`,
