@@ -9,12 +9,12 @@ const assertReference = async (
   await page.setViewportSize(viewport);
   const response = await page.goto("/");
   expect(response?.ok()).toBe(true);
-  await expect(page.getByText("Normal API")).toBeVisible();
-  await expect(page.getByText("Getting started")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Normal API" })).toBeVisible();
+  await expect(page.getByText("Getting started", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /test request/i })).toHaveCount(
     0,
   );
-  await expect(page.getByText("curl", { exact: false }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Shell Curl" })).toBeVisible();
   expect(await page.locator("input[type='password']").count()).toBe(0);
 };
 
