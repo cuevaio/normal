@@ -33,6 +33,10 @@ const monthly: DrillEvidence = {
     current_time_expiry_applied: true,
     deletion_markers_replayed: true,
     deleted_identifiers_absent: true,
+    api_keys_revoked: true,
+    api_key_digests_cleared: true,
+    api_key_hmac_rotated: true,
+    predecessor_hmac_rejected: true,
   },
 };
 
@@ -86,6 +90,25 @@ describe("recovery drill evidence", () => {
         new Date("2026-08-02"),
       ),
     ).toContain("99.5 percent first-party availability objective was missed");
+  });
+
+  test("rejects missing API Key restore invalidation evidence", () => {
+    expect(
+      validateDrillEvidence(
+        {
+          ...monthly,
+          checks: {
+            ...monthly.checks,
+            api_keys_revoked: false,
+            predecessor_hmac_rejected: undefined,
+          },
+        },
+        new Date("2026-08-02"),
+      ),
+    ).toEqual([
+      "monthly_restore check api_keys_revoked did not pass",
+      "monthly_restore check predecessor_hmac_rejected did not pass",
+    ]);
   });
 
   test("rejects serving restores and missing verification", () => {

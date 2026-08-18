@@ -50,7 +50,7 @@ describe("production migrations", () => {
         (SELECT count(*)::int FROM public.schema_migrations) AS legacy,
         (SELECT count(*)::int FROM public.drizzle_migrations) AS standard
     `);
-    expect(ledgers.rows).toEqual([{ legacy: 40, standard: 16 }]);
+    expect(ledgers.rows).toEqual([{ legacy: 40, standard: 17 }]);
   });
 
   test("clears only retention limitations superseded by a complete Directory snapshot", async () => {
@@ -1275,7 +1275,7 @@ describe("production migrations", () => {
       [accountA],
     );
     expect(protectedState.rows).toEqual([
-      { account_count: 0, audit_columns: 5, object_deletion_count: 0 },
+      { account_count: 0, audit_columns: 7, object_deletion_count: 0 },
     ]);
   });
 });

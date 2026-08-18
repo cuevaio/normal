@@ -46,6 +46,13 @@ export interface RestoreRepository {
   readonly finishObjectDeletion: (
     deletion: RestoreObjectDeletion,
   ) => Promise<void>;
+  readonly invalidateApiKeys: (
+    observedAt: string,
+    limit: number,
+  ) => Promise<{
+    readonly digestsCleared: number;
+    readonly revoked: number;
+  }>;
   readonly listObjectDeletions: (
     limit: number,
   ) => Promise<ReadonlyArray<RestoreObjectDeletion>>;
@@ -163,6 +170,22 @@ export const makePgRestoreRepository = (
         ) AS removed
       `);
       return Number(result[0]?.removed ?? 0);
+    }),
+  invalidateApiKeys: (observedAt, limit) =>
+    withClient(connectionString, async (client) => {
+      const db = makeDatabase(client);
+      const result = await db.execute<{
+        digests_cleared: number;
+        revoked: number;
+      }>(sql`
+        SELECT * FROM public.invalidate_restored_api_keys(
+          ${observedAt}, ${limit}
+        )
+      `);
+      return {
+        digestsCleared: Number(result[0]?.digests_cleared ?? 0),
+        revoked: Number(result[0]?.revoked ?? 0),
+      };
     }),
   purgeExpired: (observedAt, limit) =>
     withClient(connectionString, async (client) => {

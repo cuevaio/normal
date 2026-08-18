@@ -94,6 +94,12 @@ Ingestion Gap and index-coverage metadata, and shared returned-record quota,
 and that Connection Deletion removes selection, revokes a last-selected key
 and clears its digest, keeps remaining grants, leaves disconnection in place,
 and rejects new sends while remaining selected Connections can still send.
+Restore-coordinator and migrated-Postgres restore tests prove every restored
+API Key is revoked and every digest is cleared before `is_restore_ready`,
+aggregate invalidation evidence is recorded, incomplete batches, authority
+failure, and branch mismatch keep the gate closed, and a predecessor HMAC
+generation is not accepted as a verification fallback. Recovery-drill
+evidence requires those restore checks plus HMAC-rotation attestation.
 
 The browser always renders `apps/web/src/app/home-experience.tsx`; there is no
 test component alias or selectable web composition root. Playwright supplies
@@ -147,10 +153,11 @@ test-only readiness and binding-probe routes are not production diagnostics.
 
 Database tests apply the versioned production migrations to an isolated PGlite
 Postgres environment. Fixture setup may use migration authority, but behavior
-and adversarial checks switch to `whatsapp_api_runtime` or
-`whatsapp_webhook_runtime`, use transaction-local Personal Account or
-WhatsApp Connection context, and retain the production RLS policies, bootstrap
-functions, and composite tenant foreign keys. Do not replace repositories with
+and adversarial checks switch to `whatsapp_api_runtime`,
+`whatsapp_webhook_runtime`, or `whatsapp_restore_runtime`, use
+transaction-local Personal Account or WhatsApp Connection context, and retain
+the production RLS policies, bootstrap functions, and composite tenant
+foreign keys. Do not replace repositories with
 in-memory implementations when data is involved. Send Operation tests prove
 MCP Authorization and API Key remain distinct grant identities for create,
 replay, quota, and status, and that public receipts omit internal IDs.

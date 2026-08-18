@@ -106,6 +106,8 @@ export const ApiKeyHmac = Context.GenericTag<ApiKeyHmacService>(
   "@whatsapp-mcp/api/ApiKeyHmac",
 );
 
+// One generation only. Recovery replaces API_KEY_HMAC_SECRET; a predecessor
+// secret must not be consulted as a verification fallback.
 export const makeApiKeyHmac = (secretHex: string): ApiKeyHmacService => {
   const keyBytes = Uint8Array.from(secretHex.match(/../gu) ?? [], (byte) =>
     Number.parseInt(byte, 16),

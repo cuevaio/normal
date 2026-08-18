@@ -121,6 +121,11 @@ for (const deployable of deployables) {
       "RESTORE_DATABASE_URL",
     ].sort();
     for (const [name, configuration] of configurations) {
+      if (requiredSecrets(configuration).includes("API_KEY_HMAC_SECRET")) {
+        throw new Error(
+          `Restore coordinator ${name} must not receive API Key HMAC authority.`,
+        );
+      }
       if (!hasSameStrings(requiredSecrets(configuration), required)) {
         throw new Error(
           `Restore coordinator ${name} must require only its marker and restricted database credentials.`,

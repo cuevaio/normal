@@ -186,16 +186,26 @@ provider-control, OAuth, or public-route binding.
    then drain `stored_media_object_deletions`, before verification access or
    serving traffic. This applies current per-connection policy as required by
    ADR 0021 without reopening content from the restored snapshot.
-6. Verify no marked identifier has an available key envelope or readable
+6. Drain `invalidate_restored_api_keys` until a batch revokes and clears
+   fewer than the limit. The restore gate stays closed while any API Key is
+   still active or still has a credential digest. Record only the aggregate
+   revoked and digest-cleared counts.
+7. Generate a new 32-byte `API_KEY_HMAC_SECRET` with `openssl rand -hex 32`
+   and publish it as the API Worker secret. Do not retain the predecessor as
+   a verification fallback, dual-generation secret, or restore-coordinator
+   credential. Users create replacement keys after recovery.
+8. Verify no marked identifier has an available key envelope or readable
    content, and that no excluded recipient has readable Stored Message content,
    readable Stored Media, or a remaining prepared transition. Record marker
-   count, replayed transition count, unresolved prefix count, normalized
-   outcomes, RPO, and elapsed RTO without recording tenant, recipient, or
-   provider identifiers. A non-zero unresolved prefix count is expected when
-   the restore point predates a recipient; track it until the API sweep
-   reports it resolved.
-7. Enable verification access, and later traffic, only after every marker,
-   recipient transition, and expiry operation succeeds.
+   count, replayed transition count, unresolved prefix count, API Key
+   invalidation counts, HMAC-rotation evidence, normalized outcomes, RPO, and
+   elapsed RTO without recording tenant, recipient, credential, or provider
+   identifiers. A non-zero unresolved prefix count is expected when the
+   restore point predates a recipient; track it until the API sweep reports
+   it resolved.
+9. Enable verification access, and later traffic, only after every marker,
+   recipient transition, expiry, API Key invalidation, and HMAC-rotation
+   operation succeeds.
 
 Do not sample marker or recipient transition replay, skip a malformed object,
 substitute a database copy of marker or journal state, or unlock/delete either

@@ -41,6 +41,10 @@ test("monthly automation requests a random prior-history point and non-serving b
       current_time_expiry_applied: true,
       deletion_markers_replayed: true,
       deleted_identifiers_absent: true,
+      api_keys_revoked: true,
+      api_key_digests_cleared: true,
+      api_key_hmac_rotated: true,
+      predecessor_hmac_rejected: true,
     },
   };
   await runRecoveryDrill("monthly_restore", {
@@ -99,6 +103,10 @@ test("random restore selection spans the full prior 30-day history", async () =>
           current_time_expiry_applied: true,
           deletion_markers_replayed: true,
           deleted_identifiers_absent: true,
+          api_keys_revoked: true,
+          api_key_digests_cleared: true,
+          api_key_hmac_rotated: true,
+          predecessor_hmac_rejected: true,
         },
       });
     },
@@ -146,6 +154,10 @@ test("rejects evidence for a different drill kind", async () => {
             current_time_expiry_applied: true,
             deletion_markers_replayed: true,
             deleted_identifiers_absent: true,
+            api_keys_revoked: true,
+            api_key_digests_cleared: true,
+            api_key_hmac_rotated: true,
+            predecessor_hmac_rejected: true,
           },
         }),
     }),

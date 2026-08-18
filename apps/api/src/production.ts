@@ -1182,6 +1182,8 @@ const apiKeyRuntimeLayer = (environment: ApiEnvironment) =>
     Layer.effect(
       ApiKeyHmac,
       apiKeyHmacSecret.pipe(
+        // Recovery publishes a newly generated secret. A predecessor
+        // generation is never accepted as a verification fallback.
         Effect.map((secret) => makeApiKeyHmac(Redacted.value(secret))),
         Effect.withConfigProvider(environmentConfigProvider(environment)),
       ),

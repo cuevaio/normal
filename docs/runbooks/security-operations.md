@@ -59,12 +59,24 @@ the opaque `apk_` handle, outcome, and incident reference.
 
 ## API Key HMAC compromise
 
-`API_KEY_HMAC_SECRET` is purpose-specific. Suspected compromise and every
-production database restore use intentional global invalidation: revoke every
+`API_KEY_HMAC_SECRET` is purpose-specific. Suspected compromise uses
+intentional global invalidation rather than an unsafe fallback: revoke every
 API Key, clear every digest, generate a new 32-byte hex secret, publish it as
 the Worker secret, and record aggregate completion evidence. The predecessor
 must not remain accepted as a verification fallback. Users create replacement
 keys after recovery.
+
+## Restore HMAC rotation
+
+Every production database restore uses the same intentional global
+invalidation before verification access reopens. The restore coordinator
+revokes every restored API Key and clears every digest, recording only
+aggregate counts. Operators then generate and publish a new
+`API_KEY_HMAC_SECRET`. The predecessor is not accepted as a verification
+fallback, and no revoked grant may authenticate inside the Neon
+recovery-point window. Users create replacement keys after recovery.
+
+## Absence of routine API Key HMAC rotation
 
 Routine rotation that preserves active API Keys is not part of v1. It would
 require a reviewed dual-generation migration. Do not replace the secret as an

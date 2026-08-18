@@ -48,6 +48,8 @@ describe("operator runbooks", () => {
       "Immutable audit review",
       "User API Key revocation",
       "API Key HMAC compromise",
+      "Restore HMAC rotation",
+      "Absence of routine API Key HMAC rotation",
     ]) {
       expect(security).toContain(`## ${heading}`);
     }

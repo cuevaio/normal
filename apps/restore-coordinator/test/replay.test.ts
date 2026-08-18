@@ -83,6 +83,10 @@ describe("restore replay", () => {
         },
         recordUnresolvedRecipientPrefixes: async () => 0,
         replayRecipientTransition: async () => true,
+        invalidateApiKeys: async () => {
+          calls.push("invalidate-api-keys");
+          return { digestsCleared: 3, revoked: 3 };
+        },
         purgeExpired: async () => {
           calls.push("expire");
           return 2;
@@ -100,6 +104,8 @@ describe("restore replay", () => {
       },
     });
     expect(result).toEqual({
+      apiKeyDigestsCleared: 3,
+      apiKeysRevoked: 3,
       deletedEntityCount: 1,
       expiredRecordCount: 2,
       markerCount: 1,
@@ -110,6 +116,7 @@ describe("restore replay", () => {
       "replay-marker",
       "purge-excluded",
       "expire",
+      "invalidate-api-keys",
       "delete-object",
       "finish-object",
       "ready",
@@ -157,6 +164,7 @@ describe("restore replay", () => {
       begin: async () => [],
       complete: async () => undefined,
       finishObjectDeletion: async () => undefined,
+      invalidateApiKeys: async () => ({ digestsCleared: 0, revoked: 0 }),
       listObjectDeletions: async () => [],
       listRecipientIdentities: async (_limit: number, cursor: string | null) =>
         cursor === null ? [identity] : [],
@@ -223,6 +231,7 @@ describe("restore replay", () => {
       begin: async () => [],
       complete: async () => undefined,
       finishObjectDeletion: async () => undefined,
+      invalidateApiKeys: async () => ({ digestsCleared: 0, revoked: 0 }),
       listObjectDeletions: async () => [],
       // The snapshot predates this recipient, so the scan yields nothing.
       listRecipientIdentities: async () => [],
@@ -294,6 +303,7 @@ describe("restore replay", () => {
         completed = true;
       },
       finishObjectDeletion: async () => undefined,
+      invalidateApiKeys: async () => ({ digestsCleared: 0, revoked: 0 }),
       listObjectDeletions: async () => [],
       listRecipientIdentities: async (_limit: number, cursor: string | null) =>
         cursor === null ? [identity] : [],
@@ -324,6 +334,90 @@ describe("restore replay", () => {
         repository,
       }),
     ).rejects.toThrow();
+    expect(completed).toBe(false);
+  });
+
+  test("drains restored API Key invalidation batches before readiness", async () => {
+    const batchSizes = [
+      { digestsCleared: 1000, revoked: 1000 },
+      { digestsCleared: 2, revoked: 2 },
+    ];
+    let completed = false;
+    const repository = {
+      begin: async () => [],
+      complete: async () => {
+        completed = true;
+      },
+      finishObjectDeletion: async () => undefined,
+      invalidateApiKeys: async () => {
+        const next = batchSizes.shift();
+        if (next === undefined) throw new Error("unexpected extra invalidation");
+        return next;
+      },
+      listObjectDeletions: async () => [],
+      listRecipientIdentities: async () => [],
+      purgeExcludedRecipientHistory: async () => 0,
+      purgeExpired: async () => 0,
+      recordUnresolvedRecipientPrefixes: async () => 0,
+      replayDeletion: async () => false,
+      replayRecipientTransition: async () => true,
+    } as unknown as RestoreRepository;
+
+    const result = await replayRestore({
+      branchId: "br-restored",
+      buckets: {
+        stored_media: { delete: async () => undefined },
+        webhook_ingress: { delete: async () => undefined },
+      },
+      environment: "production",
+      hmacSecret: Redacted.make("ab".repeat(32)),
+      markers: { create: vi.fn(), enumerate: () => Effect.succeed([]) },
+      observedAt: "2026-08-03T12:00:00.000Z",
+      recipientHmacSecret: Redacted.make("cd".repeat(32)),
+      recipientJournal: emptyJournal,
+      repository,
+    });
+    expect(result.apiKeysRevoked).toBe(1002);
+    expect(result.apiKeyDigestsCleared).toBe(1002);
+    expect(completed).toBe(true);
+  });
+
+  test("keeps readiness closed when API Key invalidation fails", async () => {
+    let completed = false;
+    const repository = {
+      begin: async () => [],
+      complete: async () => {
+        completed = true;
+      },
+      finishObjectDeletion: async () => undefined,
+      invalidateApiKeys: async () => {
+        throw new Error("restore api key invalidation evidence is incomplete");
+      },
+      listObjectDeletions: async () => [],
+      listRecipientIdentities: async () => [],
+      purgeExcludedRecipientHistory: async () => 0,
+      purgeExpired: async () => 0,
+      recordUnresolvedRecipientPrefixes: async () => 0,
+      replayDeletion: async () => false,
+      replayRecipientTransition: async () => true,
+    } as unknown as RestoreRepository;
+
+    await expect(
+      replayRestore({
+        branchId: "br-restored",
+        buckets: {
+          stored_media: { delete: async () => undefined },
+          webhook_ingress: { delete: async () => undefined },
+        },
+        environment: "production",
+        hmacSecret: Redacted.make("ab".repeat(32)),
+        markers: { create: vi.fn(), enumerate: () => Effect.succeed([]) },
+        observedAt: "2026-08-03T12:00:00.000Z",
+        recipientHmacSecret: Redacted.make("cd".repeat(32)),
+        recipientJournal: emptyJournal,
+        repository,
+      }),
+    ).rejects.toThrow("restore api key invalidation evidence is incomplete");
     expect(completed).toBe(false);
   });
 });

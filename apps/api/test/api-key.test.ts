@@ -7,6 +7,7 @@ import {
   ApiKeyPersistence,
   type ApiKeyPersistenceService,
   createApiKeyManagementHandler,
+  makeApiKeyHmac,
 } from "../src/api-key";
 import {
   HumanIdentity,
@@ -307,5 +308,19 @@ describe("API Key management HTTP boundary", () => {
     expect(options.headers.get("access-control-allow-origin")).toBe(
       browserOrigin,
     );
+  });
+});
+
+describe("API Key HMAC authority", () => {
+  test("does not accept a predecessor generation as a verification fallback", async () => {
+    const predecessor = makeApiKeyHmac("ab".repeat(32));
+    const current = makeApiKeyHmac("cd".repeat(32));
+    const predecessorDigest = await Effect.runPromise(
+      predecessor.digest(credential),
+    );
+    const currentDigest = await Effect.runPromise(current.digest(credential));
+    expect(predecessorDigest).toHaveLength(32);
+    expect(currentDigest).toHaveLength(32);
+    expect(predecessorDigest).not.toEqual(currentDigest);
   });
 });

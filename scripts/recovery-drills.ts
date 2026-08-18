@@ -34,6 +34,10 @@ const monthlyChecks = [
   "current_time_expiry_applied",
   "deletion_markers_replayed",
   "deleted_identifiers_absent",
+  "api_keys_revoked",
+  "api_key_digests_cleared",
+  "api_key_hmac_rotated",
+  "predecessor_hmac_rejected",
 ] as const;
 
 const quarterlyChecks = [

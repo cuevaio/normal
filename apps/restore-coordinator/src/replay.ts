@@ -135,6 +135,20 @@ export const replayRestore = async (input: {
     expiredRecordCount += purged;
     if (purged < 1000) break;
   }
+  // Restored API Keys must lose every digest before readiness. Incomplete
+  // batches leave the gate closed because complete_restore_replay fails
+  // while any authenticable grant remains.
+  let apiKeysRevoked = 0;
+  let apiKeyDigestsCleared = 0;
+  for (;;) {
+    const invalidated = await input.repository.invalidateApiKeys(
+      input.observedAt,
+      1000,
+    );
+    apiKeysRevoked += invalidated.revoked;
+    apiKeyDigestsCleared += invalidated.digestsCleared;
+    if (invalidated.revoked < 1000 && invalidated.digestsCleared < 1000) break;
+  }
   for (;;) {
     const deletions = await input.repository.listObjectDeletions(1000);
     for (const deletion of deletions) {
@@ -151,6 +165,8 @@ export const replayRestore = async (input: {
     markerCount: markerReferences.length,
   });
   return {
+    apiKeyDigestsCleared,
+    apiKeysRevoked,
     deletedEntityCount,
     expiredRecordCount,
     markerCount: markerReferences.length,

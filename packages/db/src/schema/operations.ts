@@ -190,6 +190,8 @@ export const restoreReplayAuditInAppPrivate = publicSchema.table(
     markerCount: integer("marker_count").notNull(),
     deletedEntityCount: integer("deleted_entity_count").notNull(),
     expiredRecordCount: integer("expired_record_count").notNull(),
+    apiKeysRevoked: integer("api_keys_revoked").default(0).notNull(),
+    apiKeyDigestsCleared: integer("api_key_digests_cleared").default(0).notNull(),
   },
   (_table) => [
     check(
@@ -204,6 +206,11 @@ export const restoreReplayAuditInAppPrivate = publicSchema.table(
     check(
       "restore_replay_audit_expired_record_count_check",
       sql`expired_record_count >= 0`,
+    ),
+    check("restore_replay_audit_api_keys_revoked_check", sql`api_keys_revoked >= 0`),
+    check(
+      "restore_replay_audit_api_key_digests_cleared_check",
+      sql`api_key_digests_cleared >= 0`,
     ),
   ],
 );
@@ -225,6 +232,8 @@ export const restoreReadinessInAppPrivate = publicSchema.table(
     markerCount: integer("marker_count"),
     deletedEntityCount: integer("deleted_entity_count"),
     expiredRecordCount: integer("expired_record_count"),
+    apiKeysRevoked: integer("api_keys_revoked"),
+    apiKeyDigestsCleared: integer("api_key_digests_cleared"),
   },
   (_table) => [
     check("restore_readiness_singleton_check", sql`CHECK (singleton)`),
@@ -249,8 +258,16 @@ export const restoreReadinessInAppPrivate = publicSchema.table(
       sql`(expired_record_count IS NULL) OR (expired_record_count >= 0)`,
     ),
     check(
+      "restore_readiness_api_keys_revoked_check",
+      sql`(api_keys_revoked IS NULL) OR (api_keys_revoked >= 0)`,
+    ),
+    check(
+      "restore_readiness_api_key_digests_cleared_check",
+      sql`(api_key_digests_cleared IS NULL) OR (api_key_digests_cleared >= 0)`,
+    ),
+    check(
       "restore_readiness_check",
-      sql`((state = 'replaying'::text) AND (completed_at IS NULL)) OR ((state = 'ready'::text) AND (completed_at IS NOT NULL) AND (marker_count IS NOT NULL) AND (deleted_entity_count IS NOT NULL) AND (expired_record_count IS NOT NULL))`,
+      sql`((state = 'replaying'::text) AND (completed_at IS NULL)) OR ((state = 'ready'::text) AND (completed_at IS NOT NULL) AND (marker_count IS NOT NULL) AND (deleted_entity_count IS NOT NULL) AND (expired_record_count IS NOT NULL) AND (api_keys_revoked IS NOT NULL) AND (api_key_digests_cleared IS NOT NULL))`,
     ),
   ],
 );
