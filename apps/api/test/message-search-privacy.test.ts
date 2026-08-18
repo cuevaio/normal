@@ -1,6 +1,6 @@
+import { importCursorSigningKey } from "@whatsapp-mcp/contracts/cursor";
 import { Effect } from "effect";
 import { describe, expect, test } from "vitest";
-import { importCursorSigningKey } from "@whatsapp-mcp/contracts/cursor";
 import {
   importMessageSearchIndexKey,
   messageSearchIndexesForQuery,

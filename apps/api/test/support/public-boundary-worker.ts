@@ -1005,6 +1005,7 @@ const makeTestLayer = (
     }),
     Layer.succeed(RestCursorCodec, {
       decode: () => Effect.fail(new RestCursorError()),
+      digestSearchQuery: () => Effect.succeed("query-digest"),
       encode: () => Effect.succeed("rest-cursor"),
     }),
     Layer.succeed(RestPersistence, {
@@ -1069,6 +1070,7 @@ const makeTestLayer = (
       listGroups: () => Effect.succeed(null),
       listChats: () => Effect.succeed(null),
       readMessages: () => Effect.succeed(null),
+      searchMessages: () => Effect.succeed(null),
       completeMessageRecordRead: () =>
         Effect.succeed({ outcome: "success" as const }),
       failStoredMediaRead: () => Effect.void,

@@ -83,6 +83,7 @@ import {
   normalizeGroupDisplayName,
 } from "./group-privacy";
 import { noStoreJsonResponse, noStoreResponse } from "./http-response";
+import { SendTextMessage, type SendTextMessageService } from "./mcp";
 import {
   importMessageSearchIndexKey,
   messageSearchIndexesForQuery,
@@ -90,7 +91,6 @@ import {
   validateMessageSearchQuery,
   verifyMessageSearchCandidate,
 } from "./message-search-privacy";
-import { SendTextMessage, type SendTextMessageService } from "./mcp";
 import {
   SafeTelemetry,
   type SafeTelemetry as SafeTelemetryService,
@@ -2645,16 +2645,13 @@ const searchMessages = (
       if (keyBytes._tag === "Left") {
         return yield* failAfterAudit("service_unavailable");
       }
+      const internalConnectionId = material.right.connectionKey.connectionId;
       const tokens = yield* Effect.acquireUseRelease(
         Effect.succeed(keyBytes.right),
         (bytes) =>
           importMessageSearchIndexKey(bytes).pipe(
             Effect.flatMap((key) =>
-              messageSearchIndexesForQuery(
-                key,
-                material.right.connectionKey.connectionId,
-                query,
-              ),
+              messageSearchIndexesForQuery(key, internalConnectionId, query),
             ),
           ),
         (bytes) => Effect.sync(() => bytes.fill(0)),

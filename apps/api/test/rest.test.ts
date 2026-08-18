@@ -2198,7 +2198,9 @@ describe("REST Stored Message search", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
-    const body = await response.json();
+    const body = (await response.json()) as {
+      pagination: { next_cursor: string | null };
+    };
     expect(body).toEqual({
       data: [
         {

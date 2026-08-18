@@ -63,9 +63,9 @@ describe("API Key Stored Message search", () => {
           display_name_fallback, public_id, number_suffix, state,
           state_changed_at, created_at
         ) VALUES
-          ($1, $2, '30000000-0000-4000-8000-000000000086', 'Search Finch',
+          ($1, $2, '30000000-0000-4000-8000-000000000086', 'Bright Badger',
            $3, '1234', 'connected', $5, $6),
-          ($7, $2, '30000000-0000-4000-8000-000000000087', 'Other Finch',
+          ($7, $2, '30000000-0000-4000-8000-000000000087', 'Calm Falcon',
            $4, '5678', 'connected', $5, $6)`,
       [
         connectionId,
