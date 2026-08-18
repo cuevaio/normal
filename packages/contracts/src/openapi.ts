@@ -33,7 +33,8 @@ export interface RestRouteMetadata {
     | "/v1/connections/{connection_id}/conversations/{conversation_id}/messages"
     | "/v1/connections/{connection_id}/messages/search"
     | "/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}"
-    | "/v1/connections/{connection_id}/send-operations";
+    | "/v1/connections/{connection_id}/send-operations"
+    | "/v1/connections/{connection_id}/send-operations/{send_operation_id}";
   readonly permission: (typeof API_KEY_PERMISSIONS)[number];
   readonly summary: string;
   readonly tags:
@@ -123,6 +124,16 @@ export const restRouteRegistry = [
     path: "/v1/connections/{connection_id}/send-operations",
     permission: "messages:send",
     summary: "Create or replay a text Send Operation",
+    tags: ["Send Operations"],
+  },
+  {
+    description:
+      "Read local Send Status for one Send Operation created by the same still-active API Key. Requires current `messages:send` and the selected WhatsApp Connection. Replacement, separately authorized, expired, revoked, cross-Connection, deleted, and unknown handles share one constant-shape 404. The read is local: it never calls the provider or implies delivery beyond current evidence. Request quota and Activity Log admission apply; send quota does not.",
+    method: "GET",
+    operationId: "getSendStatus",
+    path: "/v1/connections/{connection_id}/send-operations/{send_operation_id}",
+    permission: "messages:send",
+    summary: "Read originating Send Status",
     tags: ["Send Operations"],
   },
 ] as const satisfies ReadonlyArray<RestRouteMetadata>;
@@ -1373,6 +1384,68 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
         summary: restRouteRegistry[7].summary,
         tags: [...restRouteRegistry[7].tags],
         "x-normal-permission": restRouteRegistry[7].permission,
+      },
+    },
+    "/v1/connections/{connection_id}/send-operations/{send_operation_id}": {
+      get: {
+        description: restRouteRegistry[8].description,
+        operationId: restRouteRegistry[8].operationId,
+        parameters: [
+          {
+            description:
+              "WhatsApp Connection explicitly selected for the calling API Key.",
+            in: "path",
+            name: "connection_id",
+            required: true,
+            schema: { type: "string", pattern: "^con_[A-Za-z0-9_-]{21}$" },
+          },
+          {
+            description:
+              "Send Operation created by the calling still-active API Key.",
+            in: "path",
+            name: "send_operation_id",
+            required: true,
+            schema: { type: "string", pattern: "^snd_[A-Za-z0-9_-]{21}$" },
+          },
+        ],
+        responses: {
+          "200": {
+            content: {
+              "application/json": {
+                example: sendOperationExample,
+                schema: { $ref: "#/components/schemas/SendOperation" },
+              },
+            },
+            description:
+              "Current local Send Status. `idempotent_replay` is false because this is a status read, not a create replay.",
+          },
+          "401": {
+            content: {
+              "application/problem+json": {
+                example: problemExample,
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description:
+              "The API Key is missing, malformed, expired, or revoked.",
+          },
+          "403": problemResponse(
+            "The API Key does not include `messages:send`.",
+          ),
+          "404": problemResponse(
+            "The Send Operation, Connection, or originating grant relationship was not found.",
+          ),
+          "429": problemResponse(
+            "Personal Account or API Key request quota is exhausted.",
+          ),
+          "503": problemResponse(
+            "Authentication or audit authority is unavailable.",
+          ),
+        },
+        security: [{ apiKey: [] }],
+        summary: restRouteRegistry[8].summary,
+        tags: [...restRouteRegistry[8].tags],
+        "x-normal-permission": restRouteRegistry[8].permission,
       },
     },
   },

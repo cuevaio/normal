@@ -104,7 +104,9 @@ flowchart LR
   retained Stored Messages at
   `GET /v1/connections/{connection_id}/conversations/{conversation_id}/messages`
   and creates or exactly replays a text Send Operation at
-  `POST /v1/connections/{connection_id}/send-operations`.
+  `POST /v1/connections/{connection_id}/send-operations`. Local Send Status is
+  available only to the originating still-active API Key at
+  `GET /v1/connections/{connection_id}/send-operations/{send_operation_id}`.
 
 For exact behavior, read [`CONTEXT.md`](../CONTEXT.md), the
 [MCP contract](mcp-contract.md), the [configuration reference](configuration.md),

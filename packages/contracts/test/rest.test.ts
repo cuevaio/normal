@@ -544,6 +544,12 @@ describe("REST contracts", () => {
         path: "/v1/connections/{connection_id}/send-operations",
         permission: "messages:send",
       }),
+      expect.objectContaining({
+        method: "GET",
+        operationId: "getSendStatus",
+        path: "/v1/connections/{connection_id}/send-operations/{send_operation_id}",
+        permission: "messages:send",
+      }),
     ]);
     const serialized = serializedOpenApiDocument();
     expect(serialized).toBe(`${JSON.stringify(openApiDocument, null, 2)}\n`);
@@ -558,6 +564,7 @@ describe("REST contracts", () => {
     expect(serialized).toContain('"operationId": "searchMessages"');
     expect(serialized).toContain('"operationId": "getStoredMedia"');
     expect(serialized).toContain('"operationId": "createSendOperation"');
+    expect(serialized).toContain('"operationId": "getSendStatus"');
     expect(serialized).toContain(
       "/v1/connections/{connection_id}/conversations/{conversation_id}/messages",
     );
@@ -566,6 +573,9 @@ describe("REST contracts", () => {
     );
     expect(serialized).toContain(
       "/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}",
+    );
+    expect(serialized).toContain(
+      "/v1/connections/{connection_id}/send-operations/{send_operation_id}",
     );
     expect(serialized).toContain(
       "/v1/connections/con_xxxxxxxxxxxxxxxxxxxxx/messages/msg_xxxxxxxxxxxxxxxxxxxxx/media/med_xxxxxxxxxxxxxxxxxxxxx",

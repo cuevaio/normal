@@ -311,7 +311,8 @@ export interface RestOperationCompletedEvent {
     | "read_messages"
     | "read_stored_media"
     | "search_messages"
-    | "send_text_message";
+    | "send_text_message"
+    | "get_send_status";
   readonly outcome:
     | "audit_unavailable"
     | "authorization_denied"

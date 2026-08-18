@@ -170,6 +170,8 @@ let nextConnectionSetupId = 0;
 const provisioningLeases = new Map<string, string>();
 const provisionedSetups = new Set<string>();
 let authorizationRevokedAt: Date | null = null;
+let originatingSendGrantId: string | null = null;
+let originatingSendConnectionId: string | null = null;
 const testAuthorizationId = "mca_123456789012345678901";
 const testPersonalAccountId = "10000000-0000-4000-8000-000000000018";
 const apiKeys: Array<{
@@ -987,21 +989,26 @@ const makeTestLayer = (
     }),
     Layer.succeed(SendTextMessage, {
       send: (input) =>
-        Effect.succeed(
-          input.grant.kind === "api" &&
-            input.grant.apiKey.permissions.includes("messages:send")
-            ? {
-                outcome: "receipt" as const,
-                receipt: {
-                  send_id: "snd_123456789012345678901" as never,
-                  status: "processing" as const,
-                  created_at: "2026-08-17T12:00:00.000Z" as never,
-                  status_changed_at: "2026-08-17T12:00:00.000Z" as never,
-                  idempotent_replay: false,
-                },
-              }
-            : { outcome: "authorization_denied" as const },
-        ),
+        Effect.sync(() => {
+          if (
+            input.grant.kind !== "api" ||
+            !input.grant.apiKey.permissions.includes("messages:send")
+          ) {
+            return { outcome: "authorization_denied" as const };
+          }
+          originatingSendGrantId = input.grant.apiKey.grantId;
+          originatingSendConnectionId = input.connectionId;
+          return {
+            outcome: "receipt" as const,
+            receipt: {
+              send_id: "snd_123456789012345678901" as never,
+              status: "processing" as const,
+              created_at: "2026-08-17T12:00:00.000Z" as never,
+              status_changed_at: "2026-08-17T12:00:00.000Z" as never,
+              idempotent_replay: false,
+            },
+          };
+        }),
     }),
     Layer.succeed(RestCursorCodec, {
       decode: () => Effect.fail(new RestCursorError()),
@@ -1075,6 +1082,33 @@ const makeTestLayer = (
         Effect.succeed({ outcome: "success" as const }),
       failStoredMediaRead: () => Effect.void,
       reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
+      getSendStatus: (input) =>
+        Effect.sync(() => {
+          if (input.grant.kind !== "api") return null;
+          const grant = input.grant.apiKey;
+          if (
+            originatingSendGrantId === null ||
+            grant.grantId !== originatingSendGrantId ||
+            input.connectionPublicId !== originatingSendConnectionId ||
+            input.sendPublicId !== "snd_123456789012345678901"
+          ) {
+            return null;
+          }
+          const key = apiKeys.find(
+            (candidate) =>
+              candidate.grantId === grant.grantId &&
+              candidate.state === "active" &&
+              candidate.permissions.includes("messages:send") &&
+              candidate.connectionIds.includes(input.connectionPublicId),
+          );
+          if (key === undefined) return null;
+          return {
+            createdAt: "2026-08-17T12:00:00.000Z",
+            publicId: "snd_123456789012345678901",
+            status: "processing" as const,
+            statusChangedAt: "2026-08-17T12:00:00.000Z",
+          };
+        }),
       rejectProtectedOperation: (input) =>
         Effect.sync(() => {
           if (

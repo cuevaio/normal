@@ -50,8 +50,10 @@ import type {
   McpToolGroupSearchMaterial,
   McpToolMessagePage,
   McpToolMessageSearchPage,
+  McpToolSendStatusRecord,
   RejectProtectedOperationResult,
   ReserveApiKeyStoredMediaReadResult,
+  SendGrantIdentity,
 } from "@whatsapp-mcp/db/mcp-tool";
 import { apiSendGrant } from "@whatsapp-mcp/db/send";
 import { normalizeWhatsAppConnectionName } from "@whatsapp-mcp/domain/whatsapp-connection";
@@ -107,10 +109,13 @@ const SEARCH_MESSAGES_PATH =
   /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/messages\/search$/u;
 const SEND_OPERATIONS_PATH =
   /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/send-operations$/u;
+const SEND_STATUS_PATH =
+  /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/send-operations\/(snd_[A-Za-z0-9_-]{21})$/u;
 const READ_STORED_MEDIA = "read_stored_media" as const;
 const MAX_AUTHORIZATION_LENGTH = 128;
 const MAX_SEND_BODY_BYTES = 32_768;
 const SEND_OPERATION = "send_text_message" as const;
+const GET_SEND_STATUS = "get_send_status" as const;
 const decodeIdempotencyKey = Schema.decodeUnknownSync(IdempotencyKey);
 const LIST_CONNECTIONS = "list_connections";
 const LIST_CONTACTS = "list_contacts";
@@ -261,6 +266,12 @@ export interface RestPersistenceService {
     readonly permissions: ReadonlyArray<string>;
     readonly personalAccountId: string;
   }) => Effect.Effect<ReserveApiKeyStoredMediaReadResult, RestPersistenceError>;
+  readonly getSendStatus: (input: {
+    readonly connectionPublicId: string;
+    readonly grant: SendGrantIdentity;
+    readonly observedAt: Date;
+    readonly sendPublicId: string;
+  }) => Effect.Effect<McpToolSendStatusRecord | null, RestPersistenceError>;
   readonly rejectProtectedOperation: (input: {
     readonly apiKey: {
       readonly grantId: string;
@@ -452,7 +463,8 @@ const emitCompletion = (
     | "read_messages"
     | "read_stored_media"
     | "search_messages"
-    | "send_text_message",
+    | "send_text_message"
+    | "get_send_status",
   outcome:
     | "audit_unavailable"
     | "authorization_denied"
@@ -3255,6 +3267,150 @@ const parseSendBody = async (request: Request) => {
   }
 };
 
+const getSendStatus = (
+  request: Request,
+  connectionId: string,
+  sendOperationId: string,
+  options: RestHandlerOptions,
+  layer: Layer.Layer<RestRequirements, unknown>,
+): Promise<Response> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const grant = yield* authenticate(request);
+      const clock = yield* RestClock;
+      const identifiers = yield* RestIdentifiers;
+      const persistence = yield* RestPersistence;
+      const startedAt = yield* clock.now;
+      const auditLogId = yield* identifiers.nextAuditLogId;
+      const started = yield* persistence
+        .beginProtectedOperation({
+          apiKey: {
+            grantId: grant.grantId,
+            name: grant.name,
+            publicId: grant.id,
+          },
+          auditLogId,
+          channel: "api",
+          connectionPublicId: connectionId,
+          hourLimit: options.hourLimit,
+          keyHourLimit: options.keyHourLimit,
+          keyMinuteLimit: options.keyMinuteLimit,
+          minuteLimit: options.minuteLimit,
+          observedAt: startedAt,
+          operationName: GET_SEND_STATUS,
+          permissions: grant.permissions,
+          personalAccountId: grant.personalAccountId,
+          requiredPermission: "messages:send" satisfies ApiKeyPermission,
+          sendPublicId: sendOperationId,
+        })
+        .pipe(Effect.either);
+      if (started._tag === "Left") {
+        yield* emitCompletion(GET_SEND_STATUS, "audit_unavailable");
+        return problemResponse("unavailable", 503);
+      }
+      if (started.right.outcome === "authorization_denied") {
+        yield* emitCompletion(GET_SEND_STATUS, "authorization_denied");
+        return grant.permissions.includes("messages:send")
+          ? problemResponse("invalid_credentials", 401)
+          : problemResponse("insufficient_permission", 403);
+      }
+      if (started.right.outcome === "rate_limited") {
+        yield* emitCompletion(GET_SEND_STATUS, "rate_limited");
+        return problemResponse("rate_limited", 429, {
+          retry_after_seconds: started.right.retryAfterSeconds,
+          retryable: true,
+          resets_at:
+            started.right.resetsAt.toISOString() as ProblemDetails["resets_at"],
+        });
+      }
+
+      const readAt = yield* clock.now;
+      const loaded = yield* persistence
+        .getSendStatus({
+          connectionPublicId: connectionId,
+          grant: apiSendGrant({
+            grantId: grant.grantId,
+            name: grant.name,
+            permissions: grant.permissions,
+            personalAccountId: grant.personalAccountId,
+            publicId: grant.id,
+          }),
+          observedAt: readAt,
+          sendPublicId: sendOperationId,
+        })
+        .pipe(Effect.either);
+      if (loaded._tag === "Left") {
+        const completedAt = yield* clock.now;
+        const completed = yield* persistence
+          .completeProtectedOperation({
+            auditLogId,
+            completedAt,
+            errorCode: "service_unavailable",
+            outcome: "execution_error",
+            resultCount: null,
+          })
+          .pipe(Effect.either);
+        yield* emitCompletion(
+          GET_SEND_STATUS,
+          completed._tag === "Left" ? "audit_unavailable" : "unavailable",
+        );
+        return problemResponse("unavailable", 503);
+      }
+      if (loaded.right === null) {
+        const completedAt = yield* clock.now;
+        const completed = yield* persistence
+          .completeProtectedOperation({
+            auditLogId,
+            completedAt,
+            errorCode: "send_not_found",
+            outcome: "execution_error",
+            resultCount: null,
+          })
+          .pipe(Effect.either);
+        yield* emitCompletion(
+          GET_SEND_STATUS,
+          completed._tag === "Left" ? "audit_unavailable" : "execution_error",
+        );
+        return completed._tag === "Left"
+          ? problemResponse("unavailable", 503)
+          : problemResponse("not_found", 404);
+      }
+
+      const body = decodeRestSendOperation({
+        send_id: loaded.right.publicId,
+        status: loaded.right.status,
+        created_at: loaded.right.createdAt,
+        status_changed_at: loaded.right.statusChangedAt,
+        idempotent_replay: false,
+      });
+      const completedAt = yield* clock.now;
+      const completed = yield* persistence
+        .completeProtectedOperation({
+          auditLogId,
+          completedAt,
+          errorCode: null,
+          outcome: "success",
+          resultCount: 1,
+        })
+        .pipe(Effect.either);
+      if (completed._tag === "Left") {
+        yield* emitCompletion(GET_SEND_STATUS, "audit_unavailable");
+        return problemResponse("unavailable", 503);
+      }
+      yield* emitCompletion(GET_SEND_STATUS, "success", 1);
+      return noStoreJsonResponse(body, 200);
+    }).pipe(
+      Effect.provide(layer),
+      Effect.match({
+        onFailure: (failure) =>
+          failure instanceof Response
+            ? failure
+            : problemResponse("unavailable", 503),
+        onSuccess: (response) => response,
+      }),
+    ),
+  );
+
 const createSendOperation = (
   request: Request,
   connectionId: string,
@@ -3395,6 +3551,20 @@ export const createRestHandler =
         media.connectionId,
         media.messageId,
         media.mediaId,
+        options,
+        layer,
+      );
+    }
+    const sendStatusMatch = SEND_STATUS_PATH.exec(path);
+    if (
+      request.method === "GET" &&
+      sendStatusMatch?.[1] !== undefined &&
+      sendStatusMatch[2] !== undefined
+    ) {
+      return getSendStatus(
+        request,
+        sendStatusMatch[1],
+        sendStatusMatch[2],
         options,
         layer,
       );

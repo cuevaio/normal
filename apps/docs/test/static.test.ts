@@ -50,6 +50,7 @@ describe("static Scalar documentation", () => {
         "/v1/api-keys/{api_key_id}",
         "/v1/connections",
         "/v1/connections/{connection_id}/send-operations",
+        "/v1/connections/{connection_id}/send-operations/{send_operation_id}",
       ]),
     );
     expect(openApi).not.toMatch(

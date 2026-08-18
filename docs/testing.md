@@ -79,7 +79,12 @@ Operation tests prove `POST /v1/connections/{connection_id}/send-operations`
 requires `messages:send`, an `Idempotency-Key`, exact text, and a `ctc_` or
 `grp_` recipient; exact replay and payload conflict stay on the shared send
 operation; failed and unknown post-boundary outcomes remain Send Operation
-resources; and pre-operation failures use Problem Details. MCP and REST share
+resources; and pre-operation failures use Problem Details.
+`GET /v1/connections/{connection_id}/send-operations/{send_operation_id}`
+returns local Send Status only to the originating still-active API Key with
+`messages:send`; replacement, revoked, cross-Connection, and unknown handles
+share constant-shape 404 or 401, and the read never calls the provider or
+consumes send quota. MCP and REST share
 that grant-aware send service so fingerprints, quota, and receipts cannot
 diverge by adapter. Migrated-Postgres tests prove API Key contact, group,
 conversation, Stored Message listing, and private Stored Message search share

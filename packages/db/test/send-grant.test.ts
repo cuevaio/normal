@@ -405,6 +405,75 @@ describe("Send Operation grant identities", () => {
         sendPublicId: "snd_12345678901234567898c",
       }),
     ).resolves.toBeNull();
+    await expect(
+      repository.getSendStatus({
+        connectionPublicId: "con_123456789012345678999",
+        grant: apiGrantA,
+        observedAt,
+        sendPublicId: "snd_123456789012345678988",
+      }),
+    ).resolves.toBeNull();
+  });
+
+  test("keeps Send Status readable after disconnection and hides it after revocation", async () => {
+    const created = await sends.commit(
+      commitInput(apiGrantA, {
+        auditLogId: "51000000-0000-4000-8000-000000000093",
+        fingerprint: `sf1_${"E".repeat(43)}`,
+        idempotencyKey: "123456789012345678993",
+        sendId: "60000000-0000-4000-8000-000000000093",
+        sendPublicId: "snd_123456789012345678993",
+      }),
+      encrypt,
+    );
+    expect(created).toMatchObject({
+      outcome: "created",
+      receipt: { publicId: "snd_123456789012345678993" },
+    });
+
+    await database.query(
+      `UPDATE public.whatsapp_connections
+       SET state = 'disconnected'
+       WHERE public_id = $1`,
+      [connectionPublicId],
+    );
+    await expect(
+      repository.getSendStatus({
+        connectionPublicId,
+        grant: apiGrantA,
+        observedAt,
+        sendPublicId: "snd_123456789012345678993",
+      }),
+    ).resolves.toMatchObject({
+      publicId: "snd_123456789012345678993",
+      status: "processing",
+    });
+
+    const revoked = await makeApiKeyRepository({
+      withConnection: async (use) => {
+        await database.exec("SET ROLE whatsapp_api_runtime");
+        try {
+          return await use(database);
+        } finally {
+          await database.exec("RESET ROLE");
+        }
+      },
+    }).revoke({
+      clerkUserId,
+      publicId: apiKeyPublicIdA,
+      revokedAt: new Date("2026-08-15T12:01:00.000Z"),
+    });
+    expect(revoked).toMatchObject({
+      revokedAt: new Date("2026-08-15T12:01:00.000Z"),
+    });
+    await expect(
+      repository.getSendStatus({
+        connectionPublicId,
+        grant: apiGrantA,
+        observedAt: new Date("2026-08-15T12:02:00.000Z"),
+        sendPublicId: "snd_123456789012345678993",
+      }),
+    ).resolves.toBeNull();
   });
 
   test("rejects new sends after disconnection and after Connection Deletion", async () => {

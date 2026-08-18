@@ -554,6 +554,121 @@ describe("public-boundary Worker harness", () => {
     expect(JSON.stringify(sentBody)).not.toContain(createdBody.credential);
   });
 
+  test("reads Send Status only with the originating still-active API Key", async () => {
+    const created = await exports.default.fetch(
+      new Request("https://api.example.test/v1/api-keys", {
+        body: JSON.stringify({
+          connection_ids: ["con_123456789012345678901"],
+          name: "Status CI",
+          permissions: ["messages:send"],
+        }),
+        headers: {
+          authorization: "Bearer signed-test-user",
+          "content-type": "application/json",
+          origin: "http://127.0.0.1:3000",
+        },
+        method: "POST",
+      }),
+    );
+    expect(created.status).toBe(201);
+    const createdBody = (await created.json()) as {
+      readonly credential: string;
+      readonly id: string;
+    };
+
+    const sent = await exports.default.fetch(
+      new Request(
+        "https://api.example.test/v1/connections/con_123456789012345678901/send-operations",
+        {
+          body: JSON.stringify({
+            recipient_id: "ctc_123456789012345678901",
+            text: "Hello from REST",
+          }),
+          headers: {
+            authorization: `Bearer ${createdBody.credential}`,
+            "content-type": "application/json",
+            "idempotency-key": "123456789012345678902",
+          },
+          method: "POST",
+        },
+      ),
+    );
+    expect(sent.status).toBe(201);
+    const sentBody = (await sent.json()) as { readonly send_id: string };
+
+    const statusPath = `https://api.example.test/v1/connections/con_123456789012345678901/send-operations/${sentBody.send_id}`;
+    const status = await exports.default.fetch(
+      new Request(statusPath, {
+        headers: {
+          authorization: `Bearer ${createdBody.credential}`,
+        },
+      }),
+    );
+    expect(status.status).toBe(200);
+    expect(status.headers.get("access-control-allow-origin")).toBeNull();
+    expect(status.headers.get("cache-control")).toBe("no-store");
+    expect(await status.json()).toEqual({
+      send_id: sentBody.send_id,
+      status: "processing",
+      created_at: "2026-08-17T12:00:00.000Z",
+      status_changed_at: "2026-08-17T12:00:00.000Z",
+      idempotent_replay: false,
+    });
+
+    const other = await exports.default.fetch(
+      new Request("https://api.example.test/v1/api-keys", {
+        body: JSON.stringify({
+          connection_ids: ["con_123456789012345678901"],
+          name: "Replacement CI",
+          permissions: ["messages:send"],
+        }),
+        headers: {
+          authorization: "Bearer signed-test-user",
+          "content-type": "application/json",
+          origin: "http://127.0.0.1:3000",
+        },
+        method: "POST",
+      }),
+    );
+    expect(other.status).toBe(201);
+    const otherBody = (await other.json()) as { readonly credential: string };
+    const crossKey = await exports.default.fetch(
+      new Request(statusPath, {
+        headers: {
+          authorization: `Bearer ${otherBody.credential}`,
+        },
+      }),
+    );
+    expect(crossKey.status).toBe(404);
+    expect(await crossKey.json()).toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+
+    const revoked = await exports.default.fetch(
+      new Request(`https://api.example.test/v1/api-keys/${createdBody.id}`, {
+        headers: {
+          authorization: "Bearer signed-test-user",
+          origin: "http://127.0.0.1:3000",
+        },
+        method: "DELETE",
+      }),
+    );
+    expect(revoked.status).toBe(200);
+    const afterRevoke = await exports.default.fetch(
+      new Request(statusPath, {
+        headers: {
+          authorization: `Bearer ${createdBody.credential}`,
+        },
+      }),
+    );
+    expect(afterRevoke.status).toBe(401);
+    expect(await afterRevoke.json()).toMatchObject({
+      code: "invalid_credentials",
+      status: 401,
+    });
+  });
+
   test("injects deterministic external failures only in the test root", async () => {
     const response = await exports.default.fetch(
       new Request("https://api.example.test/v1/personal-account", {

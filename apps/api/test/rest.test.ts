@@ -37,7 +37,8 @@ const fillDocumentedPath = (path: string): string =>
     .replaceAll("{connection_id}", "con_xxxxxxxxxxxxxxxxxxxxx")
     .replaceAll("{conversation_id}", "cvs_xxxxxxxxxxxxxxxxxxxxx")
     .replaceAll("{media_id}", "med_xxxxxxxxxxxxxxxxxxxxx")
-    .replaceAll("{message_id}", "msg_xxxxxxxxxxxxxxxxxxxxx");
+    .replaceAll("{message_id}", "msg_xxxxxxxxxxxxxxxxxxxxx")
+    .replaceAll("{send_operation_id}", "snd_xxxxxxxxxxxxxxxxxxxxx");
 
 describe("OpenAPI handler alignment", () => {
   test("routes every documented REST and API Key management path", () => {
@@ -82,6 +83,7 @@ const receipt = {
 const makeHarness = (options?: {
   readonly authenticate?: ApiKeyPersistenceService["authenticate"];
   readonly begin?: RestPersistenceService["beginProtectedOperation"];
+  readonly getSendStatus?: RestPersistenceService["getSendStatus"];
   readonly hmacFails?: boolean;
   readonly listConnections?: RestPersistenceService["listConnections"];
   readonly permissions?: ReadonlyArray<
@@ -144,6 +146,7 @@ const makeHarness = (options?: {
       Effect.succeed({ outcome: "success" as const }),
     failStoredMediaRead: () => Effect.void,
     reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
+    getSendStatus: options?.getSendStatus ?? (() => Effect.succeed(null)),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&
@@ -532,6 +535,7 @@ const makeContactHarness = (options?: {
       Effect.succeed({ outcome: "success" as const }),
     failStoredMediaRead: () => Effect.void,
     reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
+    getSendStatus: () => Effect.succeed(null),
     listEncryptedContacts: () =>
       Effect.succeed({
         asOf: "2026-08-14T12:00:00.000Z",
@@ -850,6 +854,7 @@ const makeGroupHarness = (options?: {
       Effect.succeed({ outcome: "success" as const }),
     failStoredMediaRead: () => Effect.void,
     reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
+    getSendStatus: () => Effect.succeed(null),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&
@@ -1160,6 +1165,7 @@ const makeConversationHarness = (options?: {
       Effect.succeed({ outcome: "success" as const }),
     failStoredMediaRead: () => Effect.void,
     reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
+    getSendStatus: () => Effect.succeed(null),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&
@@ -1506,6 +1512,7 @@ const makeMessageHarness = (options?: {
       Effect.succeed({ outcome: "success" as const }),
     failStoredMediaRead: () => Effect.void,
     reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
+    getSendStatus: () => Effect.succeed(null),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&
@@ -2069,6 +2076,7 @@ const makeSearchHarness = (options?: {
       Effect.succeed({ outcome: "success" as const }),
     failStoredMediaRead: () => Effect.void,
     reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
+    getSendStatus: () => Effect.succeed(null),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&
@@ -2559,6 +2567,98 @@ describe("REST Send Operations", () => {
       status: 409,
     });
   });
+
+  test("reads local Send Status only for the originating active API Key", async () => {
+    const sendStatusPath = `${sendPath}/${receipt.send_id}`;
+    const harness = makeHarness({
+      permissions: ["messages:send"],
+      getSendStatus: (input) => {
+        expect(input.connectionPublicId).toBe(connectionId);
+        expect(input.sendPublicId).toBe(receipt.send_id);
+        expect(input.grant).toMatchObject({
+          kind: "api",
+          apiKey: { grantId, publicId },
+        });
+        return Effect.succeed({
+          createdAt: receipt.created_at,
+          publicId: receipt.send_id,
+          status: "delivered",
+          statusChangedAt: "2026-08-17T12:01:00.000Z",
+        });
+      },
+    });
+    const response = await harness.handler(request(sendStatusPath));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await response.json()).toEqual({
+      send_id: receipt.send_id,
+      status: "delivered",
+      created_at: receipt.created_at,
+      status_changed_at: "2026-08-17T12:01:00.000Z",
+      idempotent_replay: false,
+    });
+    expect(harness.telemetry).toEqual([
+      {
+        event: "rest.operation.completed",
+        operation: "get_send_status",
+        outcome: "success",
+        resultCount: 1,
+        service: "api",
+      },
+    ]);
+    expect(JSON.stringify(harness.telemetry)).not.toContain(credential);
+  });
+
+  test("maps missing permission, unknown, and unavailable Send Status reads", async () => {
+    const sendStatusPath = `${sendPath}/${receipt.send_id}`;
+    const forbidden = await makeHarness({
+      permissions: ["connections:read"],
+    }).handler(request(sendStatusPath));
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toMatchObject({
+      code: "insufficient_permission",
+      status: 403,
+    });
+
+    const missing = await makeHarness({
+      permissions: ["messages:send"],
+    }).handler(request(sendStatusPath));
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+
+    const unknownHandle = await makeHarness({
+      permissions: ["messages:send"],
+    }).handler(request(`${sendPath}/snd_000000000000000000000`));
+    expect(unknownHandle.status).toBe(404);
+    expect(await unknownHandle.json()).toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+
+    const revoked = await makeHarness({
+      authenticate: () => Effect.succeed(null),
+      permissions: ["messages:send"],
+    }).handler(request(sendStatusPath));
+    expect(revoked.status).toBe(401);
+    expect(await revoked.json()).toMatchObject({
+      code: "invalid_credentials",
+      status: 401,
+    });
+
+    const unavailable = await makeHarness({
+      permissions: ["messages:send"],
+      getSendStatus: () => Effect.fail(new RestPersistenceError()),
+    }).handler(request(sendStatusPath));
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toMatchObject({
+      code: "unavailable",
+      status: 503,
+    });
+  });
 });
 
 const mediaPath = `/v1/connections/${connectionId}/messages/msg_111111111111111111111/media/med_222222222222222222222`;
@@ -2643,6 +2743,7 @@ const makeMediaHarness = (options?: {
               outcome: "ready" as const,
             });
       }),
+    getSendStatus: () => Effect.succeed(null),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&

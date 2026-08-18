@@ -148,6 +148,15 @@ backfill rather than a configuration switch or mixed-version reads.
 Backfill telemetry contains only `message_search.backfill.completed`, the API
 service name, and an allowlisted `success` or `failed` outcome.
 
+`GET /v1/connections/{connection_id}/send-operations/{send_operation_id}`
+requires `messages:send`, the selected WhatsApp Connection, and the
+originating still-active API Key. It reads local Send Status only: it never
+calls the provider, does not consume send quota, and shares the Personal
+Account and per-key request quotas. Replacement, separately authorized,
+expired, revoked, cross-Connection, deleted, and unknown handles share the
+same constant-shape 404 as other REST resources, except a revoked or expired
+credential itself returns 401.
+
 The API Worker receives `PROVIDER_CONTROL`, `HYPERDRIVE`,
 `WEBHOOK_HYPERDRIVE`, `OAUTH_KV`, `WEBHOOK_INGRESS`, `STORED_MEDIA`,
 `DELETION_CAPSULES`, `DELETION_MARKERS`, `RECIPIENT_TRANSITIONS`, the
