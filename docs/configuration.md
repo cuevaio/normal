@@ -269,8 +269,9 @@ Deployment automation keeps its current plaintext refresh credential only in
 the purpose-specific AWS Secrets Manager secret. Before refresh, the workflow
 proves that it can durably write that secret; after exchange it persists the
 descendant before invoking MCP and keeps the ten-minute access token in process
-memory only. Deployment and launch gate share the `production` concurrency group
-with production credential rotation, preserving one serialized credential lineage.
+memory only. Deployment, launch gate, and the public API release gate share the
+`production` concurrency group with production credential rotation, preserving
+one serialized credential lineage.
 Neither token may enter GitHub secrets, command arguments, outputs, artifacts,
 telemetry, repository state, or OpenTofu state.
 

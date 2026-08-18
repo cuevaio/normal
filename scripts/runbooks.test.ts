@@ -12,6 +12,9 @@ describe("operator runbooks", () => {
     expect(deployment).toContain("provider-control → API → web → docs");
     expect(deployment).toContain("Database migrations are forward-only");
     expect(deployment).toContain("bun run deploy:smoke");
+    expect(deployment).toContain("## Public API release gate");
+    expect(deployment).toContain("bun run release:public-api");
+    expect(deployment).toContain("api_key_hmac_rotated");
   });
 
   test("covers required incidents with containment, recovery, and exit criteria", async () => {
@@ -43,6 +46,8 @@ describe("operator runbooks", () => {
       "Refresh-family compromise",
       "Break-glass operation",
       "Immutable audit review",
+      "User API Key revocation",
+      "API Key HMAC compromise",
     ]) {
       expect(security).toContain(`## ${heading}`);
     }
@@ -62,6 +67,10 @@ describe("operator runbooks", () => {
       "## Marker validation and Deletion Capsule recovery",
     );
     expect(deletion).toContain("## Restore gate release criteria");
+    expect(deletion).toContain(
+      "Every restored API Key must already be revoked",
+    );
+    expect(deletion).toContain("API_KEY_HMAC_SECRET");
     expect(teardown).toContain("## Destruction order");
     expect(teardown).toContain("retire Vercel web and static docs deployments");
     expect(teardown).toContain("locked deletion-marker bucket");

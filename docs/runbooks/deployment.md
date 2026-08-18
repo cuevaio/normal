@@ -1275,6 +1275,36 @@ application admission state. Any missing artifact, secret, external approval,
 malformed report, failed check, missed four-hour RTO, missed five-minute Neon
 RPO, or nonzero deletion marker loss blocks the production launch decision.
 
+## Public API release gate
+
+The public API is not released from a green CI job alone. Run the
+`Public API release gate` workflow, or `bun run release:public-api` after the
+same commands, only when every listed gate has already succeeded on the
+reviewed commit:
+
+1. `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`,
+   and `bun run build` without weakening or skipping a check.
+2. `bun run db:check` and the migrated-Postgres suite under
+   `whatsapp_api_runtime` with production RLS intact.
+3. `bun run validate:infra`, `bun run manifests:validate`,
+   `bun run infra:validate`, and `bun run observability:validate`.
+4. The browser-to-Worker API Key, REST resource, Activity Log, Recipient
+   Exclusion, quota-sharing, Stored Media, and send-ambiguity suites.
+5. Connection Deletion, Personal Account Deletion, expiry, metadata purge,
+   restore invalidation, HMAC rotation evidence, and the recovery drill.
+6. `bun run inspect:bundles` with no controlled credentials, fixture secrets,
+   test verifier controls, fault selectors, or other test-only markers.
+7. `bun run deploy:smoke` against the distinct `docs.normal.fast` origin,
+   validating the complete OpenAPI 3.1 reference and static security
+   configuration.
+
+The evaluator also requires every v1 REST and API Key management path, the
+guide topics rendered by Scalar, current monthly and quarterly drill evidence,
+and restore checks `api_keys_revoked`, `api_key_digests_cleared`,
+`api_key_hmac_rotated`, and `predecessor_hmac_rejected`. Any failed or missing
+gate blocks release. Do not add an exception, skip, `continue-on-error`, or
+reduced check.
+
 Evidence records achieved first-party monthly availability against the 99.5
 percent SLO separately from achieved Wasender and WhatsApp availability.
 Reports contain timings, aggregate counts, and normalized checks only; never

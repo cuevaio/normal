@@ -21,6 +21,7 @@
     "infra:validate": "bun scripts/validate-infrastructure.ts",
     "inspect:bundles": "bun scripts/inspect-production-bundles.ts",
     "launch:gate": "bun scripts/launch-gate.ts",
+    "release:public-api": "bun scripts/public-api-release-gate.ts",
     "ingestion:replay": "bun scripts/request-webhook-replay.ts",
     "lint": "turbo run lint --cache-dir=.turbo/cache && biome check .sandcastle scripts",
     "manifests:validate": "bun scripts/validate-deployment-manifests.ts",

@@ -48,6 +48,29 @@ Clerk, Vercel, and Wasender audit by time, action, normalized outcome, and opaqu
 incident reference. Treat any copied sensitive value in logs or tickets as a
 second leak and remove access to that sink under its retention process.
 
+## User API Key revocation
+
+A User revokes an API Key from the signed-in dashboard. Revocation is
+idempotent, clears the credential digest in the authoritative Neon transaction,
+and takes effect on the next request. There is no authorization cache that can
+extend a revoked or expired key. Do not recover, redisplay, or reroll the
+plaintext. A lost credential requires creating a replacement key. Record only
+the opaque `apk_` handle, outcome, and incident reference.
+
+## API Key HMAC compromise
+
+`API_KEY_HMAC_SECRET` is purpose-specific. Suspected compromise and every
+production database restore use intentional global invalidation: revoke every
+API Key, clear every digest, generate a new 32-byte hex secret, publish it as
+the Worker secret, and record aggregate completion evidence. The predecessor
+must not remain accepted as a verification fallback. Users create replacement
+keys after recovery.
+
+Routine rotation that preserves active API Keys is not part of v1. It would
+require a reviewed dual-generation migration. Do not replace the secret as an
+ad hoc rotation while traffic is serving, and do not reuse OAuth, cursor,
+content, provider-reference, webhook, reservation, or deletion HMAC material.
+
 ## Refresh-family compromise
 
 An observed OAuth refresh `reuse` outcome means the affected family is already

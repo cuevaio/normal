@@ -193,6 +193,14 @@ reviewed security headers, and no Vercel rewrite to the API Worker. A docs
 failure reports only the `docs` subsystem; it never prints the document or
 credential material.
 
+`bun run release:public-api` is the public API release gate. It fails closed
+when any repository quality, database, infrastructure, browser-to-Worker,
+lifecycle, bundle-inspection, docs-smoke, recovery-drill, restore-invalidation,
+or HMAC-rotation attestation is missing, and when the generated OpenAPI 3.1
+document is missing a required v1 path or guide. A failed gate blocks release;
+there is no skip, ignore-failure, or reduced-check mode. The workflow reruns
+every command before it may attest `passed`.
+
 ## Production exclusion
 
 `bun run build` inspects every Worker output, source map, Next.js server and

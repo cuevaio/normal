@@ -14,6 +14,7 @@ shaping: true
 | V4 | Send Operations | Create and replay idempotent sends, preserve ambiguous outcomes, and read status only with the originating active API Key. |
 | V5 | Lifecycle and recovery | Prove expiry, revocation, Connection Deletion, Personal Account Deletion, 90-day metadata purge, and global post-restore invalidation. |
 | V6 | Scalar reference and deployment | Serve the validated OpenAPI contract through a static Astro/Scalar app at `docs.normal.fast` with self-hosted pinned assets and no browser execution. |
+| Release | Public API release gate | Prove formatting, lint, typecheck, tests, builds, migrated Postgres, manifests, infrastructure, observability, browser-to-Worker, lifecycle, bundle inspection, docs smoke, restore invalidation, and HMAC rotation evidence together. Any failed gate blocks release. |
 
 ## V1: Contract and One End-to-End Read
 
@@ -123,3 +124,15 @@ Implementation must update the affected documents in the same slices:
 ## Delivery Gate
 
 Do not expose any API Key creation UI or protected REST route until V1 proves, in one deployable slice, one-time secret handling, narrow bootstrap, RLS, current permission and Connection checks, Activity Log admission, shared quota reservation, immediate revocation, constant-shape failures, production composition, and bundle exclusion. Later resource slices must build on that gate rather than temporarily bypassing it.
+
+## Release Gate
+
+`bun run release:public-api` and the `Public API release gate` workflow prove the
+integrated public API before release. They rerun repository quality checks,
+migrated-Postgres suites, manifest and infrastructure validation, browser-to-Worker
+coverage, lifecycle and recovery suites, production bundle inspection, and the
+deployed `docs.normal.fast` smoke. They also require the complete v1 OpenAPI
+surface and restore evidence that every API Key was revoked, every digest was
+cleared, `API_KEY_HMAC_SECRET` was rotated, and the predecessor HMAC is rejected.
+Any failed or missing gate blocks release. Do not add an exception or reduced
+check.

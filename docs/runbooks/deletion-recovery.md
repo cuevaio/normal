@@ -211,10 +211,20 @@ rows and active objects were re-purged, every recipient transition journal
 prefix was replayed with its purge cutoff reapplied and no prepared transition
 left unresolved, wall-clock expiry batches and Stored Media deletion intents
 drained, and schema/RLS/quota/audit invariants pass.
+Every restored API Key must already be revoked with its credential digest
+cleared, and recovery must record aggregate evidence that
+`API_KEY_HMAC_SECRET` was rotated to a newly generated value whose predecessor
+is not accepted as a verification fallback. Users create replacement keys after
+recovery; no restored grant may authenticate inside the Neon recovery-point
+window.
 Release application and Queue traffic only after verification records aggregate
-marker count, zero failures, branch identity, achieved RPO, and elapsed RTO.
-Any malformed marker, authority failure, branch mismatch, or incomplete batch
-keeps the gate closed; there is no bypass or sampled success mode.
+marker count, zero failures, branch identity, achieved RPO, elapsed RTO, and
+those API Key invalidation and HMAC-rotation checks.
+Any malformed marker, authority failure, branch mismatch, incomplete batch, or
+missing API Key invalidation evidence keeps the gate closed; there is no bypass
+or sampled success mode.
+The public API release gate additionally requires those restore checks on the
+current monthly drill evidence before the public REST surface may be released.
 
 ## Rollback and authority recovery
 

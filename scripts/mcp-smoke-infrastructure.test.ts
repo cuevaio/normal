@@ -38,7 +38,10 @@ describe("production MCP smoke credential infrastructure", () => {
   test("both workflows serialize and use the shared rotating path", async () => {
     const deployment = await read(".github/workflows/deploy-production.yml");
     const launchGate = await read(".github/workflows/launch-gate.yml");
-    for (const workflow of [deployment, launchGate]) {
+    const publicApiReleaseGate = await read(
+      ".github/workflows/public-api-release-gate.yml",
+    );
+    for (const workflow of [deployment, launchGate, publicApiReleaseGate]) {
       expect(workflow).toContain("group: production");
       expect(workflow).toContain("id-token: write");
       expect(workflow).toContain("AWS_MCP_SMOKE_CREDENTIAL_ROLE_ARN");

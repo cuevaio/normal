@@ -1,0 +1,88 @@
+name: Public API release gate
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: 1.12.5
+      - run: bun install --frozen-lockfile
+      - run: bun x playwright install --with-deps chromium
+      - run: bun run format:check
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run validate:infra
+      - run: bun run test
+      - run: bun run build
+      - run: bun run manifests:validate
+      - run: bun run observability:validate
+      - run: bun run infra:validate
+      - run: bun run --cwd packages/db test
+      - run: bun run db:check
+        env:
+          MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
+      - run: bun run inspect:bundles
+      - uses: dawidd6/action-download-artifact@v11
+        with:
+          workflow: recovery-drills.yml
+          name: monthly-restore-evidence
+          path: evidence/monthly
+          workflow_conclusion: success
+      - uses: dawidd6/action-download-artifact@v11
+        with:
+          workflow: recovery-drills.yml
+          name: quarterly-game-day-evidence
+          path: evidence/quarterly
+          workflow_conclusion: success
+      - name: Assume the production MCP smoke credential role
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: us-east-1
+          role-session-name: public-api-release-gate-mcp-smoke
+          role-to-assume: ${{ vars.AWS_MCP_SMOKE_CREDENTIAL_ROLE_ARN }}
+      - run: bun run deploy:smoke
+        env:
+          SMOKE_API_ORIGIN: ${{ vars.API_ORIGIN }}
+          SMOKE_CHECK_SECRET: ${{ secrets.SMOKE_CHECK_SECRET }}
+          SMOKE_DOCS_ORIGIN: ${{ vars.DOCS_ORIGIN }}
+          SMOKE_MCP_CLIENT_ID: ${{ vars.MCP_SMOKE_CLIENT_ID }}
+          SMOKE_MCP_REFRESH_SECRET_ID: ${{ vars.MCP_SMOKE_REFRESH_SECRET_ID }}
+          SMOKE_WEB_ORIGIN: ${{ vars.WEB_ORIGIN }}
+      - run: bun run release:public-api
+        env:
+          MONTHLY_RECOVERY_EVIDENCE: evidence/monthly/monthly_restore.json
+          QUARTERLY_GAME_DAY_EVIDENCE: evidence/quarterly/quarterly_game_day.json
+          PUBLIC_API_FORMAT_CHECK: passed
+          PUBLIC_API_LINT: passed
+          PUBLIC_API_TYPECHECK: passed
+          PUBLIC_API_TEST: passed
+          PUBLIC_API_BUILD: passed
+          PUBLIC_API_DATABASE_CHECK: passed
+          PUBLIC_API_MIGRATED_POSTGRES: passed
+          PUBLIC_API_WORKER_MANIFESTS: passed
+          PUBLIC_API_INFRASTRUCTURE: passed
+          PUBLIC_API_DEPLOYMENT_MANIFESTS: passed
+          PUBLIC_API_OBSERVABILITY: passed
+          PUBLIC_API_BROWSER_SUITE: passed
+          PUBLIC_API_LIFECYCLE_SUITE: passed
+          PRODUCTION_BUNDLE_INSPECTION: passed
+          PUBLIC_API_DOCS_SMOKE: passed

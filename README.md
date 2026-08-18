@@ -101,6 +101,7 @@ bun run manifests:validate
 bun run infra:validate
 bun run observability:validate
 bun run launch:gate
+bun run release:public-api
 ```
 
 Install the pinned browser once before the first full test run:
