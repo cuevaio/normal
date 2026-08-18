@@ -24,6 +24,7 @@ import {
   isConnectionSetupProvisioningMessage,
 } from "./connection-setup-provisioning";
 import type { EnvelopeEncryption } from "./encryption/envelope";
+import type { StoredMediaContainer } from "./encryption/stored-media-container";
 import { noStoreJsonResponse } from "./http-response";
 import type { SendTextMessageService } from "./mcp";
 import {
@@ -112,6 +113,7 @@ type PublicBoundaryRequirements =
   | RestPersistenceService
   | SafeTelemetryService
   | SendTextMessageService
+  | StoredMediaContainer
   | ActivityLogClockService
   | ActivityLogPersistenceService
   | WebhookIngressRequirements

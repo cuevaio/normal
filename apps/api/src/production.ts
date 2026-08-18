@@ -1351,9 +1351,9 @@ const restPersistenceLayer = (environment: ApiEnvironment) =>
             if (typeof connectionString !== "string") {
               throw new Error("database unavailable");
             }
-            return makePgMcpToolRepository(connectionString).failStoredMediaRead(
-              input,
-            );
+            return makePgMcpToolRepository(
+              connectionString,
+            ).failStoredMediaRead(input);
           },
           catch: () => new RestPersistenceError(),
         }),

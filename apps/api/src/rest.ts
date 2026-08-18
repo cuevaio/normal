@@ -14,9 +14,9 @@ import {
   decodeRestGroupList,
   decodeRestMessageList,
   decodeRestSendOperation,
-  parseRestStoredMediaPath,
   type ProblemCode,
   type ProblemDetails,
+  parseRestStoredMediaPath,
   problemType,
   type RestConnectionList,
   type RestContactList,
@@ -218,10 +218,7 @@ export interface RestPersistenceService {
     readonly observedAt: Date;
     readonly permissions: ReadonlyArray<string>;
     readonly personalAccountId: string;
-  }) => Effect.Effect<
-    ReserveApiKeyStoredMediaReadResult,
-    RestPersistenceError
-  >;
+  }) => Effect.Effect<ReserveApiKeyStoredMediaReadResult, RestPersistenceError>;
   readonly rejectProtectedOperation: (input: {
     readonly apiKey: {
       readonly grantId: string;

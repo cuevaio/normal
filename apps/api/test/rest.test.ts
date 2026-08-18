@@ -2329,7 +2329,9 @@ describe("REST Stored Media", () => {
     );
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
     expect(response.headers.get("location")).toBeNull();
-    expect(await response.text()).toBe("protected bytes");
+    expect(new TextDecoder().decode(await response.arrayBuffer())).toBe(
+      "protected bytes",
+    );
     expect(harness.observations.indexOf("reserve-media-read")).toBeLessThan(
       harness.observations.indexOf("decrypt-media-metadata"),
     );
@@ -2361,7 +2363,10 @@ describe("REST Stored Media", () => {
 
     for (const path of [
       `${mediaPath}/extra`,
-      mediaPath.replace("msg_111111111111111111111", "msg_000000000000000000000"),
+      mediaPath.replace(
+        "msg_111111111111111111111",
+        "msg_000000000000000000000",
+      ),
       "/v1/connections/con_123456789012345678901/messages/msg_111111111111111111111/media",
     ]) {
       const missing = await makeMediaHarness({

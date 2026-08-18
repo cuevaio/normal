@@ -842,7 +842,8 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
               "Ready Stored Media no larger than 16 MiB, returned with the normalized MIME type, a sanitized optional filename, and private no-store caching.",
             headers: {
               "Cache-Control": {
-                description: "Protected media is private and must not be stored.",
+                description:
+                  "Protected media is private and must not be stored.",
                 schema: { type: "string", const: "private, no-store" },
               },
               "Content-Disposition": {

@@ -159,13 +159,11 @@ export const restStoredMediaPath = (input: {
 
 export const parseRestStoredMediaPath = (
   input: string,
-):
-  | {
-      readonly connectionId: string;
-      readonly mediaId: string;
-      readonly messageId: string;
-    }
-  | null => {
+): {
+  readonly connectionId: string;
+  readonly mediaId: string;
+  readonly messageId: string;
+} | null => {
   const match = restStoredMediaPathPattern.exec(input);
   if (
     match === null ||

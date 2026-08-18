@@ -375,7 +375,7 @@ describe("API Key Stored Media", () => {
       connectionPublicId,
       excluded: true,
       expectedExcluded: false,
-      idempotencyKey: "idem-media-86",
+      idempotencyKey: "idem-media-86-exclude",
       recipientPublicId: contactPublicId,
     });
     expect(prepared).toMatchObject({ outcome: "prepared" });
