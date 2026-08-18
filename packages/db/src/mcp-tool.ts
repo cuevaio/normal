@@ -84,6 +84,14 @@ export interface McpStoredMediaReadMaterial {
   readonly plaintextSizeBytes: number;
 }
 
+export type ReserveApiKeyStoredMediaReadResult =
+  | {
+      readonly material: McpStoredMediaReadMaterial;
+      readonly outcome: "ready";
+    }
+  | { readonly outcome: "not_found" }
+  | { readonly outcome: "quota_exhausted"; readonly resetsAt: Date };
+
 export interface McpToolMessageRecord {
   readonly publicId: string;
   readonly messageIdentity: string;
@@ -577,6 +585,17 @@ export interface McpToolRepository {
     | { readonly outcome: "success" }
     | { readonly outcome: "record_quota_exhausted"; readonly resetsAt: Date }
   >;
+  readonly reserveApiKeyStoredMediaRead: (input: {
+    readonly apiKeyGrantId: string;
+    readonly auditLogId: string;
+    readonly connectionPublicId: string;
+    readonly dailyByteLimit: number;
+    readonly mediaPublicId: string;
+    readonly messagePublicId: string;
+    readonly observedAt: Date;
+    readonly permissions: ReadonlyArray<string>;
+    readonly personalAccountId: string;
+  }) => Promise<ReserveApiKeyStoredMediaReadResult>;
   readonly rejectProtectedOperation: (
     input: {
       readonly auditLogId: string;
@@ -643,6 +662,58 @@ const bytes = (value: unknown): Uint8Array | null => {
 
 const base64 = (value: Uint8Array): string =>
   Buffer.from(value).toString("base64");
+
+const storedMediaReadMaterial = (
+  row: Record<string, unknown>,
+  accountId: string,
+  size: number,
+): McpStoredMediaReadMaterial => {
+  const accountCiphertext = bytes(row.account_key_ciphertext);
+  const connectionCiphertext = bytes(row.connection_key_ciphertext);
+  const connectionNonce = bytes(row.connection_key_nonce);
+  const metadataCiphertext = bytes(row.metadata_ciphertext);
+  const metadataNonce = bytes(row.metadata_nonce);
+  if (
+    typeof row.media_id !== "string" ||
+    typeof row.object_key !== "string" ||
+    typeof row.connection_id !== "string" ||
+    typeof row.kms_key_id !== "string" ||
+    accountCiphertext === null ||
+    connectionCiphertext === null ||
+    connectionNonce === null ||
+    metadataCiphertext === null ||
+    metadataNonce === null
+  ) {
+    throw new Error("invalid Stored Media read material");
+  }
+  return {
+    accountKey: {
+      ciphertext: base64(accountCiphertext),
+      keyVersion: Number(row.account_key_version),
+      kmsKeyId: row.kms_key_id,
+      personalAccountId: accountId,
+      version: 1,
+    },
+    connectionKey: {
+      accountKeyVersion: Number(row.connection_account_key_version),
+      ciphertext: base64(connectionCiphertext),
+      connectionId: row.connection_id,
+      keyVersion: Number(row.connection_key_version),
+      nonce: base64(connectionNonce),
+      personalAccountId: accountId,
+      version: 1,
+    },
+    mediaId: row.media_id,
+    metadata: {
+      ciphertext: base64(metadataCiphertext),
+      keyVersion: Number(row.metadata_key_version),
+      nonce: base64(metadataNonce),
+      version: 1,
+    },
+    objectKey: row.object_key,
+    plaintextSizeBytes: size,
+  };
+};
 
 const positiveInteger = (value: unknown): number | null =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 0
@@ -1912,50 +1983,7 @@ export const makeMcpToolRepository = (
           .update(activityLogsInApp)
           .set({ mediaBytesReserved: size })
           .where(eq(activityLogsInApp.id, input.auditLogId));
-        const accountCiphertext = bytes(row.account_key_ciphertext);
-        const connectionCiphertext = bytes(row.connection_key_ciphertext);
-        const connectionNonce = bytes(row.connection_key_nonce);
-        const metadataCiphertext = bytes(row.metadata_ciphertext);
-        const metadataNonce = bytes(row.metadata_nonce);
-        if (
-          typeof row.media_id !== "string" ||
-          typeof row.object_key !== "string" ||
-          typeof row.connection_id !== "string" ||
-          typeof row.kms_key_id !== "string" ||
-          accountCiphertext === null ||
-          connectionCiphertext === null ||
-          connectionNonce === null ||
-          metadataCiphertext === null ||
-          metadataNonce === null
-        )
-          throw new Error("invalid Stored Media read material");
-        return {
-          accountKey: {
-            ciphertext: base64(accountCiphertext),
-            keyVersion: Number(row.account_key_version),
-            kmsKeyId: row.kms_key_id,
-            personalAccountId: accountId,
-            version: 1,
-          },
-          connectionKey: {
-            accountKeyVersion: Number(row.connection_account_key_version),
-            ciphertext: base64(connectionCiphertext),
-            connectionId: row.connection_id,
-            keyVersion: Number(row.connection_key_version),
-            nonce: base64(connectionNonce),
-            personalAccountId: accountId,
-            version: 1,
-          },
-          mediaId: row.media_id,
-          metadata: {
-            ciphertext: base64(metadataCiphertext),
-            keyVersion: Number(row.metadata_key_version),
-            nonce: base64(metadataNonce),
-            version: 1,
-          },
-          objectKey: row.object_key,
-          plaintextSizeBytes: size,
-        };
+        return storedMediaReadMaterial(row, accountId, size);
       }),
     ),
   inspectAuthorization: (input) =>
@@ -4525,6 +4553,96 @@ export const makeMcpToolRepository = (
         if (completion[0]?.completed !== true)
           throw new Error("Activity Log completion unavailable");
         return { outcome: "success" as const };
+      }),
+    ),
+  reserveApiKeyStoredMediaRead: (input) =>
+    provider.withConnection((connection) =>
+      withTransaction(connection, async () => {
+        if (
+          !Number.isSafeInteger(input.dailyByteLimit) ||
+          input.dailyByteLimit < 1 ||
+          !/^con_[A-Za-z0-9_-]{21}$/u.test(input.connectionPublicId) ||
+          !/^msg_[A-Za-z0-9_-]{21}$/u.test(input.messagePublicId) ||
+          !/^med_[A-Za-z0-9_-]{21}$/u.test(input.mediaPublicId)
+        ) {
+          throw new Error("invalid API Stored Media read");
+        }
+        const personalAccountId = await enterAccountContext(
+          connection,
+          input.personalAccountId,
+        );
+        if (
+          personalAccountId === null ||
+          !input.permissions.includes("messages:read")
+        ) {
+          return { outcome: "not_found" as const };
+        }
+        const db = makeDatabase(connection);
+        await db
+          .select({ id: personalAccountsInApp.id })
+          .from(personalAccountsInApp)
+          .where(eq(personalAccountsInApp.id, personalAccountId))
+          .for("update");
+        const loaded = await db.execute<Record<string, unknown>>(sql`
+          SELECT * FROM public.load_protected_stored_media_for_api_key(
+            ${input.apiKeyGrantId}, ${input.connectionPublicId},
+            ${input.messagePublicId}, ${input.mediaPublicId}
+          )
+        `);
+        const row = loaded[0];
+        const size = Number(row?.plaintext_size_bytes);
+        const used = await db
+          .select({
+            used: sql<unknown>`COALESCE(sum(${activityLogsInApp.mediaBytesReserved}), 0)`,
+          })
+          .from(activityLogsInApp)
+          .where(
+            and(
+              eq(activityLogsInApp.personalAccountId, personalAccountId),
+              gte(
+                activityLogsInApp.startedAt,
+                sql`date_trunc('day', ${input.observedAt}::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`,
+              ),
+              lt(
+                activityLogsInApp.startedAt,
+                sql`date_trunc('day', ${input.observedAt}::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' + interval '1 day'`,
+              ),
+            ),
+          );
+        if (row === undefined || !Number.isSafeInteger(size) || size < 0) {
+          return { outcome: "not_found" as const };
+        }
+        if (Number(used[0]?.used ?? 0) + size > input.dailyByteLimit) {
+          return {
+            outcome: "quota_exhausted" as const,
+            resetsAt: new Date(
+              Date.UTC(
+                input.observedAt.getUTCFullYear(),
+                input.observedAt.getUTCMonth(),
+                input.observedAt.getUTCDate() + 1,
+              ),
+            ),
+          };
+        }
+        const reserved = await db
+          .update(activityLogsInApp)
+          .set({ mediaBytesReserved: size })
+          .where(
+            and(
+              eq(activityLogsInApp.id, input.auditLogId),
+              eq(activityLogsInApp.apiKeyId, input.apiKeyGrantId),
+              eq(activityLogsInApp.toolName, "read_stored_media"),
+              eq(activityLogsInApp.outcome, "started"),
+            ),
+          )
+          .returning({ id: activityLogsInApp.id });
+        if (reserved.length !== 1) {
+          throw new Error("Stored Media Activity Log unavailable");
+        }
+        return {
+          material: storedMediaReadMaterial(row, personalAccountId, size),
+          outcome: "ready" as const,
+        };
       }),
     ),
   rejectProtectedOperation: (input) =>

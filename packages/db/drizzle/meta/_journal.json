@@ -99,6 +99,13 @@
       "when": 1786496400000,
       "tag": "0013_revoke_api_keys_on_connection_deletion",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786500000000,
+      "tag": "0014_load_protected_stored_media_for_api_keys",
+      "breakpoints": true
     }
   ]
 }

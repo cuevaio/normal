@@ -10,6 +10,7 @@ import {
   decodeRestGroupList,
   decodeRestMessageList,
   decodeRestSendOperation,
+  parseRestStoredMediaPath,
   ProblemDetailsContract,
   problemType,
   RestConnectionListContract,
@@ -350,6 +351,25 @@ describe("REST contracts", () => {
         ],
       }),
     ).toThrow();
+    expect(
+      parseRestStoredMediaPath(
+        "/v1/connections/con_xxxxxxxxxxxxxxxxxxxxx/messages/msg_xxxxxxxxxxxxxxxxxxxxx/media/med_xxxxxxxxxxxxxxxxxxxxx",
+      ),
+    ).toEqual({
+      connectionId: "con_xxxxxxxxxxxxxxxxxxxxx",
+      mediaId: "med_xxxxxxxxxxxxxxxxxxxxx",
+      messageId: "msg_xxxxxxxxxxxxxxxxxxxxx",
+    });
+    expect(
+      parseRestStoredMediaPath(
+        "whatsapp-media://connections/con_xxxxxxxxxxxxxxxxxxxxx/messages/msg_xxxxxxxxxxxxxxxxxxxxx/media/med_xxxxxxxxxxxxxxxxxxxxx",
+      ),
+    ).toBeNull();
+    expect(
+      parseRestStoredMediaPath(
+        "/v1/connections/con_xxxxxxxxxxxxxxxxxxxxx/messages/msg_xxxxxxxxxxxxxxxxxxxxx/media/med_xxxxxxxxxxxxxxxxxxxxx?download=1",
+      ),
+    ).toBeNull();
   });
 
   test("generates a partial OpenAPI 3.1 document with stable operation IDs", () => {
@@ -386,6 +406,12 @@ describe("REST contracts", () => {
         permission: "messages:read",
       }),
       expect.objectContaining({
+        method: "GET",
+        operationId: "getStoredMedia",
+        path: "/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}",
+        permission: "messages:read",
+      }),
+      expect.objectContaining({
         method: "POST",
         operationId: "createSendOperation",
         path: "/v1/connections/{connection_id}/send-operations",
@@ -398,13 +424,19 @@ describe("REST contracts", () => {
     expect(serialized).toContain('"operationId":"listGroups"');
     expect(serialized).toContain('"operationId":"listConversations"');
     expect(serialized).toContain('"operationId":"listMessages"');
+    expect(serialized).toContain('"operationId":"getStoredMedia"');
     expect(serialized).toContain('"operationId":"createSendOperation"');
     expect(serialized).toContain(
       "/v1/connections/{connection_id}/conversations/{conversation_id}/messages",
     );
     expect(serialized).toContain(
+      "/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}",
+    );
+    expect(serialized).toContain(
       "/v1/connections/con_xxxxxxxxxxxxxxxxxxxxx/messages/msg_xxxxxxxxxxxxxxxxxxxxx/media/med_xxxxxxxxxxxxxxxxxxxxx",
     );
+    expect(serialized).toContain("private, no-store");
+    expect(serialized).toContain('"format":"binary"');
     expect(serialized).not.toContain("whatsapp-media://");
     expect(serialized).not.toContain("text_truncated");
     expect(serialized).toContain('"Idempotency-Key"');

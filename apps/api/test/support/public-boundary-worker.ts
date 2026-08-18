@@ -30,6 +30,7 @@ import {
   ConnectionSetupProvisioningWebhook,
 } from "../../src/connection-setup-provisioning";
 import { EnvelopeEncryptionService } from "../../src/encryption/envelope";
+import { StoredMediaContainerService } from "../../src/encryption/stored-media-container";
 import type { Env } from "../../src/index";
 import { SendTextMessage } from "../../src/mcp";
 import {
@@ -1070,6 +1071,8 @@ const makeTestLayer = (
       readMessages: () => Effect.succeed(null),
       completeMessageRecordRead: () =>
         Effect.succeed({ outcome: "success" as const }),
+      failStoredMediaRead: () => Effect.void,
+      reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
       rejectProtectedOperation: (input) =>
         Effect.sync(() => {
           if (
@@ -1506,6 +1509,10 @@ const makeTestLayer = (
         enumerate: () => Effect.succeed([]),
       },
       capsules: { create: () => Effect.die("not used") },
+    }),
+    Layer.succeed(StoredMediaContainerService, {
+      read: () => Effect.die("not used"),
+      write: () => Effect.die("not used"),
     }),
     Layer.succeed(EnvelopeEncryptionService, {
       createPersonalAccountKey: ({ accountId, keyVersion }) =>

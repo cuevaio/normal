@@ -6,7 +6,11 @@ import {
   ApiKeyPersistence,
   type ApiKeyPersistenceService,
 } from "../src/api-key";
-import { EnvelopeEncryptionService } from "../src/encryption/envelope";
+import {
+  EncryptionError,
+  EnvelopeEncryptionService,
+} from "../src/encryption/envelope";
+import { StoredMediaContainerService } from "../src/encryption/stored-media-container";
 import { SendTextMessage, type SendTextMessageResult } from "../src/mcp";
 import {
   createRestHandler,
@@ -99,6 +103,8 @@ const makeHarness = (options?: {
     readMessages: () => Effect.succeed(null),
     completeMessageRecordRead: () =>
       Effect.succeed({ outcome: "success" as const }),
+    failStoredMediaRead: () => Effect.void,
+    reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&
@@ -149,6 +155,10 @@ const makeHarness = (options?: {
           })),
     }),
     Layer.succeed(RestPersistence, persistence),
+    Layer.succeed(StoredMediaContainerService, {
+      read: () => Effect.die("unused"),
+      write: () => Effect.die("unused"),
+    }),
     Layer.succeed(EnvelopeEncryptionService, {
       createConnectionKey: () => Effect.die("unused"),
       createPersonalAccountKey: () => Effect.die("unused"),
@@ -479,6 +489,8 @@ const makeContactHarness = (options?: {
     readMessages: () => Effect.succeed(null),
     completeMessageRecordRead: () =>
       Effect.succeed({ outcome: "success" as const }),
+    failStoredMediaRead: () => Effect.void,
+    reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
     listEncryptedContacts: () =>
       Effect.succeed({
         asOf: "2026-08-14T12:00:00.000Z",
@@ -553,6 +565,10 @@ const makeContactHarness = (options?: {
         }),
     }),
     Layer.succeed(RestPersistence, persistence),
+    Layer.succeed(StoredMediaContainerService, {
+      read: () => Effect.die("unused"),
+      write: () => Effect.die("unused"),
+    }),
     Layer.succeed(EnvelopeEncryptionService, {
       createConnectionKey: () => Effect.die("unused"),
       createPersonalAccountKey: () => Effect.die("unused"),
@@ -789,6 +805,8 @@ const makeGroupHarness = (options?: {
     readMessages: () => Effect.succeed(null),
     completeMessageRecordRead: () =>
       Effect.succeed({ outcome: "success" as const }),
+    failStoredMediaRead: () => Effect.void,
+    reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&
@@ -836,6 +854,10 @@ const makeGroupHarness = (options?: {
         }),
     }),
     Layer.succeed(RestPersistence, persistence),
+    Layer.succeed(StoredMediaContainerService, {
+      read: () => Effect.die("unused"),
+      write: () => Effect.die("unused"),
+    }),
     Layer.succeed(EnvelopeEncryptionService, {
       createConnectionKey: () => Effect.die("unused"),
       createPersonalAccountKey: () => Effect.die("unused"),
@@ -1091,6 +1113,8 @@ const makeConversationHarness = (options?: {
     readMessages: () => Effect.succeed(null),
     completeMessageRecordRead: () =>
       Effect.succeed({ outcome: "success" as const }),
+    failStoredMediaRead: () => Effect.void,
+    reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&
@@ -1138,6 +1162,10 @@ const makeConversationHarness = (options?: {
         }),
     }),
     Layer.succeed(RestPersistence, persistence),
+    Layer.succeed(StoredMediaContainerService, {
+      read: () => Effect.die("unused"),
+      write: () => Effect.die("unused"),
+    }),
     Layer.succeed(EnvelopeEncryptionService, {
       createConnectionKey: () => Effect.die("unused"),
       createPersonalAccountKey: () => Effect.die("unused"),
@@ -1429,6 +1457,8 @@ const makeMessageHarness = (options?: {
     readMessages: () => Effect.succeed(messagePage),
     completeMessageRecordRead: () =>
       Effect.succeed({ outcome: "success" as const }),
+    failStoredMediaRead: () => Effect.void,
+    reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
     rejectProtectedOperation: (input) =>
       Effect.succeed(
         input.requiredPermission !== undefined &&
@@ -1480,6 +1510,10 @@ const makeMessageHarness = (options?: {
         }),
     }),
     Layer.succeed(RestPersistence, persistence),
+    Layer.succeed(StoredMediaContainerService, {
+      read: () => Effect.die("unused"),
+      write: () => Effect.die("unused"),
+    }),
     Layer.succeed(EnvelopeEncryptionService, {
       createConnectionKey: () => Effect.die("unused"),
       createPersonalAccountKey: () => Effect.die("unused"),
@@ -2097,5 +2131,291 @@ describe("REST Send Operations", () => {
       retryable: true,
       status: 409,
     });
+  });
+});
+
+const mediaPath = `/v1/connections/${connectionId}/messages/msg_111111111111111111111/media/med_222222222222222222222`;
+const readyMediaMaterial = {
+  accountKey: {
+    ciphertext: "AQI=",
+    keyVersion: 1,
+    kmsKeyId: "kms-content-root",
+    personalAccountId,
+    version: 1 as const,
+  },
+  connectionKey: {
+    accountKeyVersion: 1,
+    ciphertext: "AQI=",
+    connectionId: "20000000-0000-4000-8000-000000000079",
+    keyVersion: 1,
+    nonce: "AQIDBAUGBwgJCgsM",
+    personalAccountId,
+    version: 1 as const,
+  },
+  mediaId: "30000000-0000-4000-8000-000000000030",
+  metadata: encryptedJson({
+    fileName: "../unsafe\r\nname.jpg",
+    mimeType: "image/jpeg",
+  }),
+  objectKey: "stored-media/opaque-object",
+  plaintextSizeBytes: 15,
+};
+
+const makeMediaHarness = (options?: {
+  readonly decryptFails?: boolean;
+  readonly failComplete?: boolean;
+  readonly failReserve?: boolean;
+  readonly permissions?: ReadonlyArray<
+    "connections:read" | "directory:read" | "messages:read" | "messages:send"
+  >;
+  readonly reserve?: RestPersistenceService["reserveStoredMediaRead"];
+}) => {
+  const observations: string[] = [];
+  const telemetry: Array<SafeTelemetryEvent> = [];
+  const persistence: RestPersistenceService = {
+    beginProtectedOperation: (input) =>
+      Effect.succeed(
+        input.channel === "api" &&
+          input.requiredPermission !== undefined &&
+          !(input.permissions ?? []).includes(input.requiredPermission)
+          ? {
+              auditLogId: input.auditLogId,
+              outcome: "authorization_denied" as const,
+            }
+          : {
+              auditLogId: input.auditLogId,
+              outcome: "started" as const,
+            },
+      ),
+    completeProtectedOperation: () =>
+      options?.failComplete
+        ? Effect.fail(new RestPersistenceError())
+        : Effect.void,
+    listConnections: () => Effect.succeed([]),
+    loadContactReadMaterial: () => Effect.succeed(null),
+    listEncryptedContacts: () => Effect.succeed(null),
+    loadGroupSearchMaterial: () => Effect.succeed(null),
+    listGroups: () => Effect.succeed(null),
+    listChats: () => Effect.succeed(null),
+    readMessages: () => Effect.succeed(null),
+    completeMessageRecordRead: () =>
+      Effect.succeed({ outcome: "success" as const }),
+    failStoredMediaRead: () => {
+      observations.push("fail-media-read");
+      return Effect.void;
+    },
+    reserveStoredMediaRead:
+      options?.reserve ??
+      (() => {
+        observations.push("reserve-media-read");
+        return options?.failReserve
+          ? Effect.fail(new RestPersistenceError())
+          : Effect.succeed({
+              material: readyMediaMaterial,
+              outcome: "ready" as const,
+            });
+      }),
+    rejectProtectedOperation: (input) =>
+      Effect.succeed(
+        input.requiredPermission !== undefined &&
+          !input.permissions.includes(input.requiredPermission)
+          ? ("authorization_denied" as const)
+          : ("rejected" as const),
+      ),
+  };
+  const layer = Layer.mergeAll(
+    Layer.succeed(ApiKeyHmac, {
+      digest: () => Effect.succeed(digest),
+    }),
+    Layer.succeed(ApiKeyPersistence, {
+      authenticate: () =>
+        Effect.succeed({
+          connectionIds: [connectionId],
+          expiresAt: null,
+          grantId,
+          id: publicId,
+          name: "CI",
+          permissions: options?.permissions ?? [
+            "connections:read",
+            "messages:read",
+          ],
+          personalAccountId,
+        }),
+      create: () => Effect.succeed({ outcome: "not_found" as const }),
+      list: () => Effect.succeed([]),
+      revoke: () => Effect.succeed(null),
+    }),
+    Layer.succeed(RestClock, { now: Effect.succeed(observedAt) }),
+    Layer.succeed(RestIdentifiers, {
+      nextAuditLogId: Effect.succeed("50000000-0000-4000-8000-000000000080"),
+    }),
+    Layer.succeed(RestCursorCodec, {
+      decode: () => Effect.fail(new RestCursorError()),
+      encode: () => Effect.succeed("rest-cursor"),
+    }),
+    Layer.succeed(SendTextMessage, {
+      send: () =>
+        Effect.succeed({
+          outcome: "receipt" as const,
+          receipt,
+        }),
+    }),
+    Layer.succeed(RestPersistence, persistence),
+    Layer.succeed(StoredMediaContainerService, {
+      read: () => {
+        observations.push("decrypt-media-object");
+        return Effect.succeed(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("protected bytes"));
+              controller.close();
+            },
+          }),
+        );
+      },
+      write: () => Effect.die("unused"),
+    }),
+    Layer.succeed(EnvelopeEncryptionService, {
+      createConnectionKey: () => Effect.die("unused"),
+      createPersonalAccountKey: () => Effect.die("unused"),
+      decrypt: ({ ciphertext }) => {
+        observations.push("decrypt-media-metadata");
+        return options?.decryptFails
+          ? Effect.fail(
+              new EncryptionError({
+                operation: "decrypt",
+                stage: "ciphertext",
+              }),
+            )
+          : Effect.succeed(
+              Uint8Array.from(atob(ciphertext.ciphertext), (value) =>
+                value.charCodeAt(0),
+              ),
+            );
+      },
+      decryptMany: () => Effect.die("unused"),
+      encrypt: () => Effect.die("unused"),
+    }),
+    Layer.succeed(SafeTelemetry, {
+      emit: (event) =>
+        Effect.sync(() => {
+          telemetry.push(event);
+        }),
+    }),
+  );
+  return {
+    handler: createRestHandler(layer, {
+      dailyMediaByteLimit: 15,
+      dailyRecordLimit: 10_000,
+      hourLimit: 3,
+      keyHourLimit: 2,
+      keyMinuteLimit: 1,
+      minuteLimit: 2,
+    }),
+    observations,
+    telemetry,
+  };
+};
+
+describe("REST Stored Media", () => {
+  test("reserves verified bytes before decrypting and returns a private attachment", async () => {
+    const harness = makeMediaHarness();
+    const response = await harness.handler(request(mediaPath));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("content-type")).toBe("image/jpeg");
+    expect(response.headers.get("content-disposition")).toBe(
+      'attachment; filename="unsafe name.jpg"',
+    );
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(response.headers.get("location")).toBeNull();
+    expect(await response.text()).toBe("protected bytes");
+    expect(harness.observations.indexOf("reserve-media-read")).toBeLessThan(
+      harness.observations.indexOf("decrypt-media-metadata"),
+    );
+    expect(harness.observations.indexOf("reserve-media-read")).toBeLessThan(
+      harness.observations.indexOf("decrypt-media-object"),
+    );
+    expect(harness.telemetry).toEqual([
+      {
+        event: "rest.operation.completed",
+        operation: "read_stored_media",
+        outcome: "success",
+        resultCount: 1,
+        service: "api",
+      },
+    ]);
+    expect(JSON.stringify(harness.telemetry)).not.toContain(credential);
+    expect(JSON.stringify(harness.telemetry)).not.toContain("protected bytes");
+  });
+
+  test("requires messages:read and uses one not-found boundary for unavailable media", async () => {
+    const forbidden = await makeMediaHarness({
+      permissions: ["connections:read", "messages:send"],
+    }).handler(request(mediaPath));
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toMatchObject({
+      code: "insufficient_permission",
+      status: 403,
+    });
+
+    for (const path of [
+      `${mediaPath}/extra`,
+      mediaPath.replace("msg_111111111111111111111", "msg_000000000000000000000"),
+      "/v1/connections/con_123456789012345678901/messages/msg_111111111111111111111/media",
+    ]) {
+      const missing = await makeMediaHarness({
+        reserve: () => Effect.succeed({ outcome: "not_found" }),
+      }).handler(request(path));
+      expect(missing.status).toBe(404);
+      expect(await missing.json()).toMatchObject({
+        code: "not_found",
+        status: 404,
+      });
+    }
+  });
+
+  test("rejects extra query parameters before reservation", async () => {
+    const harness = makeMediaHarness();
+    const response = await harness.handler(request(`${mediaPath}?download=1`));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      code: "invalid_request",
+      status: 400,
+    });
+    expect(harness.observations).toEqual([]);
+    expect(harness.telemetry).toEqual([]);
+  });
+
+  test("shares decrypted-media-byte quota exhaustion as a rate limit", async () => {
+    const harness = makeMediaHarness({
+      reserve: () =>
+        Effect.succeed({
+          outcome: "quota_exhausted",
+          resetsAt: new Date("2026-08-15T00:00:00.000Z"),
+        }),
+    });
+    const response = await harness.handler(request(mediaPath));
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({
+      code: "rate_limited",
+      retryable: true,
+      status: 429,
+    });
+    expect(harness.observations).not.toContain("decrypt-media-object");
+  });
+
+  test("releases reserved bytes and uses not-found when decryption fails", async () => {
+    const harness = makeMediaHarness({ decryptFails: true });
+    const response = await harness.handler(request(mediaPath));
+    expect(response.status).toBe(404);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+    expect(JSON.stringify(body)).not.toContain("protected bytes");
+    expect(JSON.stringify(body)).not.toContain("stored-media/opaque-object");
+    expect(harness.observations).toContain("fail-media-read");
   });
 });

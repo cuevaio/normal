@@ -309,6 +309,7 @@ export interface RestOperationCompletedEvent {
     | "list_groups"
     | "list_chats"
     | "read_messages"
+    | "read_stored_media"
     | "send_text_message";
   readonly outcome:
     | "audit_unavailable"

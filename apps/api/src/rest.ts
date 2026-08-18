@@ -14,6 +14,7 @@ import {
   decodeRestGroupList,
   decodeRestMessageList,
   decodeRestSendOperation,
+  parseRestStoredMediaPath,
   type ProblemCode,
   type ProblemDetails,
   problemType,
@@ -39,6 +40,7 @@ import type {
   McpToolGroupSearchMaterial,
   McpToolMessagePage,
   RejectProtectedOperationResult,
+  ReserveApiKeyStoredMediaReadResult,
 } from "@whatsapp-mcp/db/mcp-tool";
 import { apiSendGrant } from "@whatsapp-mcp/db/send";
 import { normalizeWhatsAppConnectionName } from "@whatsapp-mcp/domain/whatsapp-connection";
@@ -61,6 +63,10 @@ import {
   EnvelopeEncryptionService,
 } from "./encryption/envelope";
 import {
+  type StoredMediaContainer,
+  StoredMediaContainerService,
+} from "./encryption/stored-media-container";
+import {
   groupSearchIndex,
   importGroupDirectoryIndexKey,
   normalizeGroupDisplayName,
@@ -81,6 +87,7 @@ const MESSAGES_PATH =
   /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/conversations\/(cvs_[A-Za-z0-9_-]{21})\/messages$/u;
 const SEND_OPERATIONS_PATH =
   /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/send-operations$/u;
+const READ_STORED_MEDIA = "read_stored_media" as const;
 const MAX_AUTHORIZATION_LENGTH = 128;
 const MAX_SEND_BODY_BYTES = 32_768;
 const SEND_OPERATION = "send_text_message" as const;
@@ -103,6 +110,7 @@ const MAX_PAGE_SIZE = 50;
 const CURSOR_TTL_SECONDS = 900;
 const REST_MESSAGE_PAGE_MAX_JSON_BYTES = 1_048_576;
 const READY_MEDIA_BYTE_LIMIT = 16_777_216;
+const DEFAULT_DAILY_MEDIA_BYTE_LIMIT = 268_435_456;
 
 export class RestPersistenceError extends Data.TaggedError(
   "RestPersistenceError",
@@ -195,6 +203,25 @@ export interface RestPersistenceService {
     | { readonly outcome: "record_quota_exhausted"; readonly resetsAt: Date },
     RestPersistenceError
   >;
+  readonly failStoredMediaRead: (input: {
+    readonly auditLogId: string;
+    readonly completedAt: Date;
+    readonly errorCode: string;
+  }) => Effect.Effect<void, RestPersistenceError>;
+  readonly reserveStoredMediaRead: (input: {
+    readonly apiKeyGrantId: string;
+    readonly auditLogId: string;
+    readonly connectionPublicId: string;
+    readonly dailyByteLimit: number;
+    readonly mediaPublicId: string;
+    readonly messagePublicId: string;
+    readonly observedAt: Date;
+    readonly permissions: ReadonlyArray<string>;
+    readonly personalAccountId: string;
+  }) => Effect.Effect<
+    ReserveApiKeyStoredMediaReadResult,
+    RestPersistenceError
+  >;
   readonly rejectProtectedOperation: (input: {
     readonly apiKey: {
       readonly grantId: string;
@@ -275,9 +302,11 @@ type RestRequirements =
   | RestIdentifiersService
   | RestPersistenceService
   | SafeTelemetryService
-  | SendTextMessageService;
+  | SendTextMessageService
+  | StoredMediaContainer;
 
 export interface RestHandlerOptions {
+  readonly dailyMediaByteLimit?: number;
   readonly dailyRecordLimit: number;
   readonly hourLimit: number;
   readonly keyHourLimit: number;
@@ -404,6 +433,7 @@ const emitCompletion = (
     | "list_groups"
     | "list_chats"
     | "read_messages"
+    | "read_stored_media"
     | "send_text_message",
   outcome:
     | "audit_unavailable"
@@ -2341,6 +2371,350 @@ const listMessages = (
     ),
   );
 
+const sanitizeAttachmentFilename = (value: string): string | null => {
+  const leaf = value.split(/[\\/]/u).at(-1) ?? "";
+  const sanitized = Array.from(leaf)
+    .map((character) => {
+      const point = character.codePointAt(0) ?? 0;
+      return point <= 0x1f || point === 0x7f ? " " : character;
+    })
+    .join("")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 255);
+  return sanitized.length === 0 || sanitized === "." || sanitized === ".."
+    ? null
+    : sanitized;
+};
+
+const streamToBytes = async (
+  stream: ReadableStream<Uint8Array>,
+  expectedBytes: number,
+): Promise<Uint8Array> => {
+  const bytes = new Uint8Array(expectedBytes);
+  const reader = stream.getReader();
+  let offset = 0;
+  while (true) {
+    const next = await reader.read();
+    if (next.done) break;
+    if (offset + next.value.byteLength > expectedBytes) {
+      throw new Error("Stored Media exceeded verified size");
+    }
+    bytes.set(next.value, offset);
+    offset += next.value.byteLength;
+  }
+  if (offset !== expectedBytes) {
+    throw new Error("Stored Media did not match verified size");
+  }
+  return bytes;
+};
+
+const mediaContentDisposition = (filename: string | null): string => {
+  if (filename === null) return "attachment";
+  return `attachment; filename="${filename.replace(/\\/gu, "\\\\").replace(/"/gu, '\\"')}"`;
+};
+
+const mediaResponse = (
+  body: Uint8Array,
+  mimeType: string,
+  filename: string | null,
+): Response =>
+  new Response(body, {
+    headers: {
+      "cache-control": "private, no-store",
+      "content-disposition": mediaContentDisposition(filename),
+      "content-length": String(body.byteLength),
+      "content-type": mimeType,
+    },
+    status: 200,
+  });
+
+const getStoredMedia = (
+  request: Request,
+  connectionPublicId: string,
+  messagePublicId: string,
+  mediaPublicId: string,
+  options: RestHandlerOptions,
+  layer: Layer.Layer<RestRequirements, unknown>,
+): Promise<Response> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const url = new URL(request.url);
+      if ([...url.searchParams.keys()].length > 0) {
+        return problemResponse("invalid_request", 400);
+      }
+      const grant = yield* authenticate(request);
+      const clock = yield* RestClock;
+      const identifiers = yield* RestIdentifiers;
+      const persistence = yield* RestPersistence;
+      const startedAt = yield* clock.now;
+      const auditLogId = yield* identifiers.nextAuditLogId;
+      const started = yield* persistence
+        .beginProtectedOperation({
+          apiKey: {
+            grantId: grant.grantId,
+            name: grant.name,
+            publicId: grant.id,
+          },
+          auditLogId,
+          channel: "api",
+          connectionPublicId,
+          hourLimit: options.hourLimit,
+          keyHourLimit: options.keyHourLimit,
+          keyMinuteLimit: options.keyMinuteLimit,
+          minuteLimit: options.minuteLimit,
+          observedAt: startedAt,
+          operationName: READ_STORED_MEDIA,
+          permissions: grant.permissions,
+          personalAccountId: grant.personalAccountId,
+          requiredPermission: "messages:read" satisfies ApiKeyPermission,
+        })
+        .pipe(Effect.either);
+      if (started._tag === "Left") {
+        yield* emitCompletion(READ_STORED_MEDIA, "audit_unavailable");
+        return problemResponse("unavailable", 503);
+      }
+      if (started.right.outcome === "authorization_denied") {
+        yield* emitCompletion(READ_STORED_MEDIA, "authorization_denied");
+        return grant.permissions.includes("messages:read")
+          ? problemResponse("invalid_credentials", 401)
+          : problemResponse("insufficient_permission", 403);
+      }
+      if (started.right.outcome === "rate_limited") {
+        yield* emitCompletion(READ_STORED_MEDIA, "rate_limited");
+        return problemResponse("rate_limited", 429, {
+          retry_after_seconds: started.right.retryAfterSeconds,
+          retryable: true,
+          resets_at:
+            started.right.resetsAt.toISOString() as ProblemDetails["resets_at"],
+        });
+      }
+
+      const failAfterAudit = (
+        errorCode: string,
+        outcome: "authorization_denied" | "rate_limited" | "unavailable",
+        extras: {
+          readonly resetsAt?: Date;
+        } = {},
+      ) =>
+        Effect.gen(function* () {
+          const completed = yield* persistence
+            .completeProtectedOperation({
+              auditLogId,
+              completedAt: yield* clock.now,
+              errorCode,
+              outcome:
+                outcome === "authorization_denied"
+                  ? "authorization_denied"
+                  : "execution_error",
+              resultCount: null,
+            })
+            .pipe(Effect.either);
+          yield* emitCompletion(
+            READ_STORED_MEDIA,
+            completed._tag === "Left" ? "audit_unavailable" : outcome,
+          );
+          if (completed._tag === "Left") {
+            return problemResponse("unavailable", 503);
+          }
+          if (outcome === "authorization_denied") {
+            return problemResponse("not_found", 404);
+          }
+          if (outcome === "rate_limited" && extras.resetsAt !== undefined) {
+            return problemResponse("rate_limited", 429, {
+              retry_after_seconds: Math.max(
+                0,
+                Math.ceil(
+                  (extras.resetsAt.valueOf() - startedAt.valueOf()) / 1_000,
+                ),
+              ),
+              retryable: true,
+              resets_at:
+                extras.resetsAt.toISOString() as ProblemDetails["resets_at"],
+            });
+          }
+          return problemResponse("unavailable", 503);
+        });
+
+      const reserved = yield* persistence
+        .reserveStoredMediaRead({
+          apiKeyGrantId: grant.grantId,
+          auditLogId,
+          connectionPublicId,
+          dailyByteLimit:
+            options.dailyMediaByteLimit ?? DEFAULT_DAILY_MEDIA_BYTE_LIMIT,
+          mediaPublicId,
+          messagePublicId,
+          observedAt: startedAt,
+          permissions: grant.permissions,
+          personalAccountId: grant.personalAccountId,
+        })
+        .pipe(Effect.either);
+      if (reserved._tag === "Left") {
+        return yield* failAfterAudit("service_unavailable", "unavailable");
+      }
+      if (reserved.right.outcome === "not_found") {
+        return yield* failAfterAudit("not_found", "authorization_denied");
+      }
+      if (reserved.right.outcome === "quota_exhausted") {
+        return yield* failAfterAudit("rate_limited", "rate_limited", {
+          resetsAt: reserved.right.resetsAt,
+        });
+      }
+
+      const material = reserved.right.material;
+      const encryption = yield* EnvelopeEncryptionService;
+      const container = yield* StoredMediaContainerService;
+      const metadataBytes = yield* encryption
+        .decrypt({
+          accountKey: material.accountKey,
+          connectionKey: material.connectionKey,
+          ciphertext: material.metadata,
+          context: {
+            accountId: material.accountKey.personalAccountId,
+            connectionId: material.connectionKey.connectionId,
+            entity: "stored-media",
+            fieldOrObjectPurpose: "metadata",
+            recordId: material.mediaId,
+          },
+        })
+        .pipe(Effect.either);
+      if (metadataBytes._tag === "Left") {
+        const failed = yield* persistence
+          .failStoredMediaRead({
+            auditLogId,
+            completedAt: yield* clock.now,
+            errorCode: "resource_unavailable",
+          })
+          .pipe(Effect.either);
+        yield* emitCompletion(
+          READ_STORED_MEDIA,
+          failed._tag === "Left" ? "audit_unavailable" : "unavailable",
+        );
+        return failed._tag === "Left"
+          ? problemResponse("unavailable", 503)
+          : problemResponse("not_found", 404);
+      }
+
+      let metadata: { fileName: string | null; mimeType: string };
+      try {
+        const decoded = JSON.parse(
+          new TextDecoder("utf-8", {
+            fatal: true,
+            ignoreBOM: false,
+          }).decode(metadataBytes.right),
+        ) as unknown;
+        if (
+          typeof decoded !== "object" ||
+          decoded === null ||
+          !("mimeType" in decoded) ||
+          typeof decoded.mimeType !== "string" ||
+          !("fileName" in decoded) ||
+          (decoded.fileName !== null && typeof decoded.fileName !== "string")
+        ) {
+          throw new Error("Stored Media metadata was invalid");
+        }
+        metadata = decoded as typeof metadata;
+      } catch {
+        metadataBytes.right.fill(0);
+        const failed = yield* persistence
+          .failStoredMediaRead({
+            auditLogId,
+            completedAt: yield* clock.now,
+            errorCode: "resource_unavailable",
+          })
+          .pipe(Effect.either);
+        yield* emitCompletion(
+          READ_STORED_MEDIA,
+          failed._tag === "Left" ? "audit_unavailable" : "unavailable",
+        );
+        return failed._tag === "Left"
+          ? problemResponse("unavailable", 503)
+          : problemResponse("not_found", 404);
+      }
+      metadataBytes.right.fill(0);
+
+      const stream = yield* container
+        .read({
+          accountKey: material.accountKey,
+          connectionKey: material.connectionKey,
+          context: {
+            connectionId: material.connectionKey.connectionId,
+            mediaObjectId: material.mediaId,
+            personalAccountId: material.accountKey.personalAccountId,
+          },
+          objectKey: material.objectKey,
+        })
+        .pipe(Effect.either);
+      if (stream._tag === "Left") {
+        const failed = yield* persistence
+          .failStoredMediaRead({
+            auditLogId,
+            completedAt: yield* clock.now,
+            errorCode: "resource_unavailable",
+          })
+          .pipe(Effect.either);
+        yield* emitCompletion(
+          READ_STORED_MEDIA,
+          failed._tag === "Left" ? "audit_unavailable" : "unavailable",
+        );
+        return failed._tag === "Left"
+          ? problemResponse("unavailable", 503)
+          : problemResponse("not_found", 404);
+      }
+
+      const bytes = yield* Effect.tryPromise({
+        try: () => streamToBytes(stream.right, material.plaintextSizeBytes),
+        catch: () => new RestPersistenceError(),
+      }).pipe(Effect.either);
+      if (bytes._tag === "Left") {
+        const failed = yield* persistence
+          .failStoredMediaRead({
+            auditLogId,
+            completedAt: yield* clock.now,
+            errorCode: "resource_unavailable",
+          })
+          .pipe(Effect.either);
+        yield* emitCompletion(
+          READ_STORED_MEDIA,
+          failed._tag === "Left" ? "audit_unavailable" : "unavailable",
+        );
+        return failed._tag === "Left"
+          ? problemResponse("unavailable", 503)
+          : problemResponse("not_found", 404);
+      }
+
+      const filename =
+        metadata.fileName === null
+          ? null
+          : sanitizeAttachmentFilename(metadata.fileName);
+      const completed = yield* persistence
+        .completeProtectedOperation({
+          auditLogId,
+          completedAt: yield* clock.now,
+          errorCode: null,
+          outcome: "success",
+          resultCount: 1,
+        })
+        .pipe(Effect.either);
+      if (completed._tag === "Left") {
+        yield* emitCompletion(READ_STORED_MEDIA, "audit_unavailable");
+        return problemResponse("unavailable", 503);
+      }
+      yield* emitCompletion(READ_STORED_MEDIA, "success", 1);
+      return mediaResponse(bytes.right, metadata.mimeType, filename);
+    }).pipe(
+      Effect.provide(layer),
+      Effect.match({
+        onFailure: (failure) =>
+          failure instanceof Response
+            ? failure
+            : problemResponse("unavailable", 503),
+        onSuccess: (response) => response,
+      }),
+    ),
+  );
+
 const headerCount = (request: Request, name: string): number => {
   let count = 0;
   for (const [header] of request.headers) {
@@ -2501,6 +2875,17 @@ export const createRestHandler =
         request,
         messagesMatch[1],
         messagesMatch[2],
+        options,
+        layer,
+      );
+    }
+    const media = parseRestStoredMediaPath(path);
+    if (request.method === "GET" && media !== null) {
+      return getStoredMedia(
+        request,
+        media.connectionId,
+        media.messageId,
+        media.mediaId,
         options,
         layer,
       );

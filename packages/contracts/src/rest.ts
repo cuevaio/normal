@@ -142,10 +142,11 @@ export const RestConversationListContract = makePublicObjectContract({
 export type RestConversationList =
   typeof RestConversationListContract.schema.Type;
 
+const restStoredMediaPathPattern =
+  /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/messages\/(msg_[A-Za-z0-9_-]{21})\/media\/(med_[A-Za-z0-9_-]{21})$/;
+
 export const RestStoredMediaPath = Schema.String.pipe(
-  Schema.pattern(
-    /^\/v1\/connections\/con_[A-Za-z0-9_-]{21}\/messages\/msg_[A-Za-z0-9_-]{21}\/media\/med_[A-Za-z0-9_-]{21}$/,
-  ),
+  Schema.pattern(restStoredMediaPathPattern),
 );
 export type RestStoredMediaPath = typeof RestStoredMediaPath.Type;
 
@@ -155,6 +156,32 @@ export const restStoredMediaPath = (input: {
   readonly messageId: MessageId | string;
 }): RestStoredMediaPath =>
   `/v1/connections/${input.connectionId}/messages/${input.messageId}/media/${input.mediaId}` as RestStoredMediaPath;
+
+export const parseRestStoredMediaPath = (
+  input: string,
+):
+  | {
+      readonly connectionId: string;
+      readonly mediaId: string;
+      readonly messageId: string;
+    }
+  | null => {
+  const match = restStoredMediaPathPattern.exec(input);
+  if (
+    match === null ||
+    match[0] !== input ||
+    match[1] === undefined ||
+    match[2] === undefined ||
+    match[3] === undefined
+  ) {
+    return null;
+  }
+  return {
+    connectionId: match[1],
+    messageId: match[2],
+    mediaId: match[3],
+  };
+};
 
 export const RestMessageSender = Schema.Struct({
   display_name: Schema.NullOr(Schema.String),

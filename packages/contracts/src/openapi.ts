@@ -22,6 +22,7 @@ export interface RestRouteMetadata {
     | "/v1/connections/{connection_id}/groups"
     | "/v1/connections/{connection_id}/conversations"
     | "/v1/connections/{connection_id}/conversations/{conversation_id}/messages"
+    | "/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}"
     | "/v1/connections/{connection_id}/send-operations";
   readonly permission: (typeof API_KEY_PERMISSIONS)[number];
   readonly summary: string;
@@ -82,6 +83,16 @@ export const restRouteRegistry = [
     path: "/v1/connections/{connection_id}/conversations/{conversation_id}/messages",
     permission: "messages:read",
     summary: "Page complete Stored Messages",
+    tags: ["Messages"],
+  },
+  {
+    description:
+      "Read one eligible Stored Media object for an explicitly selected WhatsApp Connection. The nested path is authenticated, non-listable, and never a public, provider, R2, or presigned URL. v1 returns the complete object after Activity Log admission and full verified-byte quota reservation. Ready media larger than 16 MiB, non-ready media, unknown or mismatched handles, Recipient Exclusions, and unauthorized grants share one constant-shape 404. Range, chunk, and alternate download URLs are not provided.",
+    method: "GET",
+    operationId: "getStoredMedia",
+    path: "/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}",
+    permission: "messages:read",
+    summary: "Read authenticated Stored Media",
     tags: ["Messages"],
   },
   {
@@ -791,10 +802,115 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
           "x-normal-permission": restRouteRegistry[4].permission,
         },
       },
-    "/v1/connections/{connection_id}/send-operations": {
-      post: {
+    "/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}": {
+      get: {
         description: restRouteRegistry[5].description,
         operationId: restRouteRegistry[5].operationId,
+        parameters: [
+          {
+            description:
+              "Opaque handle of the explicitly selected WhatsApp Connection.",
+            in: "path",
+            name: "connection_id",
+            required: true,
+            schema: { type: "string", pattern: "^con_[A-Za-z0-9_-]{21}$" },
+          },
+          {
+            description:
+              "Opaque handle of the Stored Message that owns the Stored Media.",
+            in: "path",
+            name: "message_id",
+            required: true,
+            schema: { type: "string", pattern: "^msg_[A-Za-z0-9_-]{21}$" },
+          },
+          {
+            description: "Opaque handle of the Stored Media object.",
+            in: "path",
+            name: "media_id",
+            required: true,
+            schema: { type: "string", pattern: "^med_[A-Za-z0-9_-]{21}$" },
+          },
+        ],
+        responses: {
+          "200": {
+            content: {
+              "*/*": {
+                schema: { type: "string", format: "binary" },
+              },
+            },
+            description:
+              "Ready Stored Media no larger than 16 MiB, returned with the normalized MIME type, a sanitized optional filename, and private no-store caching.",
+            headers: {
+              "Cache-Control": {
+                description: "Protected media is private and must not be stored.",
+                schema: { type: "string", const: "private, no-store" },
+              },
+              "Content-Disposition": {
+                description:
+                  "`attachment` with a sanitized filename when one is available.",
+                schema: { type: "string" },
+              },
+              "Content-Type": {
+                description: "Normalized MIME type of the Stored Media.",
+                schema: { type: "string" },
+              },
+            },
+          },
+          "401": {
+            content: {
+              "application/problem+json": {
+                example: problemExample,
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description:
+              "The API Key is missing, malformed, expired, or revoked.",
+          },
+          "403": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description: "The API Key does not include `messages:read`.",
+          },
+          "404": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description:
+              "The Connection, Stored Message, or Stored Media is unknown, unselected, deleted, excluded, mismatched, not ready, or larger than 16 MiB.",
+          },
+          "429": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description:
+              "Personal Account request or decrypted-media-byte quota is exhausted.",
+          },
+          "503": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description: "Authentication or audit authority is unavailable.",
+          },
+        },
+        security: [{ apiKey: [] }],
+        summary: restRouteRegistry[5].summary,
+        tags: [...restRouteRegistry[5].tags],
+        "x-normal-permission": restRouteRegistry[5].permission,
+      },
+    },
+    "/v1/connections/{connection_id}/send-operations": {
+      post: {
+        description: restRouteRegistry[6].description,
+        operationId: restRouteRegistry[6].operationId,
         parameters: [
           {
             description:
@@ -876,9 +992,9 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
           ),
         },
         security: [{ apiKey: [] }],
-        summary: restRouteRegistry[5].summary,
-        tags: [...restRouteRegistry[5].tags],
-        "x-normal-permission": restRouteRegistry[5].permission,
+        summary: restRouteRegistry[6].summary,
+        tags: [...restRouteRegistry[6].tags],
+        "x-normal-permission": restRouteRegistry[6].permission,
       },
     },
   },
