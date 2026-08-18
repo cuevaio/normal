@@ -15,6 +15,8 @@ const distRoot = join(import.meta.dir, "../dist");
 const vercelManifest = (await Bun.file(
   join(import.meta.dir, "../vercel.json"),
 ).json()) as {
+  readonly buildCommand?: string;
+  readonly framework?: string;
   readonly headers?: ReadonlyArray<{
     readonly headers: ReadonlyArray<{
       readonly key: string;
@@ -22,6 +24,8 @@ const vercelManifest = (await Bun.file(
     }>;
     readonly source: string;
   }>;
+  readonly installCommand?: string;
+  readonly outputDirectory?: string;
   readonly rewrites?: unknown;
   readonly routes?: unknown;
 };
@@ -95,6 +99,14 @@ describe("static Scalar documentation", () => {
   });
 
   test("declares CSP, immutable Scalar caching, and no Vercel proxy", () => {
+    expect(vercelManifest.framework).toBe("astro");
+    expect(vercelManifest.outputDirectory).toBe("dist");
+    expect(vercelManifest.installCommand).toBe(
+      "cd ../.. && bun install --frozen-lockfile",
+    );
+    expect(vercelManifest.buildCommand).toContain(
+      "bun x turbo run build --filter=@whatsapp-mcp/docs",
+    );
     expect(vercelManifest.rewrites).toBeUndefined();
     expect(vercelManifest.routes).toBeUndefined();
     expect(headerValue("/vendor/scalar/(.*)", "Cache-Control")).toBe(

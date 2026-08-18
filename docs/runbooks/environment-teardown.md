@@ -24,8 +24,8 @@ deletion workflow.
 
 ## Destruction order
 
-1. Remove public DNS and web/API routes, verify data-plane traffic is closed,
-   then retire Vercel web deployments.
+1. Remove public DNS and web/docs/API routes, verify data-plane traffic is closed,
+   then retire Vercel web and static docs deployments.
 2. Remove schedules and Queue producers; after verified drain, retire consumers,
    Queues, OAuth KV, disposable R2 buckets, API Worker, and provider-control
    Worker. Revoke their scoped credentials at each issuer.

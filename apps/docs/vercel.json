@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "astro",
+  "outputDirectory": "dist",
   "buildCommand": "cd ../.. && bun x turbo run build --filter=@whatsapp-mcp/docs --cache-dir=.turbo/cache",
   "installCommand": "cd ../.. && bun install --frozen-lockfile",
   "headers": [

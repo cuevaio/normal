@@ -125,6 +125,8 @@ const inspectProductionBundles = async (): Promise<void> => {
     ]),
     inspectForForbiddenAuthority("apps/docs/dist", [
       "API_KEY_HMAC_SECRET",
+      "CLERK_JWT_KEY",
+      "CLERK_SECRET_KEY",
       "MCP_CURSOR_HMAC_SECRET",
       "SEND_FINGERPRINT_HMAC_SECRET",
       "WASENDER_API_CREDENTIAL",

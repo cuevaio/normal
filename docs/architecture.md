@@ -73,8 +73,10 @@ flowchart LR
 * The API Worker is the only public data plane. Browser requests go directly to
   its configured origin. Server-side automations call the same Worker with a
   User-created API Key; they do not go through Vercel or a second public Worker.
-  The static Scalar app at `docs.normal.fast` renders the generated OpenAPI
-  document and cannot execute authenticated requests or persist an API Key.
+  The static Scalar app at `docs.normal.fast` is a separate Vercel project. It
+  renders the generated OpenAPI document and cannot execute authenticated
+  requests, persist an API Key, or proxy browser data requests to the API
+  Worker. Development and preview use isolated docs projects and hostnames.
 * `provider-control` is private. Provider API Credentials and provider specific
   behavior do not cross its boundary or the `packages/wasender` seam.
 * Neon is authoritative for identity mappings, tenant data, authorization,

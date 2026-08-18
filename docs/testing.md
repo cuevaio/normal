@@ -186,6 +186,13 @@ examples, then loads the production-built reference at mobile and desktop
 viewports. The site cannot execute authenticated requests or persist an API
 Key.
 
+`bun run deploy:smoke` also fetches the deployed docs origin after web health.
+It requires a distinct `docs.normal.fast` (or same-environment docs) origin,
+HTML that self-hosts the pinned Scalar bundle, the generated OpenAPI document,
+reviewed security headers, and no Vercel rewrite to the API Worker. A docs
+failure reports only the `docs` subsystem; it never prints the document or
+credential material.
+
 ## Production exclusion
 
 `bun run build` inspects every Worker output, source map, Next.js server and

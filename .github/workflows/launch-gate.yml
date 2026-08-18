@@ -45,6 +45,7 @@ jobs:
       - run: bun scripts/launch-gate.ts
         env:
           API_ORIGIN: ${{ vars.API_ORIGIN }}
+          DOCS_ORIGIN: ${{ vars.DOCS_ORIGIN }}
           WEB_ORIGIN: ${{ vars.WEB_ORIGIN }}
           MCP_SMOKE_CLIENT_ID: ${{ vars.MCP_SMOKE_CLIENT_ID }}
           MCP_SMOKE_REFRESH_SECRET_ID: ${{ vars.MCP_SMOKE_REFRESH_SECRET_ID }}

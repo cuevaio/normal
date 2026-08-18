@@ -19,7 +19,7 @@ Secret examples never contain usable key material.
 | `DEPLOYMENT_ENVIRONMENT` | Non-secret | Web, API, provider-control | Set to the deployed environment. Change only as part of a deployment. |
 | `NEXT_PUBLIC_API_ORIGIN` | Non-secret | Web browser bundle and web startup validation | OpenTofu sets the same-environment API Worker's bare HTTPS origin. It is frozen into the browser bundle at build time. |
 | `NEXT_PUBLIC_WEB_ORIGIN` | Non-secret | Web metadata, robots, XML sitemap, and web startup validation | OpenTofu sets the same-environment Vercel custom origin. It is frozen into the web build and must be a bare HTTPS origin. |
-| Docs origin | Non-secret | Static Scalar documentation | OpenTofu `docs_hostname` assigns `docs.normal.fast` in production. The Astro app is static output only. It self-hosts a pinned Scalar browser bundle, publishes the generated OpenAPI artifact, and must not receive API Key HMAC material, Clerk secrets, or a Vercel rewrite to the API Worker. |
+| Docs origin | Non-secret | Static Scalar documentation | OpenTofu `docs_hostname` assigns `docs.normal.fast` in production and a distinct same-environment hostname in development and preview. The Astro app is static output only. It self-hosts a pinned Scalar browser bundle, publishes the generated OpenAPI artifact, and must not receive API Key HMAC material, Clerk secrets, or a Vercel rewrite to the API Worker. Deployment and launch-gate smoke read the same origin as `SMOKE_DOCS_ORIGIN` or `DOCS_ORIGIN`. |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Public identifier | Web browser bundle and web startup validation | Copy the publishable key from the same-environment Clerk instance. OpenTofu freezes it into that environment's browser bundle. |
 | `NEXT_PUBLIC_POSTHOG_KEY` | Public project key | Web browser product analytics | Optional same-environment PostHog project key. OpenTofu `posthog_project_key` freezes it into the browser bundle only when `posthog_host` is also set. Public browser configuration, not a secret. Leave both unset to disable analytics collection. |
 | `NEXT_PUBLIC_POSTHOG_HOST` | Non-secret | Web browser product analytics | Optional bare HTTPS PostHog ingest origin for the same project. OpenTofu `posthog_host` must be set together with `posthog_project_key`. Browser analytics go directly to this origin; do not add a Vercel rewrite or first-party proxy. |
@@ -851,7 +851,7 @@ repository:
 | `vercel_team_id` | Team restricted to that environment's authority scope. |
 | `api_hostname` | Public custom hostname routed to the API Worker. |
 | `web_hostname` | Distinct public hostname assigned to the Vercel web project. |
-| `docs_hostname` | Distinct public hostname assigned to the static Vercel Scalar documentation project. Production uses `docs.normal.fast`. |
+| `docs_hostname` | Distinct public hostname assigned to the static Vercel Scalar documentation project. Production uses `docs.normal.fast`. Development and preview use isolated hostnames under the same environment authority. The docs project name is `whatsapp-mcp-docs` in production and `whatsapp-mcp-docs-<environment>` otherwise. |
 | `clerk_issuer` | Exact HTTPS issuer for the same-environment Clerk instance. |
 | `clerk_publishable_key` | Public browser key for the same-environment Clerk instance. |
 | `posthog_project_key` | Optional public PostHog project key. Empty disables browser analytics. Must be set together with `posthog_host`. |

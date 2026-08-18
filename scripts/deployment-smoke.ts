@@ -1,5 +1,6 @@
 export interface DeploymentSmokeConfig {
   readonly apiOrigin: string;
+  readonly docsOrigin: string;
   readonly mcpAccessToken: string;
   readonly smokeSecret: string;
   readonly webOrigin: string;
@@ -84,6 +85,70 @@ const requestMcpJson = async (
   return fail("mcp");
 };
 
+const header = (response: Response, name: string) =>
+  response.headers.get(name)?.toLowerCase() ?? "";
+
+const assertDocsReference = async (
+  fetch: (input: string, init?: RequestInit) => Promise<Response>,
+  docs: string,
+): Promise<void> => {
+  let home: Response;
+  try {
+    home = await fetch(`${docs}/`);
+  } catch {
+    return fail("docs");
+  }
+  const homeBody = await home.text().catch(() => "");
+  if (
+    !home.ok ||
+    !header(home, "content-type").includes("text/html") ||
+    !header(home, "content-security-policy").includes("default-src 'self'") ||
+    !header(home, "content-security-policy").includes(
+      "nonce-normal-docs-scalar",
+    ) ||
+    header(home, "referrer-policy") !== "no-referrer" ||
+    header(home, "x-content-type-options") !== "nosniff" ||
+    header(home, "x-frame-options") !== "deny" ||
+    !homeBody.includes("/openapi.json") ||
+    !homeBody.includes("/vendor/scalar/") ||
+    homeBody.includes("cdn.scalar.com") ||
+    homeBody.includes("proxy.scalar.com") ||
+    homeBody.includes("registry.scalar.com") ||
+    homeBody.includes("API_KEY_HMAC_SECRET")
+  )
+    return fail("docs");
+
+  let openApi: Response;
+  try {
+    openApi = await fetch(`${docs}/openapi.json`);
+  } catch {
+    return fail("docs");
+  }
+  if (openApi.url) {
+    try {
+      if (new URL(openApi.url).origin !== docs) return fail("docs");
+    } catch {
+      return fail("docs");
+    }
+  }
+  const openApiBody = await openApi.json().catch(() => null);
+  if (
+    !openApi.ok ||
+    !header(openApi, "content-type").includes("application/json") ||
+    header(openApi, "cache-control") !==
+      "public, max-age=300, must-revalidate" ||
+    header(openApi, "x-content-type-options") !== "nosniff" ||
+    typeof openApiBody !== "object" ||
+    openApiBody === null ||
+    Array.isArray(openApiBody) ||
+    (openApiBody as { openapi?: unknown }).openapi !== "3.1.0" ||
+    typeof (openApiBody as { paths?: unknown }).paths !== "object" ||
+    (openApiBody as { paths?: unknown }).paths === null ||
+    !("/v1/connections" in (openApiBody as { paths: object }).paths)
+  )
+    return fail("docs");
+};
+
 const rpc = (method: string, id: string) => ({
   id,
   jsonrpc: "2.0",
@@ -107,9 +172,12 @@ export const runDeploymentSmoke = async (
     dependencies.fetch ??
     ((input: string, init?: RequestInit) => globalThis.fetch(input, init));
   const api = new URL(config.apiOrigin).origin;
+  const docs = new URL(config.docsOrigin).origin;
   const web = new URL(config.webOrigin).origin;
+  if (docs === api || docs === web || web === api) fail("docs");
   const webHealth = await requestJson(fetch, "web", `${web}/health`);
   if (webHealth.service !== "web" || webHealth.status !== "ok") fail("web");
+  await assertDocsReference(fetch, docs);
   const apiHealth = await requestJson(fetch, "api", `${api}/health`);
   if (apiHealth.service !== "api" || apiHealth.status !== "ok") fail("api");
   const apiReadiness = await requestJson(fetch, "api", `${api}/ready`);
@@ -195,6 +263,7 @@ export const runDeploymentSmoke = async (
       return {
         checks: [
           "web",
+          "docs",
           "api",
           "oauth",
           "mcp",

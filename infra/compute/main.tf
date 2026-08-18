@@ -845,9 +845,10 @@ resource "vercel_project" "docs" {
   framework = "astro"
   team_id   = var.vercel_team_id
 
-  root_directory  = "apps/docs"
-  build_command   = "cd ../.. && bun x turbo run build --filter=@whatsapp-mcp/docs --cache-dir=.turbo/cache"
-  install_command = "cd ../.. && bun install --frozen-lockfile"
+  root_directory   = "apps/docs"
+  output_directory = "dist"
+  build_command    = "cd ../.. && bun x turbo run build --filter=@whatsapp-mcp/docs --cache-dir=.turbo/cache"
+  install_command  = "cd ../.. && bun install --frozen-lockfile"
 
   auto_assign_custom_domains                        = true
   automatically_expose_system_environment_variables = false

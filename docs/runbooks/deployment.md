@@ -44,7 +44,7 @@ production roles or read production CI secrets.
 
 Use one change record and one reviewed commit for the entire release. The
 ordered path is **infrastructure → environment population → migration →
-provider-control → API → web → smoke check**. The deployer may stop between
+provider-control → API → web → docs → smoke check**. The deployer may stop between
 steps, but must not reorder them or serve traffic from a partially compatible
 set.
 
@@ -61,7 +61,7 @@ set.
    least-privilege roles. Production has no selectable test Layer or fake.
 5. Run `bun run db:migrate` followed by `bun run db:check` with the direct
    migration-owner connection, then remove that connection from the shell.
-6. Deploy in dependency order: **provider-control → API → web**. Keep public
+6. Deploy in dependency order: **provider-control → API → web → docs**. Keep public
    traffic closed if migration readiness or any private service binding fails.
 7. Run the non-interactive `bun run deploy:smoke` boundary and retain only its
    normalized results, reviewed commit, deployment versions, plan digest, and
@@ -260,7 +260,8 @@ tofu -chdir=infra/compute plan \
 tofu -chdir=infra/compute show "$DEPLOYMENT_ENVIRONMENT.tfplan"
 ```
 
-Confirm that the plan contains exactly one Vercel web project/domain, a public
+Confirm that the plan contains exactly one Vercel web project/domain, one
+static Vercel docs project/domain with no runtime environment values, a public
 API Worker/custom domain, one private provider-control Worker, disabled
 `workers.dev` and preview URLs for both Workers, and an API-to-provider-control
 service binding. The API version must inherit `CLERK_JWT_KEY` and the OAuth
@@ -547,9 +548,10 @@ authoritative Stored Media record to `failed` through its owning workflow.
 ## Deploy
 
 OpenTofu uploads both Worker bundles and orders provider-control before the API
-through the service-binding dependency. It also creates the isolated Vercel
-project and its custom domain, but application deployment to Vercel remains an
-explicit side effect. For production, replace the initial API version with the
+through the service-binding dependency. It also creates the isolated Vercel web
+and static docs projects and their custom domains, but application deployment
+to Vercel remains an explicit side effect. The docs project publishes `dist`
+from the pinned Bun workspace build and must not receive a runtime secret. For production, replace the initial API version with the
 database-enabled build after Hyperdrive exists. Obtain identifiers from state
 without printing any secret:
 
@@ -591,11 +593,13 @@ export VERCEL_PROJECT_ID="$(tofu -chdir=infra/compute output -raw vercel_docs_pr
 vercel deploy --prod --yes --cwd apps/docs
 ```
 
-The dedicated Vercel project always uses its Production deployment target; its
+The dedicated Vercel web project always uses its Production deployment target; its
 validated `DEPLOYMENT_ENVIRONMENT` value records whether the isolated project
 represents development, preview, or production. `NEXT_PUBLIC_API_ORIGIN` is set
-before the build and points to the same-environment Worker. There is no Vercel
-rewrite or server-side API proxy. The rendered API config is mode `0600`,
+before the build and points to the same-environment Worker. The docs project is
+a second Vercel project on the same-environment `docs_hostname`; production uses
+`docs.normal.fast`. There is no Vercel rewrite or server-side API proxy in either
+project, and the docs deployment has no Clerk, HMAC, or API origin runtime value. The rendered API config is mode `0600`,
 ignored by Git, and fails generation unless both real 32-character Hyperdrive
 identifiers and the current environment's real 32-character OAuth KV identifier
 are present. The selected environment receives the same four R2 buckets, Queue
@@ -648,6 +652,7 @@ through GitHub OIDC and run the same command:
 
 ```sh
 SMOKE_API_ORIGIN="$(tofu -chdir=infra/compute output -raw api_origin)" \
+SMOKE_DOCS_ORIGIN="$(tofu -chdir=infra/compute output -raw docs_origin)" \
 SMOKE_WEB_ORIGIN="$(tofu -chdir=infra/compute output -raw web_origin)" \
 SMOKE_MCP_CLIENT_ID="$MCP_SMOKE_CLIENT_ID" \
 SMOKE_MCP_REFRESH_SECRET_ID="$MCP_SMOKE_REFRESH_SECRET_ID" \
@@ -662,11 +667,13 @@ uses the ephemeral ten-minute access token for MCP smoke. Both workflows use
 the `production` concurrency group, so only one production deployment, launch
 gate, or credential rotation can operate at a time.
 
-The command validates web and API health, branch-bound schema and restore
+The command validates web and API health, the static docs origin serving the
+generated OpenAPI document with reviewed security headers and no Scalar CDN or
+request proxy, branch-bound schema and restore
 readiness, OAuth metadata, authenticated MCP initialization and discovery, the
 restricted Hyperdrive role, private provider-control safe-read reachability,
 Queue publication and consumption, and an encrypted disposable R2/KMS round
-trip. The Queue consumer removes its object before reporting success; KV status
+trip. The docs, web, and API origins must stay distinct. The Queue consumer removes its object before reporting success; KV status
 expires automatically. Output contains only safe subsystem or credential
 outcomes. Re-run after an ordinary pre-exchange store or network failure. If
 descendant persistence fails after exchange, do not retry the predecessor: it
@@ -1206,6 +1213,7 @@ OpenTofu apply of the last known-good commit:
 | Failed surface | Safe response | Must be preserved |
 | --- | --- | --- |
 | Web only | Redeploy the last known-good immutable Vercel deployment after confirming its API contract remains compatible. | API and Worker versions, current configuration, audit evidence. |
+| Docs only | Redeploy the last known-good immutable static docs deployment. Documentation cannot proxy or retry API traffic. | Web, API, and Worker versions, current configuration, audit evidence. |
 | API Worker | Stop promotion, deploy a forward-compatible API or rebuild the last known-good compatible API and apply its reviewed Worker plan. | Send Operations, Queue messages, OAuth authority in Neon, R2 sources. |
 | Provider-control Worker | Roll back only when the current API remains RPC-compatible; otherwise forward-fix and keep lifecycle writes paused. | Provider references, reservations, cleanup intents, private-only routing. |
 | Configuration or secret binding | Restore the reviewed value or binding through its owning secret store and publish a new version. | Stable HMAC identities, KMS keys, token-family revocations, state history. |

@@ -419,13 +419,69 @@ for (const deployable of deployables) {
   }
 }
 
+const docsInstallCommand =
+  "cd ../.. && bun install --frozen-lockfile";
+const docsBuildCommand =
+  "cd ../.. && bun x turbo run build --filter=@whatsapp-mcp/docs --cache-dir=.turbo/cache";
+
 for (const app of ["web", "docs"] as const) {
   const vercelManifest = JSON.parse(
     await Bun.file(`${repositoryRoot}/apps/${app}/vercel.json`).text(),
   ) as Record<string, unknown>;
-  if ("rewrites" in vercelManifest || "routes" in vercelManifest) {
+  if (
+    "rewrites" in vercelManifest ||
+    "routes" in vercelManifest ||
+    "redirects" in vercelManifest
+  ) {
     throw new Error(`The Vercel ${app} deployment must not proxy API traffic.`);
   }
+  if (app === "docs") {
+    if (vercelManifest.framework !== "astro") {
+      throw new Error("The Vercel docs deployment must use static Astro output.");
+    }
+    if (vercelManifest.outputDirectory !== "dist") {
+      throw new Error(
+        "The Vercel docs deployment must publish the static dist output.",
+      );
+    }
+    if (vercelManifest.installCommand !== docsInstallCommand) {
+      throw new Error(
+        "The Vercel docs deployment must install the pinned Bun workspace lockfile.",
+      );
+    }
+    if (vercelManifest.buildCommand !== docsBuildCommand) {
+      throw new Error(
+        "The Vercel docs deployment must use the deterministic monorepo docs build.",
+      );
+    }
+    if ("env" in vercelManifest || "envVars" in vercelManifest) {
+      throw new Error("The Vercel docs deployment must not receive a runtime secret.");
+    }
+  }
+}
+
+const compute = await Bun.file(
+  `${repositoryRoot}/infra/compute/main.tf`,
+).text();
+const docsResource = compute.slice(
+  compute.indexOf('resource "vercel_project" "docs"'),
+  compute.indexOf('resource "vercel_project_domain" "docs"'),
+);
+if (
+  !docsResource.includes('framework = "astro"') ||
+  !/root_directory\s+=\s+"apps\/docs"/.test(docsResource) ||
+  !/output_directory\s+=\s+"dist"/.test(docsResource) ||
+  !docsResource.includes(docsInstallCommand) ||
+  !docsResource.includes(docsBuildCommand)
+) {
+  throw new Error(
+    "OpenTofu must provision the isolated static docs project with the pinned Bun workspace build.",
+  );
+}
+if (/^\s*environment\s+=/m.test(docsResource)) {
+  throw new Error(
+    "The OpenTofu docs project must not declare runtime environment values.",
+  );
 }
 
 console.info(

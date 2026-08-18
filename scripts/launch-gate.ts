@@ -29,6 +29,7 @@ export const runLaunchGate = async (
     await (options.smoke ?? runRotatingDeploymentSmoke)({
       apiOrigin: required("API_ORIGIN"),
       clientId: required("MCP_SMOKE_CLIENT_ID"),
+      docsOrigin: required("DOCS_ORIGIN"),
       refreshSecretId: required("MCP_SMOKE_REFRESH_SECRET_ID"),
       smokeSecret: required("SMOKE_CHECK_SECRET"),
       webOrigin: required("WEB_ORIGIN"),

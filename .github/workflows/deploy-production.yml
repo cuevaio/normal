@@ -117,6 +117,13 @@ jobs:
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
 
+      - name: Deploy docs
+        run: bun x vercel@50.39.0 deploy --prod --yes --token "$VERCEL_API_TOKEN"
+        env:
+          VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_DOCS_PROJECT_ID }}
+
       - name: Smoke production
         uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
@@ -128,6 +135,7 @@ jobs:
         env:
           SMOKE_API_ORIGIN: ${{ vars.API_ORIGIN }}
           SMOKE_CHECK_SECRET: ${{ secrets.SMOKE_CHECK_SECRET }}
+          SMOKE_DOCS_ORIGIN: ${{ vars.DOCS_ORIGIN }}
           SMOKE_MCP_CLIENT_ID: ${{ vars.MCP_SMOKE_CLIENT_ID }}
           SMOKE_MCP_REFRESH_SECRET_ID: ${{ vars.MCP_SMOKE_REFRESH_SECRET_ID }}
           SMOKE_WEB_ORIGIN: ${{ vars.WEB_ORIGIN }}

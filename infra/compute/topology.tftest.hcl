@@ -74,7 +74,11 @@ run "development_topology" {
       vercel_project.docs.name == "whatsapp-mcp-docs-development" &&
       vercel_project.docs.framework == "astro" &&
       vercel_project.docs.root_directory == "apps/docs" &&
+      vercel_project.docs.output_directory == "dist" &&
+      vercel_project.docs.build_command == "cd ../.. && bun x turbo run build --filter=@whatsapp-mcp/docs --cache-dir=.turbo/cache" &&
+      vercel_project.docs.install_command == "cd ../.. && bun install --frozen-lockfile" &&
       vercel_project_domain.docs.domain == "docs.dev.example.com" &&
+      output.docs_origin == "https://docs.dev.example.com" &&
       try(length(vercel_project.docs.environment), 0) == 0
     )
     error_message = "Documentation must be a separate static Vercel project with no runtime environment values."
@@ -280,6 +284,19 @@ run "preview_topology" {
     condition     = output.api_origin == "https://api.preview.example.com"
     error_message = "Preview must expose only its own API origin."
   }
+
+  assert {
+    condition = (
+      vercel_project.docs.name == "whatsapp-mcp-docs-preview" &&
+      vercel_project.docs.framework == "astro" &&
+      vercel_project.docs.root_directory == "apps/docs" &&
+      vercel_project.docs.output_directory == "dist" &&
+      vercel_project_domain.docs.domain == "docs.preview.example.com" &&
+      output.docs_origin == "https://docs.preview.example.com" &&
+      try(length(vercel_project.docs.environment), 0) == 0
+    )
+    error_message = "Preview documentation must stay on an isolated static Vercel project."
+  }
 }
 
 run "production_topology" {
@@ -399,6 +416,20 @@ run "production_topology" {
     ]) == toset(["* * * * *", "*/5 * * * *", "0 * * * *"])
     error_message = "The API Worker must schedule maintenance, five-minute health reconciliation, and hourly retention work."
   }
+
+  assert {
+    condition = (
+      vercel_project.docs.name == "whatsapp-mcp-docs" &&
+      vercel_project.docs.framework == "astro" &&
+      vercel_project.docs.root_directory == "apps/docs" &&
+      vercel_project.docs.output_directory == "dist" &&
+      vercel_project_domain.docs.domain == "docs.example.com" &&
+      output.docs_origin == "https://docs.example.com" &&
+      output.docs_hostname == "docs.example.com" &&
+      try(length(vercel_project.docs.environment), 0) == 0
+    )
+    error_message = "Production documentation must be the isolated static Vercel project with no runtime secret."
+  }
 }
 
 run "reject_same_web_and_api_origin" {
@@ -429,6 +460,66 @@ run "reject_same_web_and_api_origin" {
   }
 
   expect_failures = [vercel_project.web]
+}
+
+run "reject_same_docs_and_api_origin" {
+  command = plan
+
+  plan_options {
+    refresh = false
+  }
+
+  variables {
+    deployment_environment        = "production"
+    cloudflare_account_id         = "33333333333333333333333333333333"
+    cloudflare_zone_id            = "cccccccccccccccccccccccccccccccc"
+    api_hyperdrive_id             = "55555555555555555555555555555555"
+    webhook_hyperdrive_id         = "66666666666666666666666666666666"
+    vercel_team_id                = "team_productionvalidation"
+    api_hostname                  = "docs.example.com"
+    web_hostname                  = "app.example.com"
+    docs_hostname                 = "docs.example.com"
+    clerk_issuer                  = "https://clerk.example.com"
+    clerk_publishable_key         = "pk_live_Y2xlcmsuZXhhbXBsZS5jb20k"
+    mcp_requests_per_minute       = 60
+    mcp_requests_per_hour         = 600
+    read_message_records_per_day  = 10000
+    decrypted_media_bytes_per_day = 268435456
+    sends_per_minute              = 10
+    sends_per_day                 = 200
+  }
+
+  expect_failures = [vercel_project.web, vercel_project.docs]
+}
+
+run "reject_same_docs_and_web_origin" {
+  command = plan
+
+  plan_options {
+    refresh = false
+  }
+
+  variables {
+    deployment_environment        = "production"
+    cloudflare_account_id         = "33333333333333333333333333333333"
+    cloudflare_zone_id            = "cccccccccccccccccccccccccccccccc"
+    api_hyperdrive_id             = "55555555555555555555555555555555"
+    webhook_hyperdrive_id         = "66666666666666666666666666666666"
+    vercel_team_id                = "team_productionvalidation"
+    api_hostname                  = "api.example.com"
+    web_hostname                  = "docs.example.com"
+    docs_hostname                 = "docs.example.com"
+    clerk_issuer                  = "https://clerk.example.com"
+    clerk_publishable_key         = "pk_live_Y2xlcmsuZXhhbXBsZS5jb20k"
+    mcp_requests_per_minute       = 60
+    mcp_requests_per_hour         = 600
+    read_message_records_per_day  = 10000
+    decrypted_media_bytes_per_day = 268435456
+    sends_per_minute              = 10
+    sends_per_day                 = 200
+  }
+
+  expect_failures = [vercel_project.web, vercel_project.docs]
 }
 
 run "development_topology_with_posthog" {

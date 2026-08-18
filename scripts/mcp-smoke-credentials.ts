@@ -22,6 +22,7 @@ interface Dependencies {
 export interface RotatingDeploymentSmokeConfig {
   readonly apiOrigin: string;
   readonly clientId: string;
+  readonly docsOrigin: string;
   readonly refreshSecretId: string;
   readonly smokeSecret: string;
   readonly webOrigin: string;
@@ -130,6 +131,7 @@ export const runRotatingDeploymentSmoke = async (
 
   const smokeConfig: DeploymentSmokeConfig = {
     apiOrigin,
+    docsOrigin: new URL(config.docsOrigin).origin,
     mcpAccessToken: pair.accessToken,
     smokeSecret: config.smokeSecret,
     webOrigin: config.webOrigin,
@@ -148,6 +150,7 @@ if (import.meta.main) {
   runRotatingDeploymentSmoke({
     apiOrigin: required("SMOKE_API_ORIGIN"),
     clientId: required("SMOKE_MCP_CLIENT_ID"),
+    docsOrigin: required("SMOKE_DOCS_ORIGIN"),
     refreshSecretId: required("SMOKE_MCP_REFRESH_SECRET_ID"),
     smokeSecret: required("SMOKE_CHECK_SECRET"),
     webOrigin: required("SMOKE_WEB_ORIGIN"),

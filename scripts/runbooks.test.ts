@@ -9,7 +9,7 @@ describe("operator runbooks", () => {
 
     expect(deployment).toContain("## Initial production deployment");
     expect(deployment).toContain("## Rollback decision matrix");
-    expect(deployment).toContain("provider-control → API → web");
+    expect(deployment).toContain("provider-control → API → web → docs");
     expect(deployment).toContain("Database migrations are forward-only");
     expect(deployment).toContain("bun run deploy:smoke");
   });
@@ -63,6 +63,7 @@ describe("operator runbooks", () => {
     );
     expect(deletion).toContain("## Restore gate release criteria");
     expect(teardown).toContain("## Destruction order");
+    expect(teardown).toContain("retire Vercel web and static docs deployments");
     expect(teardown).toContain("locked deletion-marker bucket");
     expect(teardown).toMatch(/immutable audit\s+evidence/);
     expect(teardown).toContain(

@@ -4,6 +4,7 @@ import { runRotatingDeploymentSmoke } from "./mcp-smoke-credentials";
 const config = {
   apiOrigin: "https://api.example.test",
   clientId: "deployment-smoke",
+  docsOrigin: "https://docs.example.test",
   refreshSecretId: "production/mcp-smoke-refresh",
   smokeSecret: "smoke-secret",
   webOrigin: "https://web.example.test",
@@ -29,6 +30,7 @@ describe("rotating deployment MCP smoke credentials", () => {
       smoke: async (smokeConfig) => {
         events.push("smoke");
         expect(smokeConfig.mcpAccessToken).toBe("ephemeral-access");
+        expect(smokeConfig.docsOrigin).toBe("https://docs.example.test");
         expect(persisted).toEqual(["current-refresh", "descendant-refresh"]);
         return { status: "ok" as const } as Awaited<
           ReturnType<typeof import("./deployment-smoke").runDeploymentSmoke>
