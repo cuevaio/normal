@@ -13,6 +13,16 @@ output "web_hostname" {
   value       = vercel_project_domain.web.domain
 }
 
+output "docs_origin" {
+  description = "Public Vercel Scalar documentation origin."
+  value       = "https://${vercel_project_domain.docs.domain}"
+}
+
+output "docs_hostname" {
+  description = "Vercel custom hostname used for Scalar documentation DNS verification."
+  value       = vercel_project_domain.docs.domain
+}
+
 output "provider_control_service" {
   description = "Private service-binding target; no public hostname is declared."
   value       = cloudflare_worker.provider_control.name
@@ -64,6 +74,11 @@ output "ingestion_replay_queue_id" {
 output "vercel_project_id" {
   description = "Vercel project identifier used by the explicit web deployment."
   value       = vercel_project.web.id
+}
+
+output "vercel_docs_project_id" {
+  description = "Vercel project identifier used by the explicit static docs deployment."
+  value       = vercel_project.docs.id
 }
 
 output "vercel_team_id" {

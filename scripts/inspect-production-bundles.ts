@@ -18,6 +18,7 @@ const roots = [
   "apps/restore-coordinator/dist",
   "apps/web/.next/server",
   "apps/web/.next/static",
+  "apps/docs/dist",
 ];
 
 const forbiddenImplementationPatterns = [
@@ -121,6 +122,13 @@ const inspectProductionBundles = async (): Promise<void> => {
       "WHATSAPP_NUMBER_RESERVATION_HMAC_SECRET",
       "STORED_MEDIA",
       "WEBHOOK_INGRESS",
+    ]),
+    inspectForForbiddenAuthority("apps/docs/dist", [
+      "API_KEY_HMAC_SECRET",
+      "MCP_CURSOR_HMAC_SECRET",
+      "SEND_FINGERPRINT_HMAC_SECRET",
+      "WASENDER_API_CREDENTIAL",
+      "WASENDER_REFERENCE_SECRET",
     ]),
   ]);
   console.info(

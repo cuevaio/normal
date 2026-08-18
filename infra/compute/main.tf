@@ -5,6 +5,7 @@ locals {
   deletion_coordinator_worker_name         = "whatsapp-mcp-deletion-coordinator${local.environment_suffix}"
   restore_coordinator_worker_name          = "whatsapp-mcp-restore-coordinator${local.environment_suffix}"
   web_project_name                         = "whatsapp-mcp-web${local.environment_suffix}"
+  docs_project_name                        = "whatsapp-mcp-docs${local.environment_suffix}"
   webhook_ingress_bucket_name              = "whatsapp-mcp-webhook-ingress${local.environment_suffix}"
   stored_media_bucket_name                 = "whatsapp-mcp-stored-media${local.environment_suffix}"
   deletion_capsules_bucket_name            = "whatsapp-mcp-deletion-capsules${local.environment_suffix}"
@@ -819,8 +820,8 @@ resource "vercel_project" "web" {
 
   lifecycle {
     precondition {
-      condition     = var.api_hostname != var.web_hostname
-      error_message = "The web and API origins must be distinct so Vercel cannot become a data-plane proxy."
+      condition     = var.api_hostname != var.web_hostname && var.api_hostname != var.docs_hostname && var.web_hostname != var.docs_hostname
+      error_message = "The web, docs, and API origins must be distinct so Vercel cannot become a data-plane proxy."
     }
     precondition {
       condition     = (var.posthog_project_key == "") == (var.posthog_host == "")
@@ -836,5 +837,35 @@ resource "vercel_project" "web" {
 resource "vercel_project_domain" "web" {
   project_id = vercel_project.web.id
   domain     = var.web_hostname
+  team_id    = var.vercel_team_id
+}
+
+resource "vercel_project" "docs" {
+  name      = local.docs_project_name
+  framework = "astro"
+  team_id   = var.vercel_team_id
+
+  root_directory  = "apps/docs"
+  build_command   = "cd ../.. && bun x turbo run build --filter=@whatsapp-mcp/docs --cache-dir=.turbo/cache"
+  install_command = "cd ../.. && bun install --frozen-lockfile"
+
+  auto_assign_custom_domains                        = true
+  automatically_expose_system_environment_variables = false
+  customer_success_code_visibility                  = false
+  directory_listing                                 = false
+  git_fork_protection                               = true
+  protected_sourcemaps                              = true
+
+  lifecycle {
+    precondition {
+      condition     = var.api_hostname != var.docs_hostname && var.web_hostname != var.docs_hostname
+      error_message = "The docs origin must stay distinct from the web and API origins so documentation cannot become a data-plane proxy."
+    }
+  }
+}
+
+resource "vercel_project_domain" "docs" {
+  project_id = vercel_project.docs.id
+  domain     = var.docs_hostname
   team_id    = var.vercel_team_id
 }

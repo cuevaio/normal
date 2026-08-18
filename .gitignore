@@ -65,6 +65,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# generated Scalar browser bundle
+apps/docs/public/vendor/
+**/.astro/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

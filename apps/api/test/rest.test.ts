@@ -1,3 +1,7 @@
+import {
+  apiKeyManagementRouteRegistry,
+  restRouteRegistry,
+} from "@whatsapp-mcp/contracts/openapi";
 import { Effect, Layer } from "effect";
 import { describe, expect, test } from "vitest";
 import {
@@ -5,6 +9,7 @@ import {
   ApiKeyHmacError,
   ApiKeyPersistence,
   type ApiKeyPersistenceService,
+  isApiKeyManagementRequest,
 } from "../src/api-key";
 import {
   EncryptionError,
@@ -14,6 +19,7 @@ import { StoredMediaContainerService } from "../src/encryption/stored-media-cont
 import { SendTextMessage, type SendTextMessageResult } from "../src/mcp";
 import {
   createRestHandler,
+  isRestRequest,
   RestClock,
   RestCursorCodec,
   RestCursorError,
@@ -23,6 +29,37 @@ import {
   type RestPersistenceService,
 } from "../src/rest";
 import { SafeTelemetry, type SafeTelemetryEvent } from "../src/services";
+
+const fillDocumentedPath = (path: string): string =>
+  path
+    .replaceAll("{api_key_id}", "apk_xxxxxxxxxxxxxxxxxxxxx")
+    .replaceAll("{connection_id}", "con_xxxxxxxxxxxxxxxxxxxxx")
+    .replaceAll("{conversation_id}", "cvs_xxxxxxxxxxxxxxxxxxxxx")
+    .replaceAll("{media_id}", "med_xxxxxxxxxxxxxxxxxxxxx")
+    .replaceAll("{message_id}", "msg_xxxxxxxxxxxxxxxxxxxxx");
+
+describe("OpenAPI handler alignment", () => {
+  test("routes every documented REST and API Key management path", () => {
+    for (const route of restRouteRegistry) {
+      expect(
+        isRestRequest(
+          new Request(
+            `https://api.example.test${fillDocumentedPath(route.path)}`,
+          ),
+        ),
+      ).toBe(true);
+    }
+    for (const route of apiKeyManagementRouteRegistry) {
+      expect(
+        isApiKeyManagementRequest(
+          new Request(
+            `https://api.example.test${fillDocumentedPath(route.path)}`,
+          ),
+        ),
+      ).toBe(true);
+    }
+  });
+});
 
 const publicId = "apk_123456789012345678901";
 const secret = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";

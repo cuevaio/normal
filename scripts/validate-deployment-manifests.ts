@@ -419,11 +419,13 @@ for (const deployable of deployables) {
   }
 }
 
-const vercelManifest = JSON.parse(
-  await Bun.file(`${repositoryRoot}/apps/web/vercel.json`).text(),
-) as Record<string, unknown>;
-if ("rewrites" in vercelManifest || "routes" in vercelManifest) {
-  throw new Error("The Vercel web deployment must not proxy API traffic.");
+for (const app of ["web", "docs"] as const) {
+  const vercelManifest = JSON.parse(
+    await Bun.file(`${repositoryRoot}/apps/${app}/vercel.json`).text(),
+  ) as Record<string, unknown>;
+  if ("rewrites" in vercelManifest || "routes" in vercelManifest) {
+    throw new Error(`The Vercel ${app} deployment must not proxy API traffic.`);
+  }
 }
 
 console.info(

@@ -14,8 +14,12 @@
       "!**/.next",
       "!**/.turbo",
       "!**/.wrangler",
+      "!**/.astro",
+      "!**/*.astro",
       "!**/dist",
-      "!**/build"
+      "!**/build",
+      "!**/apps/docs/public/vendor",
+      "!**/apps/docs/public/openapi.json"
     ]
   },
   "formatter": {

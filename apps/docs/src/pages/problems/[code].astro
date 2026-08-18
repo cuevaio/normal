@@ -1,0 +1,33 @@
+---
+import {
+  type ProblemCode,
+  problemDetails,
+  problemTitles,
+  problemType,
+} from "@whatsapp-mcp/contracts/rest";
+
+export const getStaticPaths = () =>
+  (Object.keys(problemTitles) as ProblemCode[]).map((code) => ({
+    params: { code },
+  }));
+
+const code = Astro.params.code as ProblemCode;
+const title = problemTitles[code];
+const detail = problemDetails[code];
+const type = problemType(code);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <h1>{title}</h1>
+    <p><code>{code}</code></p>
+    <p>{detail}</p>
+    <p><code>{type}</code></p>
+  </body>
+</html>

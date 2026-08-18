@@ -5,7 +5,10 @@ import {
   ApiKeySummary,
   apiKeyCredentialHint,
   CreatedApiKey,
+  decodeApiKeyList,
+  decodeApiKeyRevokeResponse,
   decodeCreateApiKeyRequest,
+  decodeCreatedApiKey,
   parseApiKeyCredential,
 } from "../src/api-key";
 import { ApiKeyId, ConnectionId, McpAuthorizationId } from "../src/handles";
@@ -128,5 +131,30 @@ describe("API Key contract", () => {
         credential,
       }),
     ).toMatchObject({ credential });
+    expect(
+      decodeCreatedApiKey({
+        ...summary,
+        credential,
+      }),
+    ).toMatchObject({ credential });
+    expect(decodeApiKeyList({ api_keys: [summary] })).toMatchObject({
+      api_keys: [summary],
+    });
+    expect(() =>
+      decodeApiKeyList({
+        api_keys: [{ ...summary, credential }],
+      }),
+    ).toThrow();
+    expect(
+      decodeApiKeyRevokeResponse({
+        api_key: {
+          id: publicId,
+          revoked_at: "2026-08-14T13:00:00.000Z",
+          state: "revoked",
+        },
+      }),
+    ).toMatchObject({
+      api_key: { id: publicId, state: "revoked" },
+    });
   });
 });

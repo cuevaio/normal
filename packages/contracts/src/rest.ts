@@ -283,6 +283,47 @@ export const ProblemCode = Schema.Literal(
 );
 export type ProblemCode = typeof ProblemCode.Type;
 
+export const problemTitles = {
+  connection_unavailable: "Connection unavailable",
+  idempotency_conflict: "Idempotency conflict",
+  insufficient_permission: "Insufficient permission",
+  invalid_credentials: "Invalid credentials",
+  invalid_cursor: "Invalid cursor",
+  invalid_request: "Invalid request",
+  not_found: "Not found",
+  rate_limited: "Rate limited",
+  unavailable: "Unavailable",
+} as const satisfies Record<ProblemCode, string>;
+
+export const problemDetails = {
+  connection_unavailable:
+    "The WhatsApp Connection is not connected for a new Send Operation.",
+  idempotency_conflict:
+    "This Idempotency-Key is already bound to a different Send Operation.",
+  insufficient_permission:
+    "The API Key does not include the required permission.",
+  invalid_credentials:
+    "The API Key is missing, malformed, expired, or revoked.",
+  invalid_cursor:
+    "The cursor is expired, tampered, or bound to another grant or query.",
+  invalid_request: "The request body, headers, or parameters are invalid.",
+  not_found: "The requested resource was not found.",
+  rate_limited: "The request quota is exhausted.",
+  unavailable: "The service is temporarily unavailable.",
+} as const satisfies Record<ProblemCode, string>;
+
+export const problemStatuses = {
+  connection_unavailable: 409,
+  idempotency_conflict: 409,
+  insufficient_permission: 403,
+  invalid_credentials: 401,
+  invalid_cursor: 400,
+  invalid_request: 400,
+  not_found: 404,
+  rate_limited: 429,
+  unavailable: 503,
+} as const satisfies Record<ProblemCode, (typeof ProblemStatus)["Type"]>;
+
 export const ProblemDetailsContract = makePublicObjectContract({
   code: ProblemCode,
   detail: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(200)),

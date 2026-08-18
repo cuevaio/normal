@@ -17,6 +17,7 @@ run "development_topology" {
     vercel_team_id                = "team_developmentvalidation"
     api_hostname                  = "api.dev.example.com"
     web_hostname                  = "app.dev.example.com"
+    docs_hostname                 = "docs.dev.example.com"
     clerk_issuer                  = "https://clerk.dev.example.com"
     clerk_publishable_key         = "pk_test_Y2xlcmsuZGV2LmV4YW1wbGUuY29tJA"
     mcp_requests_per_minute       = 60
@@ -66,6 +67,17 @@ run "development_topology" {
       item.value if item.key == "NEXT_PUBLIC_API_ORIGIN"
     ]) == "https://api.dev.example.com"
     error_message = "The web deployment must call the API Worker directly."
+  }
+
+  assert {
+    condition = (
+      vercel_project.docs.name == "whatsapp-mcp-docs-development" &&
+      vercel_project.docs.framework == "astro" &&
+      vercel_project.docs.root_directory == "apps/docs" &&
+      vercel_project_domain.docs.domain == "docs.dev.example.com" &&
+      try(length(vercel_project.docs.environment), 0) == 0
+    )
+    error_message = "Documentation must be a separate static Vercel project with no runtime environment values."
   }
 
   assert {
@@ -243,6 +255,7 @@ run "preview_topology" {
     vercel_team_id                = "team_previewvalidation"
     api_hostname                  = "api.preview.example.com"
     web_hostname                  = "app.preview.example.com"
+    docs_hostname                 = "docs.preview.example.com"
     clerk_issuer                  = "https://clerk.preview.example.com"
     clerk_publishable_key         = "pk_test_Y2xlcmsucHJldmlldy5leGFtcGxlJA"
     mcp_requests_per_minute       = 60
@@ -285,6 +298,7 @@ run "production_topology" {
     vercel_team_id                = "team_productionvalidation"
     api_hostname                  = "api.example.com"
     web_hostname                  = "app.example.com"
+    docs_hostname                 = "docs.example.com"
     clerk_issuer                  = "https://clerk.example.com"
     clerk_publishable_key         = "pk_live_Y2xlcmsuZXhhbXBsZS5jb20k"
     mcp_requests_per_minute       = 60
@@ -403,6 +417,7 @@ run "reject_same_web_and_api_origin" {
     vercel_team_id                = "team_productionvalidation"
     api_hostname                  = "app.example.com"
     web_hostname                  = "app.example.com"
+    docs_hostname                 = "docs.example.com"
     clerk_issuer                  = "https://clerk.example.com"
     clerk_publishable_key         = "pk_live_Y2xlcmsuZXhhbXBsZS5jb20k"
     mcp_requests_per_minute       = 60
@@ -432,6 +447,7 @@ run "development_topology_with_posthog" {
     vercel_team_id                    = "team_developmentvalidation"
     api_hostname                      = "api.dev.example.com"
     web_hostname                      = "app.dev.example.com"
+    docs_hostname                     = "docs.dev.example.com"
     clerk_issuer                      = "https://clerk.dev.example.com"
     clerk_publishable_key             = "pk_test_Y2xlcmsuZGV2LmV4YW1wbGUuY29tJA"
     mcp_requests_per_minute           = 60
@@ -476,6 +492,7 @@ run "reject_partial_posthog_configuration" {
     vercel_team_id                = "team_developmentvalidation"
     api_hostname                  = "api.dev.example.com"
     web_hostname                  = "app.dev.example.com"
+    docs_hostname                 = "docs.dev.example.com"
     clerk_issuer                  = "https://clerk.dev.example.com"
     clerk_publishable_key         = "pk_test_Y2xlcmsuZGV2LmV4YW1wbGUuY29tJA"
     mcp_requests_per_minute       = 60

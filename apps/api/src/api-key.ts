@@ -2,7 +2,10 @@ import {
   type ApiKeyCredential,
   apiKeyCredentialHint,
   type ApiKeySummary as ContractApiKeySummary,
+  decodeApiKeyList,
+  decodeApiKeyRevokeResponse,
   decodeCreateApiKeyRequest,
+  decodeCreatedApiKey,
 } from "@whatsapp-mcp/contracts/api-key";
 import { makeApiKeyId } from "@whatsapp-mcp/contracts/handles";
 import type {
@@ -283,10 +286,10 @@ const createKey = (
       });
       if (result.outcome === "created") {
         return jsonResponse(
-          {
+          decodeCreatedApiKey({
             ...toContractSummary(result.summary),
             credential,
-          },
+          }),
           201,
           browserOrigin,
         );
@@ -335,7 +338,7 @@ const listKeys = (
           failureResponse(failure, browserOrigin),
         onSuccess: (keys) =>
           jsonResponse(
-            { api_keys: keys.map(toContractSummary) },
+            decodeApiKeyList({ api_keys: keys.map(toContractSummary) }),
             200,
             browserOrigin,
           ),
@@ -378,13 +381,14 @@ const revokeKey = (
           failureResponse(failure, browserOrigin),
         onSuccess: (result) =>
           jsonResponse(
-            {
+            decodeApiKeyRevokeResponse({
               api_key: {
-                id: publicId,
-                revoked_at: result.revokedAt.toISOString(),
+                id: publicId as ContractApiKeySummary["id"],
+                revoked_at:
+                  result.revokedAt.toISOString() as ContractApiKeySummary["revoked_at"],
                 state: "revoked",
               },
-            },
+            }),
             200,
             browserOrigin,
           ),

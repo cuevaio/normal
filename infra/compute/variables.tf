@@ -81,6 +81,16 @@ variable "web_hostname" {
   }
 }
 
+variable "docs_hostname" {
+  description = "Public custom hostname assigned to the static Vercel Scalar documentation project."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$", var.docs_hostname))
+    error_message = "docs_hostname must be a lowercase DNS hostname."
+  }
+}
+
 variable "clerk_issuer" {
   description = "Exact HTTPS Clerk issuer for this isolated environment."
   type        = string

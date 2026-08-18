@@ -1,0 +1,2712 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "description": "Normal's public REST API for one User's server-side personal automations.\n\n## Getting started\n\nCreate an API Key from the signed-in dashboard at `/dashboard/api-keys`. Choose a unique name, any non-empty subset of the four permissions, the WhatsApp Connections this automation may use, and an optional expiry. The plaintext credential is shown once. If that response is lost, create a replacement key.\n\nCall `https://api.normal.fast` from a server. Do not put an API Key in a browser, mobile app, query parameter, cookie, or this documentation site.\n\n```bash\ncurl -sS https://api.normal.fast/v1/connections \\\n  -H 'Authorization: Bearer <API Key>'\n```\n\nSigned-in API Key management routes (`/v1/api-keys`) are product routes. They require a Clerk bearer token, the exact web Origin, and — for creation — first-factor verification within five minutes. They are not authenticated with an API Key.\n\n## Server-side authentication\n\nSend one `Authorization: Bearer <API Key>` header. The credential uses the `normal_apk_` split format: a public `apk_` handle and a high-entropy secret shown only at creation. Duplicate or oversized authorization headers are rejected.\n\nNeon is the sole authority for validity, selected Connections, permissions, expiry, and revocation. There is no cache that can extend a revoked or expired key. Invalid, malformed, expired, or revoked credentials return the same 401 Problem Details shape.\n\n## Permissions\n\n| Permission | Capabilities |\n| --- | --- |\n| `connections:read` | List WhatsApp Connections explicitly selected for this API Key. |\n| `directory:read` | Page Directory contacts and currently joined groups. |\n| `messages:read` | Page WhatsApp Conversations, complete Stored Messages, and eligible Stored Media. |\n| `messages:send` | Create or replay text Send Operations. |\n\nPermissions are independent. `messages:send` never implies Directory or Stored Message read permission. A newly created WhatsApp Connection is never added to an existing API Key.\n\n## Pagination\n\nCollection responses use `data`, `pagination`, and optional `meta`. `pagination` contains `next_cursor` and `has_more`. The default page size is 20 and the maximum is 50.\n\nREST cursors are short-lived HMAC keyset cursors bound to the calling API Key, operation, WhatsApp Connection, normalized filters, limit, sort version, and a 15-minute expiry. MCP cursors are not accepted. A tampered, expired, or rebound cursor returns 400.\n\n## Problem Details\n\nREST errors use RFC 9457 `application/problem+json` with `type`, `title`, `status`, a safe `detail`, a stable Normal `code`, and optional `retryable`, `retry_after_seconds`, or `resets_at`.\n\n| Code | Status | Meaning |\n| --- | --- | --- |\n| `invalid_credentials` | 401 | Missing, malformed, expired, or revoked API Key. |\n| `insufficient_permission` | 403 | The grant does not include the required permission. |\n| `not_found` | 404 | Unknown, cross-tenant, deleted, excluded, or mismatched resource. The shape is constant. |\n| `invalid_request` / `invalid_cursor` | 400 | Closed request, header, or cursor contract failed. |\n| `idempotency_conflict` / `connection_unavailable` | 409 | Idempotency payload mismatch, or the Connection is not connected for a new send. |\n| `rate_limited` | 429 | Personal Account or API Key quota is exhausted. |\n| `unavailable` | 503 | Authentication, audit, or quota authority is unavailable. The request fails closed. |\n\nEach `type` is `https://docs.normal.fast/problems/{code}`.\n\n## Idempotency\n\n`POST /v1/connections/{connection_id}/send-operations` requires `Idempotency-Key` using the NanoID default alphabet (21 characters). Exact replay returns the existing Send Operation without calling the provider again or consuming send quota. A changed payload under the same key returns `idempotency_conflict`.\n\n## Ambiguous sends\n\nA Send Operation is not a Stored Message. After the durable provider-attempt boundary, `failed` and `unknown` remain Send Operation resources, not HTTP execution errors. An unknown outcome means the provider may have accepted the message. Normal never automatically retries an unknown Send Operation.\n\n## Retention and history coverage\n\nStored Messages, Stored Media, and Pending Send Content follow the User's Message Retention Policy. The default is 30 days. Pending Send Content also expires at most seven days after Send Operation creation.\n\nMessage pages include the Message History Window (`history_starts_at`, `history_start_reason`) and intersecting Ingestion Gaps. History is observed, not provider-certified complete. The absence of a known gap does not prove that every provider message arrived.\n\nDisconnected WhatsApp Connections remain readable for retained history. New Send Operations require a connected Connection.\n\n## Media\n\nEligible Stored Media appears as an authenticated nested path on the Stored Message, never an MCP URI, public URL, provider URL, R2 URL, or presigned URL. `GET` that path with the same API Key. v1 returns the complete ready object up to 16 MiB after Activity Log admission and full-byte quota reservation. Responses use the normalized MIME type, a sanitized optional filename, and `Cache-Control: private, no-store`. Range and chunk downloads are not provided.\n\nUnknown, mismatched, excluded, non-ready, unauthorized, or oversized media share one constant-shape 404.\n\n## Deletion\n\nConnection Deletion immediately removes that WhatsApp Connection from every API Key. If it was a key's last selected Connection, the key is revoked and its digest is cleared. Personal Account Deletion revokes every API Key and clears every digest before purge continues. Safe expired or revoked metadata remains visible in the dashboard for 90 days, then purges. Activity Logs retain their own 90-day window.\n\nWhatsApp Recipient Exclusions apply beneath every API Key. Excluded recipients are absent from Directory, conversation, message, and media results. A send to an excluded recipient returns the same 404 as an unknown recipient. Removing an exclusion never restores purged history.\n\n## Restore invalidation\n\nA production database restore globally invalidates every restored API Key before verification traffic reopens. Digests are cleared and the API Key HMAC authority is rotated. Previous HMAC generations are not accepted as a fallback. Users create replacement keys after recovery.\n\n## Privacy\n\nDo not send raw phone numbers, provider identifiers, or self-attested confirmation flags. Public fields use opaque handles (`con_`, `ctc_`, `grp_`, `cvs_`, `msg_`, `med_`, `snd_`, `apk_`) and suffix-only phone presentation.\n\nSearch terms, message content, media bytes, credentials, credential digests, full phone numbers, provider payloads, raw bodies, and tenant identifiers must not appear in URLs, cursors, Activity Logs, telemetry, or Problem Details. Message search, when offered, accepts terms only in a closed POST body.\n\nThis documentation site cannot execute authenticated requests or persist an API Key. Server-side curl and language examples are generated for copy-out use only.",
+    "title": "Normal API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.normal.fast"
+    }
+  ],
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "description": "Signed-in product routes for creating, listing, and revoking API Keys. They require a Clerk bearer token and the exact web Origin. They are not authenticated with an API Key and must not be called from a server-side automation.",
+      "name": "API Keys"
+    },
+    {
+      "description": "WhatsApp Connections explicitly selected for the calling API Key.",
+      "name": "Connections"
+    },
+    {
+      "description": "WhatsApp Directory contacts and groups for one selected WhatsApp Connection.",
+      "name": "Directory"
+    },
+    {
+      "description": "WhatsApp Conversations with observed Stored Message activity for one selected WhatsApp Connection.",
+      "name": "Conversations"
+    },
+    {
+      "description": "Complete retained Stored Messages for one WhatsApp Conversation. REST pages are not constrained by MCP's duplicated-text response cap.",
+      "name": "Messages"
+    },
+    {
+      "description": "Idempotent text Send Operations created by the calling API Key. Creating a Send Operation is the caller's explicit action; Client Confirmation is MCP-specific and is not a REST field.",
+      "name": "Send Operations"
+    }
+  ],
+  "paths": {
+    "/v1/api-keys": {
+      "get": {
+        "description": "List safe API Key metadata retained within the 90-day history window. Plaintext credentials are never redisplayed. Requires an active signed-in session and the exact web Origin.",
+        "operationId": "listApiKeys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "api_keys": [
+                    {
+                      "connection_ids": [
+                        "con_xxxxxxxxxxxxxxxxxxxxx"
+                      ],
+                      "created_at": "2026-08-14T12:00:00.000Z",
+                      "credential_hint": "normal_apk_xxxxxxxxxxxxxxxxxxxxx.…wxyz",
+                      "expires_at": null,
+                      "id": "apk_xxxxxxxxxxxxxxxxxxxxx",
+                      "last_used_at": null,
+                      "name": "Nightly backup",
+                      "permissions": [
+                        "connections:read",
+                        "directory:read"
+                      ],
+                      "revoked_at": null,
+                      "state": "active"
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyList"
+                }
+              }
+            },
+            "description": "Safe metadata for active, expired, and recently revoked API Keys."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "not_found"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            },
+            "description": "The signed-in session is missing or invalid."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            },
+            "description": "Identity or persistence authority is unavailable."
+          }
+        },
+        "security": [
+          {
+            "clerkSession": []
+          }
+        ],
+        "summary": "List API Key metadata",
+        "tags": [
+          "API Keys"
+        ]
+      },
+      "post": {
+        "description": "Create one named API Key for a signed-in User. Requires the exact web Origin, a Clerk bearer token, and first-factor verification within five minutes. The plaintext `normal_apk_` credential is returned only in this response. Grants are immutable after creation.",
+        "operationId": "createApiKey",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "connection_ids": [
+                  "con_xxxxxxxxxxxxxxxxxxxxx"
+                ],
+                "name": "Nightly backup",
+                "permissions": [
+                  "connections:read",
+                  "directory:read"
+                ]
+              },
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "connection_ids": [
+                    "con_xxxxxxxxxxxxxxxxxxxxx"
+                  ],
+                  "created_at": "2026-08-14T12:00:00.000Z",
+                  "credential_hint": "normal_apk_xxxxxxxxxxxxxxxxxxxxx.…wxyz",
+                  "expires_at": null,
+                  "id": "apk_xxxxxxxxxxxxxxxxxxxxx",
+                  "last_used_at": null,
+                  "name": "Nightly backup",
+                  "permissions": [
+                    "connections:read",
+                    "directory:read"
+                  ],
+                  "revoked_at": null,
+                  "state": "active",
+                  "credential": "normal_apk_<public-handle>.<secret-shown-once>"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedApiKey"
+                }
+              }
+            },
+            "description": "The API Key was created. The `credential` field is the only plaintext copy."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            },
+            "description": "The body is invalid, the name is not unique among active keys, the selected Connections are not owned, or the active-key limit is reached."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "clerk_error": {
+                    "metadata": {
+                      "reverification": {
+                        "afterMinutes": 5,
+                        "level": "first_factor"
+                      }
+                    },
+                    "reason": "reverification-error",
+                    "type": "forbidden"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ReverificationRequired"
+                }
+              }
+            },
+            "description": "First-factor verification is older than five minutes or missing."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            },
+            "description": "The signed-in session is missing or invalid."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            },
+            "description": "Identity or persistence authority is unavailable."
+          }
+        },
+        "security": [
+          {
+            "clerkSession": []
+          }
+        ],
+        "summary": "Create an API Key",
+        "tags": [
+          "API Keys"
+        ]
+      }
+    },
+    "/v1/api-keys/{api_key_id}": {
+      "delete": {
+        "description": "Permanently revoke one API Key owned by the signed-in User. Revocation is idempotent, clears the credential digest immediately, and takes effect on the next request. Requires an active signed-in session and the exact web Origin.",
+        "operationId": "revokeApiKey",
+        "parameters": [
+          {
+            "description": "Opaque `apk_` handle of the API Key to revoke.",
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^apk_[A-Za-z0-9_-]{21}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "api_key": {
+                    "id": "apk_xxxxxxxxxxxxxxxxxxxxx",
+                    "revoked_at": "2026-08-14T13:00:00.000Z",
+                    "state": "revoked"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyRevokeResponse"
+                }
+              }
+            },
+            "description": "The API Key is revoked and its digest is cleared. Repeating the call for an already revoked key owned by the User also succeeds."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            },
+            "description": "The signed-in session is missing or the handle is unknown to this User."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagementError"
+                }
+              }
+            },
+            "description": "Identity or persistence authority is unavailable."
+          }
+        },
+        "security": [
+          {
+            "clerkSession": []
+          }
+        ],
+        "summary": "Revoke an API Key",
+        "tags": [
+          "API Keys"
+        ]
+      }
+    },
+    "/v1/connections": {
+      "get": {
+        "description": "List the WhatsApp Connections explicitly selected for the calling API Key. Later Connections are never added automatically. Disconnected Connections remain visible so retained history can still be read through later endpoints.",
+        "operationId": "listConnections",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": [
+                    {
+                      "connection_id": "con_xxxxxxxxxxxxxxxxxxxxx",
+                      "display_name": "Personal WhatsApp",
+                      "number_last_four": "0000",
+                      "state": "connected",
+                      "state_changed_at": "2026-08-14T12:00:00.000Z"
+                    }
+                  ],
+                  "pagination": {
+                    "has_more": false,
+                    "next_cursor": null
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionList"
+                }
+              }
+            },
+            "description": "Selected non-deleted WhatsApp Connections."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "invalid_credentials",
+                  "detail": "The API Key is missing, malformed, expired, or revoked.",
+                  "status": 401,
+                  "title": "Invalid credentials",
+                  "type": "https://docs.normal.fast/problems/invalid_credentials"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key is missing, malformed, expired, or revoked."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key does not include `connections:read`."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Personal Account or API Key request quota is exhausted."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication or audit authority is unavailable."
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "List selected WhatsApp Connections",
+        "tags": [
+          "Connections"
+        ],
+        "x-normal-permission": "connections:read"
+      }
+    },
+    "/v1/connections/{connection_id}/contacts": {
+      "get": {
+        "description": "Page active Directory contacts for one explicitly selected WhatsApp Connection. Search accepts a display-name prefix of at least three characters or one exact E.164 number. Responses include projection freshness and never return a full phone number. Cursors bind the calling API Key, this operation, the Connection, normalized filters, limit, and sort version, and expire after 15 minutes.",
+        "operationId": "listContacts",
+        "parameters": [
+          {
+            "description": "Opaque handle of the explicitly selected WhatsApp Connection.",
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^con_[A-Za-z0-9_-]{21}$"
+            }
+          },
+          {
+            "description": "Display-name prefix of at least three characters, or one exact E.164 number beginning with `+`.",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size from 1 through 50. Defaults to 20.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "description": "Opaque REST cursor from a prior call with identical bound inputs.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": [
+                    {
+                      "contact_id": "ctc_xxxxxxxxxxxxxxxxxxxxx",
+                      "conversation_id": null,
+                      "display_name": "Ada",
+                      "phone_last_four": "0199"
+                    }
+                  ],
+                  "meta": {
+                    "as_of": "2026-08-14T12:00:00.000Z",
+                    "partial": false,
+                    "stale": false
+                  },
+                  "pagination": {
+                    "has_more": false,
+                    "next_cursor": null
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ContactList"
+                }
+              }
+            },
+            "description": "A page of active Directory contacts."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The cursor is expired, tampered, bound to another grant or query, or an MCP cursor."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "invalid_credentials",
+                  "detail": "The API Key is missing, malformed, expired, or revoked.",
+                  "status": 401,
+                  "title": "Invalid credentials",
+                  "type": "https://docs.normal.fast/problems/invalid_credentials"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key is missing, malformed, expired, or revoked."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key does not include `directory:read`."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The WhatsApp Connection is unknown, unselected, deleted, or not visible to this key."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Personal Account or API Key request quota is exhausted."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication or audit authority is unavailable."
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Page Directory contacts",
+        "tags": [
+          "Directory"
+        ],
+        "x-normal-permission": "directory:read"
+      }
+    },
+    "/v1/connections/{connection_id}/groups": {
+      "get": {
+        "description": "Page currently joined WhatsApp groups for one explicitly selected WhatsApp Connection. Search accepts a display-name prefix of three to 64 characters. Responses include projection freshness and never return a roster, description, or provider identifier. `group_id` is a WhatsApp Recipient handle and cannot be used as a WhatsApp Conversation handle. Cursors bind the calling API Key, this operation, the Connection, normalized filters, limit, and sort version, and expire after 15 minutes.",
+        "operationId": "listGroups",
+        "parameters": [
+          {
+            "description": "Opaque handle of the explicitly selected WhatsApp Connection.",
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^con_[A-Za-z0-9_-]{21}$"
+            }
+          },
+          {
+            "description": "Group display-name prefix of three to 64 characters after normalization.",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size from 1 through 50. Defaults to 20.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "description": "Opaque REST cursor from a prior call with identical bound inputs.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": [
+                    {
+                      "group_id": "grp_xxxxxxxxxxxxxxxxxxxxx",
+                      "display_name": "Family"
+                    }
+                  ],
+                  "meta": {
+                    "as_of": "2026-08-14T12:00:00.000Z",
+                    "partial": false,
+                    "stale": false
+                  },
+                  "pagination": {
+                    "has_more": false,
+                    "next_cursor": null
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/GroupList"
+                }
+              }
+            },
+            "description": "A page of currently joined WhatsApp groups."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The cursor is expired, tampered, bound to another grant or query, or an MCP cursor."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "invalid_credentials",
+                  "detail": "The API Key is missing, malformed, expired, or revoked.",
+                  "status": 401,
+                  "title": "Invalid credentials",
+                  "type": "https://docs.normal.fast/problems/invalid_credentials"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key is missing, malformed, expired, or revoked."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key does not include `directory:read`."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The WhatsApp Connection is unknown, unselected, deleted, or not visible to this key."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Personal Account or API Key request quota is exhausted."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication or audit authority is unavailable."
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Page joined WhatsApp groups",
+        "tags": [
+          "Directory"
+        ],
+        "x-normal-permission": "directory:read"
+      }
+    },
+    "/v1/connections/{connection_id}/conversations": {
+      "get": {
+        "description": "Page WhatsApp Conversations with observed Stored Message activity for one explicitly selected WhatsApp Connection. Filter by `kind` (`all`, `direct`, or `group`; default `all`). Results sort by Conversation Activity descending, then conversation handle. Responses include Directory freshness and never return snippets, unread state, provider fields, or a full phone number. Cursors bind the calling API Key, this operation, the Connection, kind filter, limit, and sort version, and expire after 15 minutes.",
+        "operationId": "listConversations",
+        "parameters": [
+          {
+            "description": "Opaque handle of the explicitly selected WhatsApp Connection.",
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^con_[A-Za-z0-9_-]{21}$"
+            }
+          },
+          {
+            "description": "Conversation kind filter. Defaults to `all`. Results still include only conversations with observed Stored Message activity.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "direct",
+                "group"
+              ],
+              "default": "all"
+            }
+          },
+          {
+            "description": "Page size from 1 through 50. Defaults to 20.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "description": "Opaque REST cursor from a prior call with identical bound inputs.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": [
+                    {
+                      "conversation_id": "cvs_xxxxxxxxxxxxxxxxxxxxx",
+                      "display_name": "Ada",
+                      "kind": "direct",
+                      "last_activity_at": "2026-08-14T11:59:00.000Z",
+                      "last_activity_direction": "inbound",
+                      "phone_last_four": "0199",
+                      "recipient_id": "ctc_xxxxxxxxxxxxxxxxxxxxx"
+                    }
+                  ],
+                  "meta": {
+                    "as_of": "2026-08-14T12:00:00.000Z",
+                    "partial": false,
+                    "stale": false
+                  },
+                  "pagination": {
+                    "has_more": false,
+                    "next_cursor": null
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationList"
+                }
+              }
+            },
+            "description": "A page of WhatsApp Conversations with observed Stored Message activity."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The cursor is expired, tampered, bound to another grant or query, or an MCP cursor."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "invalid_credentials",
+                  "detail": "The API Key is missing, malformed, expired, or revoked.",
+                  "status": 401,
+                  "title": "Invalid credentials",
+                  "type": "https://docs.normal.fast/problems/invalid_credentials"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key is missing, malformed, expired, or revoked."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key does not include `messages:read`."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The WhatsApp Connection is unknown, unselected, deleted, or not visible to this key."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Personal Account or API Key request quota is exhausted."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication or audit authority is unavailable."
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Page WhatsApp Conversations",
+        "tags": [
+          "Conversations"
+        ],
+        "x-normal-permission": "messages:read"
+      }
+    },
+    "/v1/connections/{connection_id}/conversations/{conversation_id}/messages": {
+      "get": {
+        "description": "Page complete retained Stored Messages for one WhatsApp Conversation owned by an explicitly selected WhatsApp Connection. The newest page is selected first; records inside each page are chronological. The REST cursor supports deterministic older traversal and binds the calling API Key, this operation, the Connection, conversation, limit, and sort version for 15 minutes. Responses include complete retained text, Deleted Message Tombstones, sender metadata, the Message History Window, and intersecting Ingestion Gaps. The encoded JSON response never exceeds 1 MiB: the server returns fewer records rather than truncating or splitting a Stored Message. Eligible Stored Media is represented by an authenticated nested path, never an MCP URI or public URL.",
+        "operationId": "listMessages",
+        "parameters": [
+          {
+            "description": "Opaque handle of the explicitly selected WhatsApp Connection.",
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^con_[A-Za-z0-9_-]{21}$"
+            }
+          },
+          {
+            "description": "Opaque handle of a WhatsApp Conversation owned by that Connection.",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^cvs_[A-Za-z0-9_-]{21}$"
+            }
+          },
+          {
+            "description": "Page size from 1 through 50. Defaults to 20.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "description": "Opaque REST cursor from a prior call with identical bound inputs. Traverses older Stored Messages.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": [
+                    {
+                      "content_type": "image",
+                      "deleted": false,
+                      "direction": "inbound",
+                      "edited_at": null,
+                      "media": {
+                        "file_name": "photo.jpg",
+                        "media_id": "med_xxxxxxxxxxxxxxxxxxxxx",
+                        "mime_type": "image/jpeg",
+                        "path": "/v1/connections/con_xxxxxxxxxxxxxxxxxxxxx/messages/msg_xxxxxxxxxxxxxxxxxxxxx/media/med_xxxxxxxxxxxxxxxxxxxxx",
+                        "size_bytes": 245123,
+                        "state": "ready",
+                        "type": "image",
+                        "unavailable_reason": null
+                      },
+                      "message_id": "msg_xxxxxxxxxxxxxxxxxxxxx",
+                      "sender": {
+                        "display_name": "Ada",
+                        "kind": "contact",
+                        "phone_last_four": "0199"
+                      },
+                      "sent_at": "2026-08-14T11:58:00.000Z",
+                      "text": "A caption"
+                    }
+                  ],
+                  "meta": {
+                    "conversation_id": "cvs_xxxxxxxxxxxxxxxxxxxxx",
+                    "gaps": [
+                      {
+                        "cause": "connection_unavailable",
+                        "ends_at": "2026-08-14T11:08:00.000Z",
+                        "starts_at": "2026-08-14T11:00:00.000Z"
+                      }
+                    ],
+                    "history_start_reason": "retention_policy",
+                    "history_starts_at": "2026-07-15T12:00:00.000Z",
+                    "kind": "direct",
+                    "recipient_id": "ctc_xxxxxxxxxxxxxxxxxxxxx",
+                    "size_limited": false
+                  },
+                  "pagination": {
+                    "has_more": true,
+                    "next_cursor": "opaque-rest-cursor"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/MessageList"
+                }
+              }
+            },
+            "description": "A chronological page of complete retained Stored Messages, newest page first."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The cursor is expired, tampered, bound to another grant or query, or an MCP cursor."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "invalid_credentials",
+                  "detail": "The API Key is missing, malformed, expired, or revoked.",
+                  "status": 401,
+                  "title": "Invalid credentials",
+                  "type": "https://docs.normal.fast/problems/invalid_credentials"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key is missing, malformed, expired, or revoked."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key does not include `messages:read`."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The WhatsApp Connection or Conversation is unknown, unselected, deleted, excluded, or not visible to this key."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Personal Account request or returned-record quota is exhausted."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication or audit authority is unavailable."
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Page complete Stored Messages",
+        "tags": [
+          "Messages"
+        ],
+        "x-normal-permission": "messages:read"
+      }
+    },
+    "/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}": {
+      "get": {
+        "description": "Read one eligible Stored Media object for an explicitly selected WhatsApp Connection. The nested path is authenticated, non-listable, and never a public, provider, R2, or presigned URL. v1 returns the complete object after Activity Log admission and full verified-byte quota reservation. Ready media larger than 16 MiB, non-ready media, unknown or mismatched handles, Recipient Exclusions, and unauthorized grants share one constant-shape 404. Range, chunk, and alternate download URLs are not provided.",
+        "operationId": "getStoredMedia",
+        "parameters": [
+          {
+            "description": "Opaque handle of the explicitly selected WhatsApp Connection.",
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^con_[A-Za-z0-9_-]{21}$"
+            }
+          },
+          {
+            "description": "Opaque handle of the Stored Message that owns the Stored Media.",
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^msg_[A-Za-z0-9_-]{21}$"
+            }
+          },
+          {
+            "description": "Opaque handle of the Stored Media object.",
+            "in": "path",
+            "name": "media_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^med_[A-Za-z0-9_-]{21}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "description": "Ready Stored Media no larger than 16 MiB, returned with the normalized MIME type, a sanitized optional filename, and private no-store caching.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Protected media is private and must not be stored.",
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              },
+              "Content-Disposition": {
+                "description": "`attachment` with a sanitized filename when one is available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "description": "Normalized MIME type of the Stored Media.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "invalid_credentials",
+                  "detail": "The API Key is missing, malformed, expired, or revoked.",
+                  "status": 401,
+                  "title": "Invalid credentials",
+                  "type": "https://docs.normal.fast/problems/invalid_credentials"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key is missing, malformed, expired, or revoked."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key does not include `messages:read`."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The Connection, Stored Message, or Stored Media is unknown, unselected, deleted, excluded, mismatched, not ready, or larger than 16 MiB."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Personal Account request or decrypted-media-byte quota is exhausted."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication or audit authority is unavailable."
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Read authenticated Stored Media",
+        "tags": [
+          "Messages"
+        ],
+        "x-normal-permission": "messages:read"
+      }
+    },
+    "/v1/connections/{connection_id}/send-operations": {
+      "post": {
+        "description": "Create or exactly replay one text Send Operation for a known active `ctc_` or joined `grp_` recipient. Requires `Idempotency-Key`. Raw phone numbers, provider identifiers, conversation identifiers, and self-attested confirmation flags are not accepted. Exact replay returns the existing operation without resending. Failed and unknown post-boundary outcomes remain Send Operation resources.",
+        "operationId": "createSendOperation",
+        "parameters": [
+          {
+            "description": "WhatsApp Connection explicitly selected for the calling API Key.",
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^con_[A-Za-z0-9_-]{21}$"
+            }
+          },
+          {
+            "description": "Caller-generated NanoID-default-alphabet retry identity. Exact replay returns the existing Send Operation. A changed payload returns `idempotency_conflict`.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{21}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "recipient_id": "ctc_xxxxxxxxxxxxxxxxxxxxx",
+                "text": "Hello from a server-side automation."
+              },
+              "schema": {
+                "$ref": "#/components/schemas/CreateSendOperation"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "send_id": "snd_xxxxxxxxxxxxxxxxxxxxx",
+                  "status": "processing",
+                  "created_at": "2026-08-17T12:00:00.000Z",
+                  "status_changed_at": "2026-08-17T12:00:00.000Z",
+                  "idempotent_replay": true
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/SendOperation"
+                }
+              }
+            },
+            "description": "Exact replay of an existing Send Operation. The provider is not called again."
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "send_id": "snd_xxxxxxxxxxxxxxxxxxxxx",
+                  "status": "processing",
+                  "created_at": "2026-08-17T12:00:00.000Z",
+                  "status_changed_at": "2026-08-17T12:00:00.000Z",
+                  "idempotent_replay": false
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/SendOperation"
+                }
+              }
+            },
+            "description": "A new Send Operation after the durable provider-attempt boundary, including `failed` and `unknown`."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request body or `Idempotency-Key` is missing or invalid."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "invalid_credentials",
+                  "detail": "The API Key is missing, malformed, expired, or revoked.",
+                  "status": 401,
+                  "title": "Invalid credentials",
+                  "type": "https://docs.normal.fast/problems/invalid_credentials"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key is missing, malformed, expired, or revoked."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The API Key does not include `messages:send`."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The Connection, recipient, or originating grant relationship was not found."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The Idempotency-Key is bound to a different payload, or the Connection is not connected."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Personal Account or API Key request or send quota is exhausted."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication or audit authority is unavailable."
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Create or replay a text Send Operation",
+        "tags": [
+          "Send Operations"
+        ],
+        "x-normal-permission": "messages:send"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiKeyList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "api_keys"
+        ],
+        "properties": {
+          "api_keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "connection_ids",
+                "created_at",
+                "credential_hint",
+                "expires_at",
+                "id",
+                "last_used_at",
+                "name",
+                "permissions",
+                "revoked_at",
+                "state"
+              ],
+              "properties": {
+                "connection_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "description": "a string matching the pattern ^con_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                    "pattern": "^con_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                  }
+                },
+                "created_at": {
+                  "type": "string",
+                  "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                  "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                  "format": "date-time"
+                },
+                "credential_hint": {
+                  "type": "string"
+                },
+                "expires_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                      "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "description": "a string matching the pattern ^apk_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                  "pattern": "^apk_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                },
+                "last_used_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                      "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "permissions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "connections:read",
+                      "directory:read",
+                      "messages:read",
+                      "messages:send"
+                    ]
+                  }
+                },
+                "revoked_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                      "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "expired",
+                    "revoked"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ApiKeyRevokeResponse": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "api_key"
+        ],
+        "properties": {
+          "api_key": {
+            "type": "object",
+            "required": [
+              "id",
+              "revoked_at",
+              "state"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "a string matching the pattern ^apk_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                "pattern": "^apk_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+              },
+              "revoked_at": {
+                "type": "string",
+                "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "format": "date-time"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "revoked"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "ConnectionList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "connection_id",
+                "display_name",
+                "number_last_four",
+                "state",
+                "state_changed_at"
+              ],
+              "properties": {
+                "connection_id": {
+                  "type": "string",
+                  "description": "a string matching the pattern ^con_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                  "pattern": "^con_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                },
+                "display_name": {
+                  "type": "string",
+                  "description": "a string at most 64 character(s) long",
+                  "title": "maxLength(64)",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "number_last_four": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "a string matching the pattern ^[0-9]{4}$",
+                      "pattern": "^[0-9]{4}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "connected",
+                    "connecting",
+                    "disconnected",
+                    "reconnect_required",
+                    "degraded"
+                  ]
+                },
+                "state_changed_at": {
+                  "type": "string",
+                  "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                  "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                  "format": "date-time"
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "an array of at most 3 item(s)",
+            "title": "maxItems(3)",
+            "maxItems": 3
+          },
+          "pagination": {
+            "type": "object",
+            "required": [
+              "has_more",
+              "next_cursor"
+            ],
+            "properties": {
+              "has_more": {
+                "type": "boolean"
+              },
+              "next_cursor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "ContactList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "data",
+          "meta",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "contact_id",
+                "conversation_id",
+                "display_name",
+                "phone_last_four"
+              ],
+              "properties": {
+                "contact_id": {
+                  "type": "string",
+                  "description": "a string matching the pattern ^ctc_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                  "pattern": "^ctc_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                },
+                "conversation_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "a string matching the pattern ^cvs_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                      "pattern": "^cvs_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "display_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "phone_last_four": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "a string matching the pattern ^[0-9]{4}$",
+                      "pattern": "^[0-9]{4}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "an array of at most 50 item(s)",
+            "title": "maxItems(50)",
+            "maxItems": 50
+          },
+          "meta": {
+            "type": "object",
+            "required": [
+              "as_of",
+              "partial",
+              "stale"
+            ],
+            "properties": {
+              "as_of": {
+                "type": "string",
+                "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "format": "date-time"
+              },
+              "partial": {
+                "type": "boolean"
+              },
+              "stale": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "pagination": {
+            "type": "object",
+            "required": [
+              "has_more",
+              "next_cursor"
+            ],
+            "properties": {
+              "has_more": {
+                "type": "boolean"
+              },
+              "next_cursor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "ConversationList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "data",
+          "meta",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "conversation_id",
+                "display_name",
+                "kind",
+                "last_activity_at",
+                "last_activity_direction",
+                "phone_last_four",
+                "recipient_id"
+              ],
+              "properties": {
+                "conversation_id": {
+                  "type": "string",
+                  "description": "a string matching the pattern ^cvs_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                  "pattern": "^cvs_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                },
+                "display_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "direct",
+                    "group"
+                  ]
+                },
+                "last_activity_at": {
+                  "type": "string",
+                  "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                  "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                  "format": "date-time"
+                },
+                "last_activity_direction": {
+                  "type": "string",
+                  "enum": [
+                    "inbound",
+                    "outbound"
+                  ]
+                },
+                "phone_last_four": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "a string matching the pattern ^[0-9]{4}$",
+                      "pattern": "^[0-9]{4}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "recipient_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "a string matching the pattern ^ctc_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                      "pattern": "^ctc_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                    },
+                    {
+                      "type": "string",
+                      "description": "a string matching the pattern ^grp_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                      "pattern": "^grp_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "an array of at most 50 item(s)",
+            "title": "maxItems(50)",
+            "maxItems": 50
+          },
+          "meta": {
+            "type": "object",
+            "required": [
+              "as_of",
+              "partial",
+              "stale"
+            ],
+            "properties": {
+              "as_of": {
+                "type": "string",
+                "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "format": "date-time"
+              },
+              "partial": {
+                "type": "boolean"
+              },
+              "stale": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "pagination": {
+            "type": "object",
+            "required": [
+              "has_more",
+              "next_cursor"
+            ],
+            "properties": {
+              "has_more": {
+                "type": "boolean"
+              },
+              "next_cursor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateApiKey": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "connection_ids",
+          "name",
+          "permissions"
+        ],
+        "properties": {
+          "connection_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "a string matching the pattern ^con_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+              "pattern": "^con_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+            },
+            "description": "an array of at most 50 item(s)",
+            "title": "maxItems(50)",
+            "minItems": 1,
+            "maxItems": 50
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "connections:read",
+                "directory:read",
+                "messages:read",
+                "messages:send"
+              ]
+            },
+            "description": "an array of at most 4 item(s)",
+            "title": "maxItems(4)",
+            "minItems": 1,
+            "maxItems": 4
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateSendOperation": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "recipient_id",
+          "text"
+        ],
+        "properties": {
+          "recipient_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "a string matching the pattern ^ctc_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                "pattern": "^ctc_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+              },
+              {
+                "type": "string",
+                "description": "a string matching the pattern ^grp_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                "pattern": "^grp_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+              }
+            ]
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreatedApiKey": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "connection_ids",
+          "created_at",
+          "credential_hint",
+          "expires_at",
+          "id",
+          "last_used_at",
+          "name",
+          "permissions",
+          "revoked_at",
+          "state",
+          "credential"
+        ],
+        "properties": {
+          "connection_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "a string matching the pattern ^con_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+              "pattern": "^con_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+            "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+            "format": "date-time"
+          },
+          "credential_hint": {
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "a string matching the pattern ^apk_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+            "pattern": "^apk_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "connections:read",
+                "directory:read",
+                "messages:read",
+                "messages:send"
+              ]
+            }
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "expired",
+              "revoked"
+            ]
+          },
+          "credential": {
+            "type": "string",
+            "description": "a string matching the pattern ^normal_apk_[A-Za-z0-9_-]{21}\\.[A-Za-z0-9_-]{43}(?![\\s\\S])$",
+            "pattern": "^normal_apk_[A-Za-z0-9_-]{21}\\.[A-Za-z0-9_-]{43}(?![\\s\\S])$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GroupList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "data",
+          "meta",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "group_id",
+                "display_name"
+              ],
+              "properties": {
+                "group_id": {
+                  "type": "string",
+                  "description": "a string matching the pattern ^grp_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                  "pattern": "^grp_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                },
+                "display_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "an array of at most 50 item(s)",
+            "title": "maxItems(50)",
+            "maxItems": 50
+          },
+          "meta": {
+            "type": "object",
+            "required": [
+              "as_of",
+              "partial",
+              "stale"
+            ],
+            "properties": {
+              "as_of": {
+                "type": "string",
+                "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "format": "date-time"
+              },
+              "partial": {
+                "type": "boolean"
+              },
+              "stale": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "pagination": {
+            "type": "object",
+            "required": [
+              "has_more",
+              "next_cursor"
+            ],
+            "properties": {
+              "has_more": {
+                "type": "boolean"
+              },
+              "next_cursor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "ManagementError": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "MessageList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "data",
+          "meta",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "content_type",
+                "deleted",
+                "direction",
+                "edited_at",
+                "media",
+                "message_id",
+                "sender",
+                "sent_at",
+                "text"
+              ],
+              "properties": {
+                "content_type": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "image",
+                    "audio",
+                    "video",
+                    "document",
+                    "sticker",
+                    "unknown"
+                  ]
+                },
+                "deleted": {
+                  "type": "boolean"
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "inbound",
+                    "outbound"
+                  ]
+                },
+                "edited_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                      "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "media": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "file_name",
+                        "media_id",
+                        "mime_type",
+                        "path",
+                        "size_bytes",
+                        "state",
+                        "type",
+                        "unavailable_reason"
+                      ],
+                      "properties": {
+                        "file_name": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "media_id": {
+                          "type": "string",
+                          "description": "a string matching the pattern ^med_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                          "pattern": "^med_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                        },
+                        "mime_type": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "path": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "description": "a string matching the pattern ^\\/v1\\/connections\\/(con_[A-Za-z0-9_-]{21})\\/messages\\/(msg_[A-Za-z0-9_-]{21})\\/media\\/(med_[A-Za-z0-9_-]{21})$",
+                              "pattern": "^\\/v1\\/connections\\/(con_[A-Za-z0-9_-]{21})\\/messages\\/(msg_[A-Za-z0-9_-]{21})\\/media\\/(med_[A-Za-z0-9_-]{21})$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "size_bytes": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "description": "a non-negative number",
+                              "title": "nonNegative",
+                              "minimum": 0
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "ready",
+                            "rejected",
+                            "failed"
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "image",
+                            "audio",
+                            "video",
+                            "document",
+                            "sticker"
+                          ]
+                        },
+                        "unavailable_reason": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "media_pending",
+                                "media_rejected",
+                                "media_failed",
+                                "too_large"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "message_id": {
+                  "type": "string",
+                  "description": "a string matching the pattern ^msg_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                  "pattern": "^msg_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                },
+                "sender": {
+                  "type": "object",
+                  "required": [
+                    "display_name",
+                    "kind",
+                    "phone_last_four"
+                  ],
+                  "properties": {
+                    "display_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "self",
+                        "contact",
+                        "group_participant"
+                      ]
+                    },
+                    "phone_last_four": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "description": "a string matching the pattern ^[0-9]{4}$",
+                          "pattern": "^[0-9]{4}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "sent_at": {
+                  "type": "string",
+                  "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                  "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                  "format": "date-time"
+                },
+                "text": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "an array of at most 50 item(s)",
+            "title": "maxItems(50)",
+            "maxItems": 50
+          },
+          "meta": {
+            "type": "object",
+            "required": [
+              "conversation_id",
+              "gaps",
+              "history_start_reason",
+              "history_starts_at",
+              "kind",
+              "recipient_id",
+              "size_limited"
+            ],
+            "properties": {
+              "conversation_id": {
+                "type": "string",
+                "description": "a string matching the pattern ^cvs_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                "pattern": "^cvs_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+              },
+              "gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "cause",
+                    "ends_at",
+                    "starts_at"
+                  ],
+                  "properties": {
+                    "cause": {
+                      "type": "string",
+                      "enum": [
+                        "connection_unavailable",
+                        "webhook_configuration",
+                        "ingress_failure",
+                        "processing_failure",
+                        "restore_loss"
+                      ]
+                    },
+                    "ends_at": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                          "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                          "format": "date-time"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "starts_at": {
+                      "type": "string",
+                      "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                      "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                      "format": "date-time"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "history_start_reason": {
+                "type": "string",
+                "enum": [
+                  "connection_started",
+                  "retention_policy"
+                ]
+              },
+              "history_starts_at": {
+                "type": "string",
+                "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+                "format": "date-time"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "direct",
+                  "group"
+                ]
+              },
+              "recipient_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "a string matching the pattern ^ctc_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                    "pattern": "^ctc_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                  },
+                  {
+                    "type": "string",
+                    "description": "a string matching the pattern ^grp_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                    "pattern": "^grp_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                  }
+                ]
+              },
+              "size_limited": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "pagination": {
+            "type": "object",
+            "required": [
+              "has_more",
+              "next_cursor"
+            ],
+            "properties": {
+              "has_more": {
+                "type": "boolean"
+              },
+              "next_cursor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProblemDetails": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "code",
+          "detail",
+          "status",
+          "title",
+          "type"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "invalid_credentials",
+              "insufficient_permission",
+              "invalid_cursor",
+              "invalid_request",
+              "not_found",
+              "idempotency_conflict",
+              "connection_unavailable",
+              "rate_limited",
+              "unavailable"
+            ]
+          },
+          "detail": {
+            "type": "string",
+            "description": "a string at most 200 character(s) long",
+            "title": "maxLength(200)",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "retry_after_seconds": {
+            "type": "integer",
+            "description": "a non-negative number",
+            "title": "greaterThanOrEqualTo(0)",
+            "minimum": 0
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "resets_at": {
+            "type": "string",
+            "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+            "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "number",
+            "enum": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              503
+            ]
+          },
+          "title": {
+            "type": "string",
+            "description": "a string at most 80 character(s) long",
+            "title": "maxLength(80)",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "type": {
+            "type": "string",
+            "description": "a string matching the pattern ^https:\\/\\/docs\\.normal\\.fast\\/problems\\/[a-z_]+$",
+            "pattern": "^https:\\/\\/docs\\.normal\\.fast\\/problems\\/[a-z_]+$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReverificationRequired": {
+        "additionalProperties": false,
+        "properties": {
+          "clerk_error": {
+            "additionalProperties": false,
+            "properties": {
+              "metadata": {
+                "additionalProperties": false,
+                "properties": {
+                  "reverification": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "afterMinutes": {
+                        "type": "integer",
+                        "const": 5
+                      },
+                      "level": {
+                        "type": "string",
+                        "const": "first_factor"
+                      }
+                    },
+                    "required": [
+                      "afterMinutes",
+                      "level"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "reverification"
+                ],
+                "type": "object"
+              },
+              "reason": {
+                "type": "string",
+                "const": "reverification-error"
+              },
+              "type": {
+                "type": "string",
+                "const": "forbidden"
+              }
+            },
+            "required": [
+              "metadata",
+              "reason",
+              "type"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "clerk_error"
+        ],
+        "type": "object"
+      },
+      "SendOperation": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "send_id",
+          "status",
+          "created_at",
+          "status_changed_at",
+          "idempotent_replay"
+        ],
+        "properties": {
+          "send_id": {
+            "type": "string",
+            "description": "a string matching the pattern ^snd_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+            "pattern": "^snd_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "processing",
+              "accepted",
+              "sent",
+              "delivered",
+              "read",
+              "failed",
+              "unknown"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+            "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+            "format": "date-time"
+          },
+          "status_changed_at": {
+            "type": "string",
+            "description": "a string matching the pattern ^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+            "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z(?![\\s\\S])",
+            "format": "date-time"
+          },
+          "idempotent_replay": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "bearerFormat": "API Key",
+        "description": "A `normal_apk_` split credential shown once at creation. Send it as `Authorization: Bearer <credential>` from a server. Never place it in a browser, query parameter, or cookie.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "clerkSession": {
+        "bearerFormat": "Clerk JWT",
+        "description": "Signed-in product session for API Key management. Requires the exact configured web Origin and a Clerk bearer token. Creation also requires first-factor verification within five minutes. Server-side automations must not call these routes.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  }
+}

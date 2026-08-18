@@ -6,6 +6,7 @@ import {
   verifyRestCursor,
 } from "@whatsapp-mcp/contracts/cursor";
 import { ConnectionId, IdempotencyKey } from "@whatsapp-mcp/contracts/handles";
+import type { restRouteRegistry } from "@whatsapp-mcp/contracts/openapi";
 import {
   decodeRestConnectionList,
   decodeRestContactList,
@@ -17,6 +18,8 @@ import {
   type ProblemCode,
   type ProblemDetails,
   parseRestStoredMediaPath,
+  problemDetails,
+  problemTitles,
   problemType,
   type RestConnectionList,
   type RestContactList,
@@ -97,10 +100,13 @@ const LIST_CONTACTS = "list_contacts";
 const LIST_GROUPS = "list_groups";
 const LIST_CHATS = "list_chats";
 const READ_MESSAGES = "read_messages";
-const LIST_CONTACTS_OPERATION_ID = "listContacts";
-const LIST_GROUPS_OPERATION_ID = "listGroups";
-const LIST_CONVERSATIONS_OPERATION_ID = "listConversations";
-const LIST_MESSAGES_OPERATION_ID = "listMessages";
+const restOperationId = (
+  operationId: (typeof restRouteRegistry)[number]["operationId"],
+) => operationId;
+const LIST_CONTACTS_OPERATION_ID = restOperationId("listContacts");
+const LIST_GROUPS_OPERATION_ID = restOperationId("listGroups");
+const LIST_CONVERSATIONS_OPERATION_ID = restOperationId("listConversations");
+const LIST_MESSAGES_OPERATION_ID = restOperationId("listMessages");
 const CONTACT_SORT_VERSION = "contacts-v1";
 const GROUP_SORT_VERSION = "groups-v1";
 const CONVERSATION_SORT_VERSION = "conversations-v1";
@@ -310,35 +316,6 @@ export interface RestHandlerOptions {
   readonly keyMinuteLimit: number;
   readonly minuteLimit: number;
 }
-
-const problemTitles: Record<ProblemCode, string> = {
-  connection_unavailable: "Connection unavailable",
-  idempotency_conflict: "Idempotency conflict",
-  insufficient_permission: "Insufficient permission",
-  invalid_credentials: "Invalid credentials",
-  invalid_cursor: "Invalid cursor",
-  invalid_request: "Invalid request",
-  not_found: "Not found",
-  rate_limited: "Rate limited",
-  unavailable: "Unavailable",
-};
-
-const problemDetails: Record<ProblemCode, string> = {
-  connection_unavailable:
-    "The WhatsApp Connection is not connected for a new Send Operation.",
-  idempotency_conflict:
-    "This Idempotency-Key is already bound to a different Send Operation.",
-  insufficient_permission:
-    "The API Key does not include the required permission.",
-  invalid_credentials:
-    "The API Key is missing, malformed, expired, or revoked.",
-  invalid_cursor:
-    "The cursor is expired, tampered, or bound to another grant or query.",
-  invalid_request: "The request body, headers, or parameters are invalid.",
-  not_found: "The requested resource was not found.",
-  rate_limited: "The request quota is exhausted.",
-  unavailable: "The service is temporarily unavailable.",
-};
 
 const problemResponse = (
   code: ProblemCode,

@@ -1,5 +1,12 @@
 import type { API_KEY_PERMISSIONS } from "./api-key";
 import {
+  ApiKeyListContract,
+  ApiKeyRevokeResponseContract,
+  CreateApiKeyRequestContract,
+  CreatedApiKeyContract,
+} from "./api-key";
+import { openApiInfoDescription } from "./openapi-guides";
+import {
   ProblemDetailsContract,
   RestConnectionListContract,
   RestContactListContract,
@@ -106,6 +113,50 @@ export const restRouteRegistry = [
     tags: ["Send Operations"],
   },
 ] as const satisfies ReadonlyArray<RestRouteMetadata>;
+
+export interface ApiKeyManagementRouteMetadata {
+  readonly description: string;
+  readonly method: "DELETE" | "GET" | "POST";
+  readonly operationId: string;
+  readonly path: "/v1/api-keys" | "/v1/api-keys/{api_key_id}";
+  readonly summary: string;
+  readonly tags: readonly ["API Keys"];
+}
+
+export const apiKeyManagementRouteRegistry = [
+  {
+    description:
+      "Create one named API Key for a signed-in User. Requires the exact web Origin, a Clerk bearer token, and first-factor verification within five minutes. The plaintext `normal_apk_` credential is returned only in this response. Grants are immutable after creation.",
+    method: "POST",
+    operationId: "createApiKey",
+    path: "/v1/api-keys",
+    summary: "Create an API Key",
+    tags: ["API Keys"],
+  },
+  {
+    description:
+      "List safe API Key metadata retained within the 90-day history window. Plaintext credentials are never redisplayed. Requires an active signed-in session and the exact web Origin.",
+    method: "GET",
+    operationId: "listApiKeys",
+    path: "/v1/api-keys",
+    summary: "List API Key metadata",
+    tags: ["API Keys"],
+  },
+  {
+    description:
+      "Permanently revoke one API Key owned by the signed-in User. Revocation is idempotent, clears the credential digest immediately, and takes effect on the next request. Requires an active signed-in session and the exact web Origin.",
+    method: "DELETE",
+    operationId: "revokeApiKey",
+    path: "/v1/api-keys/{api_key_id}",
+    summary: "Revoke an API Key",
+    tags: ["API Keys"],
+  },
+] as const satisfies ReadonlyArray<ApiKeyManagementRouteMetadata>;
+
+export const documentedRouteRegistries = {
+  apiKeyManagement: apiKeyManagementRouteRegistry,
+  rest: restRouteRegistry,
+} as const;
 
 const connectionListExample = {
   data: [
@@ -253,6 +304,46 @@ const createSendOperationExample = {
   text: "Hello from a server-side automation.",
 };
 
+const apiKeySummaryExample = {
+  connection_ids: ["con_xxxxxxxxxxxxxxxxxxxxx"],
+  created_at: "2026-08-14T12:00:00.000Z",
+  credential_hint: "normal_apk_xxxxxxxxxxxxxxxxxxxxx.…wxyz",
+  expires_at: null,
+  id: "apk_xxxxxxxxxxxxxxxxxxxxx",
+  last_used_at: null,
+  name: "Nightly backup",
+  permissions: ["connections:read", "directory:read"],
+  revoked_at: null,
+  state: "active",
+};
+
+const createdApiKeyExample = {
+  ...apiKeySummaryExample,
+  credential: "normal_apk_<public-handle>.<secret-shown-once>",
+};
+
+const apiKeyListExample = {
+  api_keys: [apiKeySummaryExample],
+};
+
+const apiKeyRevokeExample = {
+  api_key: {
+    id: "apk_xxxxxxxxxxxxxxxxxxxxx",
+    revoked_at: "2026-08-14T13:00:00.000Z",
+    state: "revoked",
+  },
+};
+
+const createApiKeyExample = {
+  connection_ids: ["con_xxxxxxxxxxxxxxxxxxxxx"],
+  name: "Nightly backup",
+  permissions: ["connections:read", "directory:read"],
+};
+
+const managementErrorExample = {
+  error: "not_found",
+};
+
 const problemResponse = (description: string) => ({
   content: {
     "application/problem+json": {
@@ -266,24 +357,30 @@ const jsonSchema = (schema: {
   readonly jsonSchema: unknown;
 }): Record<string, unknown> => schema.jsonSchema as Record<string, unknown>;
 
+const managementJsonResponse = (description: string, schemaRef: string) => ({
+  content: {
+    "application/json": {
+      schema: { $ref: schemaRef },
+    },
+  },
+  description,
+});
+
 export const generateOpenApiDocument = (): Record<string, unknown> => ({
   openapi: "3.1.0",
   info: {
-    description: [
-      "Normal's public REST API for one User's server-side personal automations.",
-      "",
-      "Authenticate with `Authorization: Bearer <API Key>`. API Keys are server-side credentials: do not put them in browsers, mobile apps, query parameters, or cookies.",
-      "",
-      "Each key grants an explicit non-empty subset of `connections:read`, `directory:read`, `messages:read`, and `messages:send` over explicitly selected WhatsApp Connections. Send permission never implies Directory or Stored Message read permission.",
-      "",
-      "Errors use RFC 9457 Problem Details with a stable Normal `code`. Invalid credentials return 401, missing permission returns 403, and unknown, cross-tenant, deleted, or mismatched resources share a constant-shape 404.",
-    ].join("\n"),
+    description: openApiInfoDescription,
     title: "Normal API",
     version: REST_API_VERSION,
   },
   servers: [{ url: "https://api.normal.fast" }],
   security: [{ apiKey: [] }],
   tags: [
+    {
+      description:
+        "Signed-in product routes for creating, listing, and revoking API Keys. They require a Clerk bearer token and the exact web Origin. They are not authenticated with an API Key and must not be called from a server-side automation.",
+      name: "API Keys",
+    },
     {
       description:
         "WhatsApp Connections explicitly selected for the calling API Key.",
@@ -311,6 +408,139 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
     },
   ],
   paths: {
+    "/v1/api-keys": {
+      get: {
+        description: apiKeyManagementRouteRegistry[1].description,
+        operationId: apiKeyManagementRouteRegistry[1].operationId,
+        responses: {
+          "200": {
+            content: {
+              "application/json": {
+                example: apiKeyListExample,
+                schema: { $ref: "#/components/schemas/ApiKeyList" },
+              },
+            },
+            description:
+              "Safe metadata for active, expired, and recently revoked API Keys.",
+          },
+          "404": {
+            content: {
+              "application/json": {
+                example: managementErrorExample,
+                schema: { $ref: "#/components/schemas/ManagementError" },
+              },
+            },
+            description: "The signed-in session is missing or invalid.",
+          },
+          "503": managementJsonResponse(
+            "Identity or persistence authority is unavailable.",
+            "#/components/schemas/ManagementError",
+          ),
+        },
+        security: [{ clerkSession: [] }],
+        summary: apiKeyManagementRouteRegistry[1].summary,
+        tags: [...apiKeyManagementRouteRegistry[1].tags],
+      },
+      post: {
+        description: apiKeyManagementRouteRegistry[0].description,
+        operationId: apiKeyManagementRouteRegistry[0].operationId,
+        requestBody: {
+          content: {
+            "application/json": {
+              example: createApiKeyExample,
+              schema: { $ref: "#/components/schemas/CreateApiKey" },
+            },
+          },
+          required: true,
+        },
+        responses: {
+          "201": {
+            content: {
+              "application/json": {
+                example: createdApiKeyExample,
+                schema: { $ref: "#/components/schemas/CreatedApiKey" },
+              },
+            },
+            description:
+              "The API Key was created. The `credential` field is the only plaintext copy.",
+          },
+          "400": managementJsonResponse(
+            "The body is invalid, the name is not unique among active keys, the selected Connections are not owned, or the active-key limit is reached.",
+            "#/components/schemas/ManagementError",
+          ),
+          "403": {
+            content: {
+              "application/json": {
+                example: {
+                  clerk_error: {
+                    metadata: {
+                      reverification: {
+                        afterMinutes: 5,
+                        level: "first_factor",
+                      },
+                    },
+                    reason: "reverification-error",
+                    type: "forbidden",
+                  },
+                },
+                schema: { $ref: "#/components/schemas/ReverificationRequired" },
+              },
+            },
+            description:
+              "First-factor verification is older than five minutes or missing.",
+          },
+          "404": managementJsonResponse(
+            "The signed-in session is missing or invalid.",
+            "#/components/schemas/ManagementError",
+          ),
+          "503": managementJsonResponse(
+            "Identity or persistence authority is unavailable.",
+            "#/components/schemas/ManagementError",
+          ),
+        },
+        security: [{ clerkSession: [] }],
+        summary: apiKeyManagementRouteRegistry[0].summary,
+        tags: [...apiKeyManagementRouteRegistry[0].tags],
+      },
+    },
+    "/v1/api-keys/{api_key_id}": {
+      delete: {
+        description: apiKeyManagementRouteRegistry[2].description,
+        operationId: apiKeyManagementRouteRegistry[2].operationId,
+        parameters: [
+          {
+            description: "Opaque `apk_` handle of the API Key to revoke.",
+            in: "path",
+            name: "api_key_id",
+            required: true,
+            schema: { type: "string", pattern: "^apk_[A-Za-z0-9_-]{21}$" },
+          },
+        ],
+        responses: {
+          "200": {
+            content: {
+              "application/json": {
+                example: apiKeyRevokeExample,
+                schema: { $ref: "#/components/schemas/ApiKeyRevokeResponse" },
+              },
+            },
+            description:
+              "The API Key is revoked and its digest is cleared. Repeating the call for an already revoked key owned by the User also succeeds.",
+          },
+          "404": managementJsonResponse(
+            "The signed-in session is missing or the handle is unknown to this User.",
+            "#/components/schemas/ManagementError",
+          ),
+          "503": managementJsonResponse(
+            "Identity or persistence authority is unavailable.",
+            "#/components/schemas/ManagementError",
+          ),
+        },
+        security: [{ clerkSession: [] }],
+        summary: apiKeyManagementRouteRegistry[2].summary,
+        tags: [...apiKeyManagementRouteRegistry[2].tags],
+      },
+    },
     "/v1/connections": {
       get: {
         description: restRouteRegistry[0].description,
@@ -1001,20 +1231,71 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
   },
   components: {
     schemas: {
+      ApiKeyList: jsonSchema(ApiKeyListContract),
+      ApiKeyRevokeResponse: jsonSchema(ApiKeyRevokeResponseContract),
       ConnectionList: jsonSchema(RestConnectionListContract),
       ContactList: jsonSchema(RestContactListContract),
       ConversationList: jsonSchema(RestConversationListContract),
+      CreateApiKey: jsonSchema(CreateApiKeyRequestContract),
       CreateSendOperation: jsonSchema(RestCreateSendOperationContract),
+      CreatedApiKey: jsonSchema(CreatedApiKeyContract),
       GroupList: jsonSchema(RestGroupListContract),
+      ManagementError: {
+        additionalProperties: false,
+        properties: {
+          error: { type: "string", minLength: 1 },
+        },
+        required: ["error"],
+        type: "object",
+      },
       MessageList: jsonSchema(RestMessageListContract),
       ProblemDetails: jsonSchema(ProblemDetailsContract),
+      ReverificationRequired: {
+        additionalProperties: false,
+        properties: {
+          clerk_error: {
+            additionalProperties: false,
+            properties: {
+              metadata: {
+                additionalProperties: false,
+                properties: {
+                  reverification: {
+                    additionalProperties: false,
+                    properties: {
+                      afterMinutes: { type: "integer", const: 5 },
+                      level: { type: "string", const: "first_factor" },
+                    },
+                    required: ["afterMinutes", "level"],
+                    type: "object",
+                  },
+                },
+                required: ["reverification"],
+                type: "object",
+              },
+              reason: { type: "string", const: "reverification-error" },
+              type: { type: "string", const: "forbidden" },
+            },
+            required: ["metadata", "reason", "type"],
+            type: "object",
+          },
+        },
+        required: ["clerk_error"],
+        type: "object",
+      },
       SendOperation: jsonSchema(RestSendOperationContract),
     },
     securitySchemes: {
       apiKey: {
         bearerFormat: "API Key",
         description:
-          "A `normal_apk_` split credential shown once at creation. Send it as `Authorization: Bearer <credential>`.",
+          "A `normal_apk_` split credential shown once at creation. Send it as `Authorization: Bearer <credential>` from a server. Never place it in a browser, query parameter, or cookie.",
+        scheme: "bearer",
+        type: "http",
+      },
+      clerkSession: {
+        bearerFormat: "Clerk JWT",
+        description:
+          "Signed-in product session for API Key management. Requires the exact configured web Origin and a Clerk bearer token. Creation also requires first-factor verification within five minutes. Server-side automations must not call these routes.",
         scheme: "bearer",
         type: "http",
       },

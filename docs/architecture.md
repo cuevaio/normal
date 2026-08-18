@@ -15,6 +15,7 @@ flowchart LR
 
     subgraph vercel[Vercel]
         web[Next.js product UI]
+        docs[Static Scalar reference]
     end
 
     subgraph cloudflare[Cloudflare]
@@ -37,6 +38,7 @@ flowchart LR
     end
 
     user -->|sign in and manage| web
+    user -->|read public API reference| docs
     web -->|Clerk JWT over HTTPS| api
     mcp -->|OAuth and MCP over HTTPS| api
     apiCaller -->|API Key over HTTPS| api
@@ -71,6 +73,8 @@ flowchart LR
 * The API Worker is the only public data plane. Browser requests go directly to
   its configured origin. Server-side automations call the same Worker with a
   User-created API Key; they do not go through Vercel or a second public Worker.
+  The static Scalar app at `docs.normal.fast` renders the generated OpenAPI
+  document and cannot execute authenticated requests or persist an API Key.
 * `provider-control` is private. Provider API Credentials and provider specific
   behavior do not cross its boundary or the `packages/wasender` seam.
 * Neon is authoritative for identity mappings, tenant data, authorization,

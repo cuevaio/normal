@@ -1,0 +1,25 @@
+{
+  "name": "@whatsapp-mcp/docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "astro telemetry disable && bun scripts/prepare-static-assets.ts && astro build",
+    "dev": "bun scripts/prepare-static-assets.ts && astro dev",
+    "lint": "biome check .",
+    "preview": "astro preview",
+    "test": "bun run build && bun test test/*.test.ts && playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@scalar/api-reference": "1.65.1",
+    "@scalar/astro": "0.4.14",
+    "@whatsapp-mcp/contracts": "workspace:*",
+    "astro": "5.16.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/bun": "^1.3.14",
+    "typescript": "^5"
+  }
+}

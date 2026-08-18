@@ -1,0 +1,13 @@
+{
+  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true
+  },
+  "include": [".astro/types.d.ts", "src/**/*", "scripts/**/*", "test/**/*"],
+  "exclude": ["dist"]
+}

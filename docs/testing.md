@@ -179,10 +179,17 @@ Playwright starts a test-only Wrangler API Worker and a production Next.js
 server automatically. It never requires a Clerk tenant, Provider Account,
 Provider API Credential, or production data.
 
+The static Scalar documentation suite builds `apps/docs`, validates the
+generated OpenAPI 3.1 artifact against the shared contracts, checks
+self-hosted Scalar assets, CSP, caching, Problem Details type URLs, and safe
+examples, then loads the production-built reference at mobile and desktop
+viewports. The site cannot execute authenticated requests or persist an API
+Key.
+
 ## Production exclusion
 
-`bun run build` inspects every Worker output, source map, and Next.js server and
-browser chunk. The build fails if any test Layer, controlled identity
+`bun run build` inspects every Worker output, source map, Next.js server and
+browser chunk, and the static docs output. The build fails if any test Layer, controlled identity
 credential, fixture secret, or fault-injection marker is present. A failure
 reports only the artifact path, never the matched plaintext. Production configuration accepts only
 `development`, `preview`, or `production`; no production build variable,

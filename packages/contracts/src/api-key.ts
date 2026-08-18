@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { ApiKeyId, ConnectionId } from "./handles";
-import { UtcTimestamp } from "./mcp-schema";
+import { makePublicObjectContract, UtcTimestamp } from "./mcp-schema";
 
 const nanoIdSecretPattern = "[A-Za-z0-9_-]{43}(?![\\s\\S])";
 
@@ -67,8 +67,54 @@ export const CreatedApiKey = Schema.Struct({
 });
 export type CreatedApiKey = typeof CreatedApiKey.Type;
 
+export const CreateApiKeyRequestContract = makePublicObjectContract(
+  CreateApiKeyRequest.fields,
+);
+export type CreateApiKeyRequestBody =
+  typeof CreateApiKeyRequestContract.schema.Type;
+
+export const ApiKeySummaryContract = makePublicObjectContract(
+  ApiKeySummary.fields,
+);
+export type ApiKeySummaryRecord = typeof ApiKeySummaryContract.schema.Type;
+
+export const CreatedApiKeyContract = makePublicObjectContract(
+  CreatedApiKey.fields,
+);
+export type CreatedApiKeyRecord = typeof CreatedApiKeyContract.schema.Type;
+
+export const ApiKeyListContract = makePublicObjectContract({
+  api_keys: Schema.Array(ApiKeySummary),
+});
+export type ApiKeyList = typeof ApiKeyListContract.schema.Type;
+
+export const ApiKeyRevokeResponseContract = makePublicObjectContract({
+  api_key: Schema.Struct({
+    id: ApiKeyId,
+    revoked_at: UtcTimestamp,
+    state: Schema.Literal("revoked"),
+  }),
+});
+export type ApiKeyRevokeResponse =
+  typeof ApiKeyRevokeResponseContract.schema.Type;
+
 export const decodeCreateApiKeyRequest = Schema.decodeUnknownSync(
   CreateApiKeyRequest,
+  { onExcessProperty: "error" },
+);
+
+export const decodeCreatedApiKey = Schema.decodeUnknownSync(
+  CreatedApiKeyContract.schema,
+  { onExcessProperty: "error" },
+);
+
+export const decodeApiKeyList = Schema.decodeUnknownSync(
+  ApiKeyListContract.schema,
+  { onExcessProperty: "error" },
+);
+
+export const decodeApiKeyRevokeResponse = Schema.decodeUnknownSync(
+  ApiKeyRevokeResponseContract.schema,
   { onExcessProperty: "error" },
 );
 

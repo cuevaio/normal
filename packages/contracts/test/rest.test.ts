@@ -1,6 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { Schema } from "effect";
-import { openApiDocument, restRouteRegistry } from "../src/openapi";
+import {
+  ApiKeyListContract,
+  ApiKeyRevokeResponseContract,
+  CreateApiKeyRequestContract,
+  CreatedApiKeyContract,
+} from "../src/api-key";
+import {
+  apiKeyManagementRouteRegistry,
+  openApiDocument,
+  restRouteRegistry,
+} from "../src/openapi";
+import { openApiInfoDescription } from "../src/openapi-guides";
 import {
   decodeProblemDetails,
   decodeRestConnectionList,
@@ -21,6 +32,7 @@ import {
   RestMessageListContract,
   RestSendOperationContract,
 } from "../src/rest";
+import { serializedOpenApiDocument } from "../src/write-openapi";
 
 const connectionId = "con_xxxxxxxxxxxxxxxxxxxxx";
 
@@ -372,8 +384,31 @@ describe("REST contracts", () => {
     ).toBeNull();
   });
 
-  test("generates a partial OpenAPI 3.1 document with stable operation IDs", () => {
+  test("generates a complete OpenAPI 3.1 document with stable operation IDs", () => {
     expect(openApiDocument.openapi).toBe("3.1.0");
+    expect(openApiDocument.info).toEqual(
+      expect.objectContaining({
+        description: openApiInfoDescription,
+        title: "Normal API",
+      }),
+    );
+    expect(apiKeyManagementRouteRegistry).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        operationId: "createApiKey",
+        path: "/v1/api-keys",
+      }),
+      expect.objectContaining({
+        method: "GET",
+        operationId: "listApiKeys",
+        path: "/v1/api-keys",
+      }),
+      expect.objectContaining({
+        method: "DELETE",
+        operationId: "revokeApiKey",
+        path: "/v1/api-keys/{api_key_id}",
+      }),
+    ]);
     expect(restRouteRegistry).toEqual([
       expect.objectContaining({
         method: "GET",
@@ -418,14 +453,18 @@ describe("REST contracts", () => {
         permission: "messages:send",
       }),
     ]);
-    const serialized = JSON.stringify(openApiDocument);
-    expect(serialized).toContain('"operationId":"listConnections"');
-    expect(serialized).toContain('"operationId":"listContacts"');
-    expect(serialized).toContain('"operationId":"listGroups"');
-    expect(serialized).toContain('"operationId":"listConversations"');
-    expect(serialized).toContain('"operationId":"listMessages"');
-    expect(serialized).toContain('"operationId":"getStoredMedia"');
-    expect(serialized).toContain('"operationId":"createSendOperation"');
+    const serialized = serializedOpenApiDocument();
+    expect(serialized).toBe(`${JSON.stringify(openApiDocument, null, 2)}\n`);
+    expect(serialized).toContain('"operationId": "createApiKey"');
+    expect(serialized).toContain('"operationId": "listApiKeys"');
+    expect(serialized).toContain('"operationId": "revokeApiKey"');
+    expect(serialized).toContain('"operationId": "listConnections"');
+    expect(serialized).toContain('"operationId": "listContacts"');
+    expect(serialized).toContain('"operationId": "listGroups"');
+    expect(serialized).toContain('"operationId": "listConversations"');
+    expect(serialized).toContain('"operationId": "listMessages"');
+    expect(serialized).toContain('"operationId": "getStoredMedia"');
+    expect(serialized).toContain('"operationId": "createSendOperation"');
     expect(serialized).toContain(
       "/v1/connections/{connection_id}/conversations/{conversation_id}/messages",
     );
@@ -436,12 +475,12 @@ describe("REST contracts", () => {
       "/v1/connections/con_xxxxxxxxxxxxxxxxxxxxx/messages/msg_xxxxxxxxxxxxxxxxxxxxx/media/med_xxxxxxxxxxxxxxxxxxxxx",
     );
     expect(serialized).toContain("private, no-store");
-    expect(serialized).toContain('"format":"binary"');
+    expect(serialized).toContain('"format": "binary"');
     expect(serialized).not.toContain("whatsapp-media://");
     expect(serialized).not.toContain("text_truncated");
     expect(serialized).toContain('"Idempotency-Key"');
-    expect(serialized).toContain('"type":"http"');
-    expect(serialized).toContain('"scheme":"bearer"');
+    expect(serialized).toContain('"type": "http"');
+    expect(serialized).toContain('"scheme": "bearer"');
     expect(serialized).toContain("con_xxxxxxxxxxxxxxxxxxxxx");
     expect(serialized).toContain("ctc_xxxxxxxxxxxxxxxxxxxxx");
     expect(serialized).toContain("grp_xxxxxxxxxxxxxxxxxxxxx");
@@ -455,6 +494,15 @@ describe("REST contracts", () => {
     expect(serialized).not.toContain("tools/call");
     expect(serialized).not.toContain("structuredContent");
     expect(serialized).not.toContain("list_chats");
+    expect(serialized).toContain('"clerkSession"');
+    expect(serialized).toContain("/v1/api-keys/{api_key_id}");
+    expect(serialized).toContain("Restore invalidation");
+    expect(serialized).toContain("Problem Details");
+    expect(serialized).toContain("Idempotency-Key");
+    expect(serialized).toContain("Message History Window");
+    expect(serialized).toContain("Recipient Exclusions");
+    expect(serialized).not.toContain("cdn.jsdelivr.net");
+    expect(serialized).not.toContain("proxy.scalar.com");
     const schemas = (
       openApiDocument.components as { schemas: Record<string, unknown> }
     ).schemas;
@@ -471,6 +519,21 @@ describe("REST contracts", () => {
     );
     expect(schemas.GroupList).toEqual(RestGroupListContract.jsonSchema);
     expect(schemas.SendOperation).toEqual(RestSendOperationContract.jsonSchema);
+    expect(schemas.ApiKeyList).toEqual(ApiKeyListContract.jsonSchema);
+    expect(schemas.ApiKeyRevokeResponse).toEqual(
+      ApiKeyRevokeResponseContract.jsonSchema,
+    );
+    expect(schemas.CreateApiKey).toEqual(
+      CreateApiKeyRequestContract.jsonSchema,
+    );
+    expect(schemas.CreatedApiKey).toEqual(CreatedApiKeyContract.jsonSchema);
+  });
+
+  test("keeps the committed OpenAPI artifact identical to the generator", async () => {
+    const artifact = await Bun.file(
+      new URL("../../../apps/docs/public/openapi.json", import.meta.url),
+    ).text();
+    expect(artifact).toBe(serializedOpenApiDocument());
   });
 
   test("rejects excess Send Operation properties and unaccepted destinations", () => {

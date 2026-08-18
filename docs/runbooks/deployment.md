@@ -12,7 +12,7 @@
 - A Vercel team for each authority scope
 - A separate Clerk instance or satellite domain for each authority scope, with
   its publishable key and custom-JWT PEM public key available to the deployer
-- Approved API and web custom domains
+- Approved API, web, and documentation custom domains
 - An encrypted, versioned S3 remote-state bucket and KMS key in `us-east-1`
   for each environment
 - Short-lived `NEON_API_KEY`, `CLOUDFLARE_API_TOKEN`, `VERCEL_API_TOKEN`, and
@@ -287,13 +287,16 @@ Delete the local saved plan after a successful apply. If applying fails, retain
 it only in encrypted, access-controlled incident storage until reconciliation
 is complete.
 
-If Vercel reports that the web domain needs DNS verification, retrieve the
+If Vercel reports that the web or docs domain needs DNS verification, retrieve the
 exact current record instead of guessing a shared CNAME:
 
 ```sh
 WEB_HOSTNAME="$(tofu -chdir=infra/compute output -raw web_hostname)"
 VERCEL_PROJECT_ID="$(tofu -chdir=infra/compute output -raw vercel_project_id)"
 vercel domains verify "$WEB_HOSTNAME" --project "$VERCEL_PROJECT_ID"
+DOCS_HOSTNAME="$(tofu -chdir=infra/compute output -raw docs_hostname)"
+VERCEL_DOCS_PROJECT_ID="$(tofu -chdir=infra/compute output -raw vercel_docs_project_id)"
+vercel domains verify "$DOCS_HOSTNAME" --project "$VERCEL_DOCS_PROJECT_ID"
 ```
 
 Add the reported record in the environment's Cloudflare zone, wait for DNS
@@ -584,6 +587,8 @@ unset CLOUDFLARE_HYPERDRIVE_ID CLOUDFLARE_OAUTH_KV_ID NEON_BRANCH_ID \
 export VERCEL_ORG_ID="$(tofu -chdir=infra/compute output -raw vercel_team_id)"
 export VERCEL_PROJECT_ID="$(tofu -chdir=infra/compute output -raw vercel_project_id)"
 vercel deploy --prod --yes --cwd apps/web
+export VERCEL_PROJECT_ID="$(tofu -chdir=infra/compute output -raw vercel_docs_project_id)"
+vercel deploy --prod --yes --cwd apps/docs
 ```
 
 The dedicated Vercel project always uses its Production deployment target; its
