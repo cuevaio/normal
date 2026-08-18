@@ -269,6 +269,72 @@ export const RestMessageListContract = makePublicObjectContract({
 });
 export type RestMessageList = typeof RestMessageListContract.schema.Type;
 
+export const RestSearchMessagesRequestContract = makePublicObjectContract({
+  after: Schema.optional(UtcTimestamp),
+  before: Schema.optional(UtcTimestamp),
+  conversation_id: Schema.optional(ConversationId),
+  cursor: Schema.optional(
+    Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
+  ),
+  direction: Schema.optional(Schema.Literal("all", "inbound", "outbound")),
+  limit: Schema.optional(
+    Schema.Number.pipe(Schema.int(), Schema.between(1, 20)),
+  ),
+  query: Schema.String.pipe(
+    Schema.filter((value) => {
+      const length = Array.from(value).length;
+      return length >= 1 && length <= 256 && !hasUnpairedSurrogate(value);
+    }),
+  ),
+});
+export type RestSearchMessagesRequest =
+  typeof RestSearchMessagesRequestContract.schema.Type;
+
+export const RestSearchMessage = Schema.Struct({
+  content_type: Schema.Literal(
+    "text",
+    "image",
+    "audio",
+    "video",
+    "document",
+    "sticker",
+    "unknown",
+  ),
+  conversation_id: ConversationId,
+  direction: Schema.Literal("inbound", "outbound"),
+  edited_at: Schema.NullOr(UtcTimestamp),
+  message_id: MessageId,
+  sent_at: UtcTimestamp,
+  text: Schema.NullOr(Schema.String),
+});
+export type RestSearchMessage = typeof RestSearchMessage.Type;
+
+export const RestSearchMessagesMeta = Schema.Struct({
+  backfill_complete: Schema.Boolean,
+  gaps: Schema.Array(RestIngestionGap),
+  history_start_reason: Schema.Literal(
+    "connection_started",
+    "retention_policy",
+  ),
+  history_starts_at: UtcTimestamp,
+  index_version: Schema.Literal("v1"),
+  partial: Schema.Boolean,
+  partial_reasons: Schema.Array(
+    Schema.Literal("index_backfill", "ingestion_gap"),
+  ).pipe(Schema.maxItems(2)),
+  searchable_history_starts_at: Schema.NullOr(UtcTimestamp),
+  size_limited: Schema.Boolean,
+});
+export type RestSearchMessagesMeta = typeof RestSearchMessagesMeta.Type;
+
+export const RestSearchMessagesListContract = makePublicObjectContract({
+  data: Schema.Array(RestSearchMessage).pipe(Schema.maxItems(20)),
+  meta: RestSearchMessagesMeta,
+  pagination: RestPagination,
+});
+export type RestSearchMessagesList =
+  typeof RestSearchMessagesListContract.schema.Type;
+
 export const ProblemStatus = Schema.Literal(400, 401, 403, 404, 409, 429, 503);
 
 export const ProblemCode = Schema.Literal(
@@ -382,6 +448,16 @@ export const decodeRestConversationList = Schema.decodeUnknownSync(
 
 export const decodeRestMessageList = Schema.decodeUnknownSync(
   RestMessageListContract.schema,
+  { onExcessProperty: "error" },
+);
+
+export const decodeRestSearchMessagesRequest = Schema.decodeUnknownSync(
+  RestSearchMessagesRequestContract.schema,
+  { onExcessProperty: "error" },
+);
+
+export const decodeRestSearchMessagesList = Schema.decodeUnknownSync(
+  RestSearchMessagesListContract.schema,
   { onExcessProperty: "error" },
 );
 

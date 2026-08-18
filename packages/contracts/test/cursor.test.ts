@@ -394,4 +394,58 @@ describe("REST authorization-bound cursors", () => {
       ),
     ).toBeInstanceOf(InvalidCursorError);
   });
+
+  test("binds a search cursor to the keyed query digest and never encodes terms", async () => {
+    const key = await run(importCursorSigningKey(secret));
+    const searchContext = {
+      ...restContext,
+      filters: {
+        conversation_id: null,
+        direction: "all",
+        index_version: "v1",
+        query_digest: "keyed-query-digest",
+      },
+      operationId: "searchMessages",
+      pageSize: 20,
+      sortVersion: "message-search-sent-v1",
+    };
+    const cursor = await run(
+      signRestCursor(key, {
+        boundary: ["2026-08-14T11:58:00.000Z", "msg_123456789012345678901"],
+        context: searchContext,
+        expiresAtEpochSeconds,
+      }),
+    );
+    expect(
+      await run(verifyRestCursor(key, cursor, searchContext, nowEpochSeconds)),
+    ).toEqual(["2026-08-14T11:58:00.000Z", "msg_123456789012345678901"]);
+    const [encodedPayload] = cursor.split(".");
+    const payload = Encoding.decodeBase64UrlString(encodedPayload ?? "");
+    const serializedPayload =
+      payload._tag === "Right" ? payload.right : "decode failed";
+    expect(serializedPayload).not.toContain("invoice");
+    expect(serializedPayload).not.toContain("confirmation");
+    expect(serializedPayload).not.toContain("keyed-query-digest");
+    expect(
+      await runError(
+        verifyRestCursor(
+          key,
+          cursor,
+          {
+            ...searchContext,
+            filters: {
+              ...searchContext.filters,
+              query_digest: "other-digest",
+            },
+          },
+          nowEpochSeconds,
+        ),
+      ),
+    ).toBeInstanceOf(InvalidCursorError);
+    expect(
+      await runError(
+        verifyRestCursor(key, cursor, restContext, nowEpochSeconds),
+      ),
+    ).toBeInstanceOf(InvalidCursorError);
+  });
 });

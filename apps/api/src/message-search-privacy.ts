@@ -1,4 +1,5 @@
 import { Data, Effect, Encoding } from "effect";
+import { encodeBase64 } from "./base64-url";
 
 export class MessageSearchPrivacyError extends Data.TaggedError(
   "MessageSearchPrivacyError",
@@ -214,6 +215,22 @@ export const messageSearchIndexesForQuery = (
   hasCanonicalQueryTerms(query)
     ? messageSearchIndexesForTerms(key, connectionId, query.terms)
     : Effect.fail(new MessageSearchPrivacyError());
+
+export const messageSearchQueryDigest = (
+  key: CryptoKey,
+  terms: ReadonlyArray<string>,
+): Effect.Effect<string, MessageSearchPrivacyError> =>
+  Effect.tryPromise({
+    try: async () => {
+      const document = encoder.encode(
+        `normal.message-search.cursor\0v1\0${JSON.stringify(terms)}`,
+      );
+      return encodeBase64(
+        new Uint8Array(await crypto.subtle.sign("HMAC", key, document)),
+      );
+    },
+    catch: () => new MessageSearchPrivacyError(),
+  });
 
 export const verifyMessageSearchCandidate = (
   plaintext: string,

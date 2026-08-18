@@ -22,6 +22,7 @@ import {
   isRestRequest,
   RestClock,
   RestCursorCodec,
+  type RestCursorCodecService,
   RestCursorError,
   RestIdentifiers,
   RestPersistence,
@@ -138,6 +139,7 @@ const makeHarness = (options?: {
     listGroups: () => Effect.succeed(null),
     listChats: () => Effect.succeed(null),
     readMessages: () => Effect.succeed(null),
+    searchMessages: () => Effect.succeed(null),
     completeMessageRecordRead: () =>
       Effect.succeed({ outcome: "success" as const }),
     failStoredMediaRead: () => Effect.void,
@@ -180,6 +182,7 @@ const makeHarness = (options?: {
     }),
     Layer.succeed(RestCursorCodec, {
       decode: () => Effect.fail(new RestCursorError()),
+      digestSearchQuery: () => Effect.succeed("query-digest"),
       encode: () => Effect.succeed("rest-cursor"),
     }),
     Layer.succeed(SendTextMessage, {
@@ -524,6 +527,7 @@ const makeContactHarness = (options?: {
     listGroups: () => Effect.succeed(null),
     listChats: () => Effect.succeed(null),
     readMessages: () => Effect.succeed(null),
+    searchMessages: () => Effect.succeed(null),
     completeMessageRecordRead: () =>
       Effect.succeed({ outcome: "success" as const }),
     failStoredMediaRead: () => Effect.void,
@@ -592,6 +596,7 @@ const makeContactHarness = (options?: {
     }),
     Layer.succeed(RestCursorCodec, {
       decode: () => Effect.fail(new RestCursorError()),
+      digestSearchQuery: () => Effect.succeed("query-digest"),
       encode: () => Effect.succeed("rest-cursor"),
     }),
     Layer.succeed(SendTextMessage, {
@@ -840,6 +845,7 @@ const makeGroupHarness = (options?: {
     listGroups: () => Effect.succeed(groupPage),
     listChats: () => Effect.succeed(null),
     readMessages: () => Effect.succeed(null),
+    searchMessages: () => Effect.succeed(null),
     completeMessageRecordRead: () =>
       Effect.succeed({ outcome: "success" as const }),
     failStoredMediaRead: () => Effect.void,
@@ -881,6 +887,7 @@ const makeGroupHarness = (options?: {
     }),
     Layer.succeed(RestCursorCodec, {
       decode: () => Effect.fail(new RestCursorError()),
+      digestSearchQuery: () => Effect.succeed("query-digest"),
       encode: () => Effect.succeed("rest-cursor"),
     }),
     Layer.succeed(SendTextMessage, {
@@ -1148,6 +1155,7 @@ const makeConversationHarness = (options?: {
     listGroups: () => Effect.succeed(null),
     listChats: () => Effect.succeed(chatPage),
     readMessages: () => Effect.succeed(null),
+    searchMessages: () => Effect.succeed(null),
     completeMessageRecordRead: () =>
       Effect.succeed({ outcome: "success" as const }),
     failStoredMediaRead: () => Effect.void,
@@ -1189,6 +1197,7 @@ const makeConversationHarness = (options?: {
     }),
     Layer.succeed(RestCursorCodec, {
       decode: () => Effect.fail(new RestCursorError()),
+      digestSearchQuery: () => Effect.succeed("query-digest"),
       encode: () => Effect.succeed("rest-cursor"),
     }),
     Layer.succeed(SendTextMessage, {
@@ -1492,6 +1501,7 @@ const makeMessageHarness = (options?: {
     listGroups: () => Effect.succeed(null),
     listChats: () => Effect.succeed(null),
     readMessages: () => Effect.succeed(messagePage),
+    searchMessages: () => Effect.succeed(null),
     completeMessageRecordRead: () =>
       Effect.succeed({ outcome: "success" as const }),
     failStoredMediaRead: () => Effect.void,
@@ -1536,6 +1546,7 @@ const makeMessageHarness = (options?: {
         options?.cursorBoundary === undefined
           ? Effect.fail(new RestCursorError())
           : Effect.succeed([...options.cursorBoundary]),
+      digestSearchQuery: () => Effect.succeed("query-digest"),
       encode: ({ boundary }) =>
         Effect.succeed(`rest-cursor:${boundary.join(":")}`),
     }),
@@ -1971,6 +1982,383 @@ describe("REST Stored Messages", () => {
   });
 });
 
+const searchPath = `/v1/connections/${connectionId}/messages/search`;
+const searchQuery = "invoice confirmation";
+const searchPage = {
+  accountKey: messagePage.accountKey,
+  connectionKey: messagePage.connectionKey,
+  coverage: {
+    backfillComplete: false,
+    gaps: [
+      {
+        cause: "connection_unavailable" as const,
+        endsAt: "2026-08-14T11:08:00.000Z",
+        startsAt: "2026-08-14T11:00:00.000Z",
+      },
+    ],
+    historyStartReason: "retention_policy" as const,
+    historyStartsAt: "2026-07-15T12:00:00.000Z",
+    searchableHistoryStartsAt: "2026-07-15T12:00:00.000Z",
+  },
+  hasMore: true,
+  messageSearchKey: encryptedJson("search-key"),
+  messages: [
+    {
+      content: encryptedJson({
+        mediaSource: null,
+        text: "INVOICE, flight confirmation",
+      }),
+      contentType: "text" as const,
+      conversationPublicId: conversationId,
+      direction: "inbound" as const,
+      editedAt: null,
+      messageIdentity: `wi1_${"S".repeat(43)}`,
+      publicId: "msg_222222222222222222222",
+      sentAt: "2026-08-14T11:58:00.000Z",
+    },
+  ],
+  sizeLimited: false,
+};
+
+const makeSearchHarness = (options?: {
+  readonly cursor?: RestCursorCodecService;
+  readonly permissions?: ReadonlyArray<
+    "connections:read" | "directory:read" | "messages:read" | "messages:send"
+  >;
+  readonly persistence?: Partial<RestPersistenceService>;
+}) => {
+  const observations: string[] = [];
+  const telemetry: Array<SafeTelemetryEvent> = [];
+  let boundDigest: string | null = null;
+  const persistence: RestPersistenceService = {
+    beginProtectedOperation: (input) => {
+      observations.push("begin");
+      return Effect.succeed(
+        input.channel === "api" &&
+          input.requiredPermission !== undefined &&
+          !(input.permissions ?? []).includes(input.requiredPermission)
+          ? {
+              auditLogId: input.auditLogId,
+              outcome: "authorization_denied" as const,
+            }
+          : {
+              auditLogId: input.auditLogId,
+              outcome: "started" as const,
+            },
+      );
+    },
+    completeProtectedOperation: () => Effect.void,
+    listConnections: () => Effect.succeed([]),
+    loadContactReadMaterial: () => Effect.succeed(null),
+    listEncryptedContacts: () => Effect.succeed(null),
+    loadGroupSearchMaterial: () => Effect.succeed(null),
+    listGroups: () => Effect.succeed(null),
+    listChats: () => Effect.succeed(null),
+    readMessages: () => Effect.succeed(null),
+    searchMessages: (input) => {
+      observations.push(
+        input.searchTokens === null ? "search-material" : "search-tokens",
+      );
+      return Effect.succeed(
+        input.searchTokens === null
+          ? { ...searchPage, messages: [] }
+          : searchPage,
+      );
+    },
+    completeMessageRecordRead: () =>
+      Effect.succeed({ outcome: "success" as const }),
+    failStoredMediaRead: () => Effect.void,
+    reserveStoredMediaRead: () => Effect.succeed({ outcome: "not_found" }),
+    rejectProtectedOperation: (input) =>
+      Effect.succeed(
+        input.requiredPermission !== undefined &&
+          !input.permissions.includes(input.requiredPermission)
+          ? ("authorization_denied" as const)
+          : ("rejected" as const),
+      ),
+    ...options?.persistence,
+  };
+  const layer = Layer.mergeAll(
+    Layer.succeed(ApiKeyHmac, {
+      digest: () => Effect.succeed(digest),
+    }),
+    Layer.succeed(ApiKeyPersistence, {
+      authenticate: () =>
+        Effect.succeed({
+          connectionIds: [connectionId],
+          expiresAt: null,
+          grantId,
+          id: publicId,
+          name: "CI",
+          permissions: options?.permissions ?? [
+            "connections:read",
+            "messages:read",
+          ],
+          personalAccountId,
+        }),
+      create: () => Effect.succeed({ outcome: "not_found" as const }),
+      list: () => Effect.succeed([]),
+      revoke: () => Effect.succeed(null),
+    }),
+    Layer.succeed(RestClock, { now: Effect.succeed(observedAt) }),
+    Layer.succeed(RestIdentifiers, {
+      nextAuditLogId: Effect.succeed("50000000-0000-4000-8000-000000000080"),
+    }),
+    Layer.succeed(
+      RestCursorCodec,
+      options?.cursor ?? {
+        decode: ({ context, cursor }) => {
+          if (
+            cursor === "mcp-or-tampered" ||
+            !cursor.startsWith("rest-cursor:") ||
+            (boundDigest !== null &&
+              context.filters.query_digest !== boundDigest)
+          ) {
+            return Effect.fail(new RestCursorError());
+          }
+          const parts = cursor.slice("rest-cursor:".length).split(":");
+          return parts.length === 2
+            ? Effect.succeed(parts)
+            : Effect.fail(new RestCursorError());
+        },
+        digestSearchQuery: (terms) =>
+          Effect.succeed(
+            `qd${terms.length}${terms.reduce((sum, term) => sum + term.length, 0)}`,
+          ),
+        encode: ({ boundary, context }) => {
+          boundDigest =
+            typeof context.filters.query_digest === "string"
+              ? context.filters.query_digest
+              : null;
+          return Effect.succeed(`rest-cursor:${boundary.join(":")}`);
+        },
+      },
+    ),
+    Layer.succeed(SendTextMessage, {
+      send: () =>
+        Effect.succeed({
+          outcome: "receipt" as const,
+          receipt,
+        }),
+    }),
+    Layer.succeed(RestPersistence, persistence),
+    Layer.succeed(StoredMediaContainerService, {
+      read: () => Effect.die("unused"),
+      write: () => Effect.die("unused"),
+    }),
+    Layer.succeed(EnvelopeEncryptionService, {
+      createConnectionKey: () => Effect.die("unused"),
+      createPersonalAccountKey: () => Effect.die("unused"),
+      decrypt: () => Effect.succeed(new Uint8Array(32).fill(41)),
+      decryptMany: (input) => {
+        observations.push("decrypt-many");
+        return Effect.succeed(
+          input.items.map((item) => {
+            const decoded = JSON.parse(
+              base64ToUtf8(item.ciphertext.ciphertext),
+            ) as { readonly text?: string | null } | string;
+            if (typeof decoded === "string") {
+              return new TextEncoder().encode(decoded);
+            }
+            return new TextEncoder().encode(JSON.stringify(decoded));
+          }),
+        );
+      },
+      encrypt: () => Effect.die("unused"),
+    }),
+    Layer.succeed(SafeTelemetry, {
+      emit: (event) =>
+        Effect.sync(() => {
+          telemetry.push(event);
+        }),
+    }),
+  );
+  return {
+    handler: createRestHandler(layer, {
+      dailyRecordLimit: 10_000,
+      hourLimit: 3,
+      keyHourLimit: 2,
+      keyMinuteLimit: 1,
+      minuteLimit: 2,
+    }),
+    observations,
+    telemetry,
+  };
+};
+
+describe("REST Stored Message search", () => {
+  test("searches from a closed POST body and keeps terms out of URLs, cursors, and telemetry", async () => {
+    const harness = makeSearchHarness();
+    const response = await harness.handler(
+      request(searchPath, {
+        body: { limit: 1, query: searchQuery },
+        method: "POST",
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    const body = await response.json();
+    expect(body).toEqual({
+      data: [
+        {
+          content_type: "text",
+          conversation_id: conversationId,
+          direction: "inbound",
+          edited_at: null,
+          message_id: "msg_222222222222222222222",
+          sent_at: "2026-08-14T11:58:00.000Z",
+          text: "INVOICE, flight confirmation",
+        },
+      ],
+      meta: {
+        backfill_complete: false,
+        gaps: [
+          {
+            cause: "connection_unavailable",
+            ends_at: "2026-08-14T11:08:00.000Z",
+            starts_at: "2026-08-14T11:00:00.000Z",
+          },
+        ],
+        history_start_reason: "retention_policy",
+        history_starts_at: "2026-07-15T12:00:00.000Z",
+        index_version: "v1",
+        partial: true,
+        partial_reasons: ["index_backfill", "ingestion_gap"],
+        searchable_history_starts_at: "2026-07-15T12:00:00.000Z",
+        size_limited: false,
+      },
+      pagination: {
+        has_more: true,
+        next_cursor:
+          "rest-cursor:2026-08-14T11:58:00.000Z:msg_222222222222222222222",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("text_truncated");
+    expect(JSON.stringify(body)).not.toContain("whatsapp-media://");
+    expect(JSON.stringify(body)).not.toContain("resource_uri");
+    expect(body.pagination.next_cursor).not.toContain("invoice");
+    expect(body.pagination.next_cursor).not.toContain("confirmation");
+    expect(harness.observations.indexOf("begin")).toBeLessThan(
+      harness.observations.indexOf("decrypt-many"),
+    );
+    expect(harness.observations).toEqual([
+      "begin",
+      "search-material",
+      "search-tokens",
+      "decrypt-many",
+    ]);
+    expect(harness.telemetry).toEqual([
+      {
+        event: "rest.operation.completed",
+        operation: "search_messages",
+        outcome: "success",
+        resultCount: 1,
+        service: "api",
+      },
+    ]);
+    expect(JSON.stringify(harness.telemetry)).not.toContain("invoice");
+    expect(JSON.stringify(harness.telemetry)).not.toContain(credential);
+
+    const rebound = await harness.handler(
+      request(searchPath, {
+        body: {
+          cursor: body.pagination.next_cursor,
+          limit: 1,
+          query: "different",
+        },
+        method: "POST",
+      }),
+    );
+    expect(rebound.status).toBe(400);
+    const reboundBody = await rebound.json();
+    expect(reboundBody).toMatchObject({
+      code: "invalid_cursor",
+      status: 400,
+    });
+    expect(JSON.stringify(reboundBody)).not.toContain("different");
+    expect(JSON.stringify(reboundBody)).not.toContain("invoice");
+  });
+
+  test("requires messages:read and hides unknown or excluded connections", async () => {
+    const forbidden = await makeSearchHarness({
+      permissions: ["connections:read", "messages:send"],
+    }).handler(
+      request(searchPath, {
+        body: { query: searchQuery },
+        method: "POST",
+      }),
+    );
+    expect(forbidden.status).toBe(403);
+    expect(await forbidden.json()).toMatchObject({
+      code: "insufficient_permission",
+      status: 403,
+    });
+
+    const missing = await makeSearchHarness({
+      persistence: {
+        searchMessages: () => Effect.succeed(null),
+      },
+    }).handler(
+      request(searchPath, {
+        body: { query: searchQuery },
+        method: "POST",
+      }),
+    );
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+  });
+
+  test("rejects query-string terms, excess fields, and MCP cursors before leaking the query", async () => {
+    const harness = makeSearchHarness();
+    for (const [path, body] of [
+      [
+        `${searchPath}?query=${encodeURIComponent(searchQuery)}`,
+        { query: searchQuery },
+      ],
+      [searchPath, { query: searchQuery, snippet: "secret" }],
+      [searchPath, { query: "✈" }],
+      [
+        searchPath,
+        {
+          after: "2026-08-14T12:00:00.000Z",
+          before: "2026-08-14T11:00:00.000Z",
+          query: searchQuery,
+        },
+      ],
+      [searchPath, { limit: 21, query: searchQuery }],
+    ] as const) {
+      const response = await harness.handler(
+        request(path, { body, method: "POST" }),
+      );
+      expect(response.status).toBe(400);
+      const problem = await response.json();
+      expect(problem).toMatchObject({
+        code: "invalid_request",
+        status: 400,
+      });
+      expect(JSON.stringify(problem)).not.toContain("invoice");
+      expect(JSON.stringify(problem)).not.toContain("confirmation");
+      expect(JSON.stringify(problem)).not.toContain("secret");
+    }
+
+    const invalidCursor = await harness.handler(
+      request(searchPath, {
+        body: { cursor: "mcp-or-tampered", query: searchQuery },
+        method: "POST",
+      }),
+    );
+    expect(invalidCursor.status).toBe(400);
+    expect(await invalidCursor.json()).toMatchObject({
+      code: "invalid_cursor",
+      status: 400,
+    });
+  });
+});
+
 describe("REST Send Operations", () => {
   test("creates a Send Operation through the shared grant-aware send service", async () => {
     const deferred: Array<Promise<void>> = [];
@@ -2235,6 +2623,7 @@ const makeMediaHarness = (options?: {
     listGroups: () => Effect.succeed(null),
     listChats: () => Effect.succeed(null),
     readMessages: () => Effect.succeed(null),
+    searchMessages: () => Effect.succeed(null),
     completeMessageRecordRead: () =>
       Effect.succeed({ outcome: "success" as const }),
     failStoredMediaRead: () => {
@@ -2288,6 +2677,7 @@ const makeMediaHarness = (options?: {
     }),
     Layer.succeed(RestCursorCodec, {
       decode: () => Effect.fail(new RestCursorError()),
+      digestSearchQuery: () => Effect.succeed("query-digest"),
       encode: () => Effect.succeed("rest-cursor"),
     }),
     Layer.succeed(SendTextMessage, {

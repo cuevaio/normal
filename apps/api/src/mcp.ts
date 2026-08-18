@@ -82,6 +82,7 @@ import {
 import {
   importMessageSearchIndexKey,
   messageSearchIndexesForQuery,
+  messageSearchQueryDigest,
   validateMessageSearchQuery,
   verifyMessageSearchCandidate,
 } from "./message-search-privacy";
@@ -2756,22 +2757,6 @@ const readMessages = (
       ),
     );
   }).pipe(Effect.catchAll(() => Effect.succeed(auditUnavailable())));
-
-const messageSearchQueryDigest = (
-  key: CryptoKey,
-  terms: ReadonlyArray<string>,
-) =>
-  Effect.tryPromise({
-    try: async () => {
-      const document = new TextEncoder().encode(
-        `normal.message-search.cursor\0v1\0${JSON.stringify(terms)}`,
-      );
-      return encodeBase64(
-        new Uint8Array(await crypto.subtle.sign("HMAC", key, document)),
-      );
-    },
-    catch: () => new McpToolPersistenceError(),
-  });
 
 const searchMessages = (
   authorization: McpAccessAuthorization,

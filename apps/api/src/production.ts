@@ -1331,6 +1331,19 @@ const restPersistenceLayer = (environment: ApiEnvironment) =>
           },
           catch: () => new RestPersistenceError(),
         }),
+      searchMessages: (input) =>
+        Effect.tryPromise({
+          try: () => {
+            const connectionString = environment.HYPERDRIVE?.connectionString;
+            if (typeof connectionString !== "string") {
+              throw new Error("database unavailable");
+            }
+            return makePgMcpToolRepository(
+              connectionString,
+            ).searchApiKeyMessages(input);
+          },
+          catch: () => new RestPersistenceError(),
+        }),
       completeMessageRecordRead: (input) =>
         Effect.tryPromise({
           try: () => {

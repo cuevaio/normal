@@ -14,6 +14,8 @@ import {
   RestCreateSendOperationContract,
   RestGroupListContract,
   RestMessageListContract,
+  RestSearchMessagesListContract,
+  RestSearchMessagesRequestContract,
   RestSendOperationContract,
 } from "./rest";
 
@@ -29,6 +31,7 @@ export interface RestRouteMetadata {
     | "/v1/connections/{connection_id}/groups"
     | "/v1/connections/{connection_id}/conversations"
     | "/v1/connections/{connection_id}/conversations/{conversation_id}/messages"
+    | "/v1/connections/{connection_id}/messages/search"
     | "/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}"
     | "/v1/connections/{connection_id}/send-operations";
   readonly permission: (typeof API_KEY_PERMISSIONS)[number];
@@ -90,6 +93,16 @@ export const restRouteRegistry = [
     path: "/v1/connections/{connection_id}/conversations/{conversation_id}/messages",
     permission: "messages:read",
     summary: "Page complete Stored Messages",
+    tags: ["Messages"],
+  },
+  {
+    description:
+      "Search retained Stored Messages by exact normalized words in one explicitly selected WhatsApp Connection. The closed POST body is the only place query terms may appear. Terms never enter the URL, Activity Logs, telemetry, Problem Details, or the REST cursor. The cursor binds a keyed digest of the normalized terms, this API Key, operation, Connection, optional conversation, direction, time range, limit, and sort version for 15 minutes. Results reuse keyed exact-word indexes and plaintext verification, include search coverage and intersecting Ingestion Gaps, and contain no Stored Media. Search remains capped at 20 records. The encoded JSON response never exceeds 1 MiB: the server returns fewer complete records rather than truncating text.",
+    method: "POST",
+    operationId: "searchMessages",
+    path: "/v1/connections/{connection_id}/messages/search",
+    permission: "messages:read",
+    summary: "Search Stored Messages privately",
     tags: ["Messages"],
   },
   {
@@ -283,6 +296,46 @@ const messageListExample = {
   },
 };
 
+const searchMessagesRequestExample = {
+  query: "invoice",
+  limit: 20,
+};
+
+const searchMessagesListExample = {
+  data: [
+    {
+      content_type: "text",
+      conversation_id: "cvs_xxxxxxxxxxxxxxxxxxxxx",
+      direction: "inbound",
+      edited_at: null,
+      message_id: "msg_xxxxxxxxxxxxxxxxxxxxx",
+      sent_at: "2026-08-14T11:58:00.000Z",
+      text: "The invoice is attached.",
+    },
+  ],
+  meta: {
+    backfill_complete: true,
+    gaps: [
+      {
+        cause: "connection_unavailable",
+        ends_at: "2026-08-14T11:08:00.000Z",
+        starts_at: "2026-08-14T11:00:00.000Z",
+      },
+    ],
+    history_start_reason: "retention_policy",
+    history_starts_at: "2026-07-15T12:00:00.000Z",
+    index_version: "v1",
+    partial: true,
+    partial_reasons: ["ingestion_gap"],
+    searchable_history_starts_at: "2026-07-15T12:00:00.000Z",
+    size_limited: false,
+  },
+  pagination: {
+    has_more: false,
+    next_cursor: null,
+  },
+};
+
 const problemExample = {
   code: "invalid_credentials",
   detail: "The API Key is missing, malformed, expired, or revoked.",
@@ -398,7 +451,7 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
     },
     {
       description:
-        "Complete retained Stored Messages for one WhatsApp Conversation. REST pages are not constrained by MCP's duplicated-text response cap.",
+        "Complete retained Stored Messages, private exact-word search, and authenticated Stored Media for one selected WhatsApp Connection. REST pages are not constrained by MCP's duplicated-text response cap. Search terms are accepted only in a closed POST body.",
       name: "Messages",
     },
     {
@@ -1032,10 +1085,104 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
           "x-normal-permission": restRouteRegistry[4].permission,
         },
       },
-    "/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}": {
-      get: {
+    "/v1/connections/{connection_id}/messages/search": {
+      post: {
         description: restRouteRegistry[5].description,
         operationId: restRouteRegistry[5].operationId,
+        parameters: [
+          {
+            description:
+              "Opaque handle of the explicitly selected WhatsApp Connection.",
+            in: "path",
+            name: "connection_id",
+            required: true,
+            schema: { type: "string", pattern: "^con_[A-Za-z0-9_-]{21}$" },
+          },
+        ],
+        requestBody: {
+          content: {
+            "application/json": {
+              example: searchMessagesRequestExample,
+              schema: { $ref: "#/components/schemas/SearchMessagesRequest" },
+            },
+          },
+          required: true,
+        },
+        responses: {
+          "200": {
+            content: {
+              "application/json": {
+                example: searchMessagesListExample,
+                schema: { $ref: "#/components/schemas/SearchMessagesList" },
+              },
+            },
+            description:
+              "A newest-first page of exact-word matches with search coverage and intersecting Ingestion Gaps.",
+          },
+          "400": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description:
+              "The body is closed and invalid, the query has no valid terms, time bounds are inverted, or the cursor is expired, tampered, bound to another grant or query, or an MCP cursor.",
+          },
+          "401": {
+            content: {
+              "application/problem+json": {
+                example: problemExample,
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description:
+              "The API Key is missing, malformed, expired, or revoked.",
+          },
+          "403": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description: "The API Key does not include `messages:read`.",
+          },
+          "404": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description:
+              "The WhatsApp Connection or Conversation is unknown, unselected, deleted, excluded, or not visible to this key.",
+          },
+          "429": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description:
+              "Personal Account request or returned-record quota is exhausted.",
+          },
+          "503": {
+            content: {
+              "application/problem+json": {
+                schema: { $ref: "#/components/schemas/ProblemDetails" },
+              },
+            },
+            description: "Authentication or audit authority is unavailable.",
+          },
+        },
+        security: [{ apiKey: [] }],
+        summary: restRouteRegistry[5].summary,
+        tags: [...restRouteRegistry[5].tags],
+        "x-normal-permission": restRouteRegistry[5].permission,
+      },
+    },
+    "/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}": {
+      get: {
+        description: restRouteRegistry[6].description,
+        operationId: restRouteRegistry[6].operationId,
         parameters: [
           {
             description:
@@ -1133,15 +1280,15 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
           },
         },
         security: [{ apiKey: [] }],
-        summary: restRouteRegistry[5].summary,
-        tags: [...restRouteRegistry[5].tags],
-        "x-normal-permission": restRouteRegistry[5].permission,
+        summary: restRouteRegistry[6].summary,
+        tags: [...restRouteRegistry[6].tags],
+        "x-normal-permission": restRouteRegistry[6].permission,
       },
     },
     "/v1/connections/{connection_id}/send-operations": {
       post: {
-        description: restRouteRegistry[6].description,
-        operationId: restRouteRegistry[6].operationId,
+        description: restRouteRegistry[7].description,
+        operationId: restRouteRegistry[7].operationId,
         parameters: [
           {
             description:
@@ -1223,9 +1370,9 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
           ),
         },
         security: [{ apiKey: [] }],
-        summary: restRouteRegistry[6].summary,
-        tags: [...restRouteRegistry[6].tags],
-        "x-normal-permission": restRouteRegistry[6].permission,
+        summary: restRouteRegistry[7].summary,
+        tags: [...restRouteRegistry[7].tags],
+        "x-normal-permission": restRouteRegistry[7].permission,
       },
     },
   },
@@ -1250,6 +1397,8 @@ export const generateOpenApiDocument = (): Record<string, unknown> => ({
       },
       MessageList: jsonSchema(RestMessageListContract),
       ProblemDetails: jsonSchema(ProblemDetailsContract),
+      SearchMessagesList: jsonSchema(RestSearchMessagesListContract),
+      SearchMessagesRequest: jsonSchema(RestSearchMessagesRequestContract),
       ReverificationRequired: {
         additionalProperties: false,
         properties: {

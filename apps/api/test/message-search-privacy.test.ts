@@ -1,9 +1,11 @@
 import { Effect } from "effect";
 import { describe, expect, test } from "vitest";
+import { importCursorSigningKey } from "@whatsapp-mcp/contracts/cursor";
 import {
   importMessageSearchIndexKey,
   messageSearchIndexesForQuery,
   messageSearchIndexesForText,
+  messageSearchQueryDigest,
   tokenizeMessageSearchText,
   validateMessageSearchQuery,
   verifyMessageSearchCandidate,
@@ -114,5 +116,25 @@ describe("Stored Message search privacy", () => {
         ),
       ),
     ).rejects.toBeDefined();
+  });
+
+  test("binds a domain-separated digest that does not contain query terms", async () => {
+    const key = await Effect.runPromise(
+      importCursorSigningKey(new Uint8Array(32).fill(19)),
+    );
+    const query = validateMessageSearchQuery("invoice confirmation");
+    const digest = await Effect.runPromise(
+      messageSearchQueryDigest(key, query.terms),
+    );
+    expect(digest).toMatch(/^[A-Za-z0-9+/]+=*$/u);
+    expect(digest).not.toContain("invoice");
+    expect(digest).not.toContain("confirmation");
+    const other = await Effect.runPromise(
+      messageSearchQueryDigest(
+        key,
+        validateMessageSearchQuery("different").terms,
+      ),
+    );
+    expect(other).not.toEqual(digest);
   });
 });

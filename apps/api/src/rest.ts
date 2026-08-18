@@ -5,7 +5,11 @@ import {
   signRestCursor,
   verifyRestCursor,
 } from "@whatsapp-mcp/contracts/cursor";
-import { ConnectionId, IdempotencyKey } from "@whatsapp-mcp/contracts/handles";
+import {
+  ConnectionId,
+  ConversationId,
+  IdempotencyKey,
+} from "@whatsapp-mcp/contracts/handles";
 import type { restRouteRegistry } from "@whatsapp-mcp/contracts/openapi";
 import {
   decodeRestConnectionList,
@@ -14,6 +18,8 @@ import {
   decodeRestCreateSendOperation,
   decodeRestGroupList,
   decodeRestMessageList,
+  decodeRestSearchMessagesList,
+  decodeRestSearchMessagesRequest,
   decodeRestSendOperation,
   type ProblemCode,
   type ProblemDetails,
@@ -26,6 +32,7 @@ import {
   type RestConversationList,
   type RestGroupList,
   type RestMessageList,
+  type RestSearchMessagesList,
   restStoredMediaPath,
 } from "@whatsapp-mcp/contracts/rest";
 import type {
@@ -42,6 +49,7 @@ import type {
   McpToolGroupPage,
   McpToolGroupSearchMaterial,
   McpToolMessagePage,
+  McpToolMessageSearchPage,
   RejectProtectedOperationResult,
   ReserveApiKeyStoredMediaReadResult,
 } from "@whatsapp-mcp/db/mcp-tool";
@@ -75,6 +83,13 @@ import {
   normalizeGroupDisplayName,
 } from "./group-privacy";
 import { noStoreJsonResponse, noStoreResponse } from "./http-response";
+import {
+  importMessageSearchIndexKey,
+  messageSearchIndexesForQuery,
+  messageSearchQueryDigest,
+  validateMessageSearchQuery,
+  verifyMessageSearchCandidate,
+} from "./message-search-privacy";
 import { SendTextMessage, type SendTextMessageService } from "./mcp";
 import {
   SafeTelemetry,
@@ -88,6 +103,8 @@ const CONVERSATIONS_PATH =
   /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/conversations$/u;
 const MESSAGES_PATH =
   /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/conversations\/(cvs_[A-Za-z0-9_-]{21})\/messages$/u;
+const SEARCH_MESSAGES_PATH =
+  /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/messages\/search$/u;
 const SEND_OPERATIONS_PATH =
   /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/send-operations$/u;
 const READ_STORED_MEDIA = "read_stored_media" as const;
@@ -100,6 +117,7 @@ const LIST_CONTACTS = "list_contacts";
 const LIST_GROUPS = "list_groups";
 const LIST_CHATS = "list_chats";
 const READ_MESSAGES = "read_messages";
+const SEARCH_MESSAGES = "search_messages";
 const restOperationId = (
   operationId: (typeof restRouteRegistry)[number]["operationId"],
 ) => operationId;
@@ -107,12 +125,15 @@ const LIST_CONTACTS_OPERATION_ID = restOperationId("listContacts");
 const LIST_GROUPS_OPERATION_ID = restOperationId("listGroups");
 const LIST_CONVERSATIONS_OPERATION_ID = restOperationId("listConversations");
 const LIST_MESSAGES_OPERATION_ID = restOperationId("listMessages");
+const SEARCH_MESSAGES_OPERATION_ID = restOperationId("searchMessages");
 const CONTACT_SORT_VERSION = "contacts-v1";
 const GROUP_SORT_VERSION = "groups-v1";
 const CONVERSATION_SORT_VERSION = "conversations-v1";
 const MESSAGE_SORT_VERSION = "messages-sent-v1";
+const SEARCH_SORT_VERSION = "message-search-sent-v1";
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
+const MAX_SEARCH_PAGE_SIZE = 20;
 const CURSOR_TTL_SECONDS = 900;
 const REST_MESSAGE_PAGE_MAX_JSON_BYTES = 1_048_576;
 const READY_MEDIA_BYTE_LIMIT = 16_777_216;
@@ -197,6 +218,21 @@ export interface RestPersistenceService {
     readonly permissions: ReadonlyArray<string>;
     readonly personalAccountId: string;
   }) => Effect.Effect<McpToolMessagePage | null, RestPersistenceError>;
+  readonly searchMessages: (input: {
+    readonly after: string | null;
+    readonly apiKeyGrantId: string;
+    readonly before: string | null;
+    readonly connectionPublicId: string;
+    readonly conversationPublicId: string | null;
+    readonly cursorPublicId: string | null;
+    readonly cursorSentAt: string | null;
+    readonly direction: "all" | "inbound" | "outbound";
+    readonly limit: number;
+    readonly observedAt: Date;
+    readonly permissions: ReadonlyArray<string>;
+    readonly personalAccountId: string;
+    readonly searchTokens: ReadonlyArray<string> | null;
+  }) => Effect.Effect<McpToolMessageSearchPage | null, RestPersistenceError>;
   readonly completeMessageRecordRead: (input: {
     readonly apiKeyGrantId: string;
     readonly auditLogId: string;
@@ -268,6 +304,9 @@ export interface RestCursorCodecService {
     readonly cursor: string;
     readonly nowEpochSeconds: number;
   }) => Effect.Effect<CursorBoundary, RestCursorError>;
+  readonly digestSearchQuery: (
+    terms: ReadonlyArray<string>,
+  ) => Effect.Effect<string, RestCursorError>;
   readonly encode: (input: {
     readonly boundary: CursorBoundary;
     readonly context: RestCursorContext;
@@ -286,6 +325,10 @@ export const makeRestCursorCodec = (
 ): RestCursorCodecService => ({
   decode: ({ context, cursor, nowEpochSeconds }) =>
     verifyRestCursor(key, cursor, context, nowEpochSeconds).pipe(
+      Effect.mapError(() => new RestCursorError()),
+    ),
+  digestSearchQuery: (terms) =>
+    messageSearchQueryDigest(key, terms).pipe(
       Effect.mapError(() => new RestCursorError()),
     ),
   encode: ({ boundary, context, expiresAtEpochSeconds }) =>
@@ -408,6 +451,7 @@ const emitCompletion = (
     | "list_chats"
     | "read_messages"
     | "read_stored_media"
+    | "search_messages"
     | "send_text_message",
   outcome:
     | "audit_unavailable"
@@ -650,6 +694,15 @@ const parseContactLimit = (value: string | null): number | "invalid" => {
   const limit = Number(value);
   return Number.isSafeInteger(limit) && limit >= 1 && limit <= MAX_PAGE_SIZE
     ? limit
+    : "invalid";
+};
+
+const parseSearchLimit = (value: number | undefined): number | "invalid" => {
+  if (value === undefined) return DEFAULT_PAGE_SIZE;
+  return Number.isSafeInteger(value) &&
+    value >= 1 &&
+    value <= MAX_SEARCH_PAGE_SIZE
+    ? value
     : "invalid";
 };
 
@@ -2345,6 +2398,471 @@ const listMessages = (
     ),
   );
 
+const searchMessages = (
+  request: Request,
+  connectionPublicId: string,
+  options: RestHandlerOptions,
+  layer: Layer.Layer<RestRequirements, unknown>,
+): Promise<Response> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const url = new URL(request.url);
+      if ([...url.searchParams.keys()].length > 0) {
+        return problemResponse("invalid_request", 400);
+      }
+      const body = yield* Effect.tryPromise({
+        try: () => parseSearchBody(request),
+        catch: () => null,
+      });
+      if (body === null) {
+        return problemResponse("invalid_request", 400);
+      }
+      let query: ReturnType<typeof validateMessageSearchQuery>;
+      try {
+        query = validateMessageSearchQuery(body.query);
+      } catch {
+        return problemResponse("invalid_request", 400);
+      }
+      const limit = parseSearchLimit(body.limit);
+      const after = body.after ?? null;
+      const before = body.before ?? null;
+      if (
+        limit === "invalid" ||
+        (after !== null &&
+          before !== null &&
+          new Date(after).valueOf() >= new Date(before).valueOf())
+      ) {
+        return problemResponse("invalid_request", 400);
+      }
+      const conversationPublicId = body.conversation_id ?? null;
+      const direction = body.direction ?? "all";
+      const cursor = body.cursor ?? null;
+
+      const grant = yield* authenticate(request);
+      const clock = yield* RestClock;
+      const identifiers = yield* RestIdentifiers;
+      const persistence = yield* RestPersistence;
+      const cursors = yield* RestCursorCodec;
+      const startedAt = yield* clock.now;
+      const queryDigest = yield* cursors
+        .digestSearchQuery(query.terms)
+        .pipe(Effect.either);
+      if (queryDigest._tag === "Left") {
+        return problemResponse("unavailable", 503);
+      }
+      const cursorContext: RestCursorContext = {
+        connectionId:
+          Schema.decodeUnknownSync(ConnectionId)(connectionPublicId),
+        filters: {
+          after,
+          before,
+          conversation_id: conversationPublicId,
+          direction,
+          index_version: "v1",
+          query_digest: queryDigest.right,
+        },
+        grantId: grant.grantId,
+        operationId: SEARCH_MESSAGES_OPERATION_ID,
+        pageSize: limit,
+        sortVersion: SEARCH_SORT_VERSION,
+      };
+      let boundary: readonly [string, string] | null = null;
+      if (cursor !== null) {
+        const decoded = yield* cursors
+          .decode({
+            context: cursorContext,
+            cursor,
+            nowEpochSeconds: Math.floor(startedAt.valueOf() / 1_000),
+          })
+          .pipe(Effect.either);
+        if (
+          decoded._tag === "Left" ||
+          decoded.right.length !== 2 ||
+          typeof decoded.right[0] !== "string" ||
+          typeof decoded.right[1] !== "string" ||
+          !/^msg_[A-Za-z0-9_-]{21}$/u.test(decoded.right[1])
+        ) {
+          const auditLogId = yield* identifiers.nextAuditLogId;
+          const rejected = yield* persistence
+            .rejectProtectedOperation({
+              apiKey: {
+                grantId: grant.grantId,
+                name: grant.name,
+                publicId: grant.id,
+              },
+              auditLogId,
+              connectionPublicId,
+              errorCode: "invalid_cursor",
+              observedAt: startedAt,
+              operationName: SEARCH_MESSAGES,
+              permissions: grant.permissions,
+              personalAccountId: grant.personalAccountId,
+              requiredPermission: "messages:read",
+            })
+            .pipe(Effect.either);
+          if (rejected._tag === "Left") {
+            yield* emitCompletion(SEARCH_MESSAGES, "audit_unavailable");
+            return problemResponse("unavailable", 503);
+          }
+          if (rejected.right === "authorization_denied") {
+            yield* emitCompletion(SEARCH_MESSAGES, "authorization_denied");
+            return grant.permissions.includes("messages:read")
+              ? problemResponse("invalid_credentials", 401)
+              : problemResponse("insufficient_permission", 403);
+          }
+          yield* emitCompletion(SEARCH_MESSAGES, "invalid_cursor");
+          return problemResponse("invalid_cursor", 400);
+        }
+        boundary = [decoded.right[0], decoded.right[1]];
+      }
+
+      const auditLogId = yield* identifiers.nextAuditLogId;
+      const started = yield* persistence
+        .beginProtectedOperation({
+          apiKey: {
+            grantId: grant.grantId,
+            name: grant.name,
+            publicId: grant.id,
+          },
+          auditLogId,
+          channel: "api",
+          connectionPublicId,
+          hourLimit: options.hourLimit,
+          keyHourLimit: options.keyHourLimit,
+          keyMinuteLimit: options.keyMinuteLimit,
+          minuteLimit: options.minuteLimit,
+          observedAt: startedAt,
+          operationName: SEARCH_MESSAGES,
+          permissions: grant.permissions,
+          personalAccountId: grant.personalAccountId,
+          requiredPermission: "messages:read" satisfies ApiKeyPermission,
+        })
+        .pipe(Effect.either);
+      if (started._tag === "Left") {
+        yield* emitCompletion(SEARCH_MESSAGES, "audit_unavailable");
+        return problemResponse("unavailable", 503);
+      }
+      if (started.right.outcome === "authorization_denied") {
+        yield* emitCompletion(SEARCH_MESSAGES, "authorization_denied");
+        return grant.permissions.includes("messages:read")
+          ? problemResponse("invalid_credentials", 401)
+          : problemResponse("insufficient_permission", 403);
+      }
+      if (started.right.outcome === "rate_limited") {
+        yield* emitCompletion(SEARCH_MESSAGES, "rate_limited");
+        return problemResponse("rate_limited", 429, {
+          retry_after_seconds: started.right.retryAfterSeconds,
+          retryable: true,
+          resets_at:
+            started.right.resetsAt.toISOString() as ProblemDetails["resets_at"],
+        });
+      }
+
+      const failAfterAudit = (
+        errorCode: string,
+        denied = false,
+        rateLimited?: { readonly resetsAt: Date },
+      ) =>
+        Effect.gen(function* () {
+          const completed = yield* persistence
+            .completeProtectedOperation({
+              auditLogId,
+              completedAt: yield* clock.now,
+              errorCode,
+              outcome: denied ? "authorization_denied" : "execution_error",
+              resultCount: null,
+            })
+            .pipe(Effect.either);
+          yield* emitCompletion(
+            SEARCH_MESSAGES,
+            completed._tag === "Left"
+              ? "audit_unavailable"
+              : denied
+                ? "authorization_denied"
+                : rateLimited !== undefined
+                  ? "rate_limited"
+                  : "unavailable",
+          );
+          if (completed._tag === "Left") {
+            return problemResponse("unavailable", 503);
+          }
+          if (denied) return problemResponse("not_found", 404);
+          if (rateLimited !== undefined) {
+            return problemResponse("rate_limited", 429, {
+              retry_after_seconds: Math.max(
+                0,
+                Math.ceil(
+                  (rateLimited.resetsAt.valueOf() - startedAt.valueOf()) /
+                    1_000,
+                ),
+              ),
+              retryable: true,
+              resets_at:
+                rateLimited.resetsAt.toISOString() as ProblemDetails["resets_at"],
+            });
+          }
+          return problemResponse("unavailable", 503);
+        });
+
+      const searchInput = {
+        after,
+        apiKeyGrantId: grant.grantId,
+        before,
+        connectionPublicId,
+        conversationPublicId,
+        cursorPublicId: boundary?.[1] ?? null,
+        cursorSentAt: boundary?.[0] ?? null,
+        direction,
+        limit,
+        observedAt: startedAt,
+        permissions: grant.permissions,
+        personalAccountId: grant.personalAccountId,
+      } as const;
+      const material = yield* persistence
+        .searchMessages({ ...searchInput, searchTokens: null })
+        .pipe(Effect.either);
+      if (material._tag === "Left") {
+        return yield* failAfterAudit("service_unavailable");
+      }
+      if (material.right === null) {
+        return yield* failAfterAudit("authorization_denied", true);
+      }
+      const encryption = yield* EnvelopeEncryptionService;
+      const keyBytes = yield* encryption
+        .decrypt({
+          accountKey: material.right.accountKey,
+          connectionKey: material.right.connectionKey,
+          ciphertext: material.right.messageSearchKey,
+          context: {
+            accountId: material.right.accountKey.personalAccountId,
+            connectionId: material.right.connectionKey.connectionId,
+            entity: "whatsapp-connection",
+            fieldOrObjectPurpose: "message-search-key",
+            recordId: material.right.connectionKey.connectionId,
+          },
+        })
+        .pipe(Effect.either);
+      if (keyBytes._tag === "Left") {
+        return yield* failAfterAudit("service_unavailable");
+      }
+      const tokens = yield* Effect.acquireUseRelease(
+        Effect.succeed(keyBytes.right),
+        (bytes) =>
+          importMessageSearchIndexKey(bytes).pipe(
+            Effect.flatMap((key) =>
+              messageSearchIndexesForQuery(
+                key,
+                material.right.connectionKey.connectionId,
+                query,
+              ),
+            ),
+          ),
+        (bytes) => Effect.sync(() => bytes.fill(0)),
+      ).pipe(Effect.either);
+      if (tokens._tag === "Left") {
+        return yield* failAfterAudit("service_unavailable");
+      }
+      const loaded = yield* persistence
+        .searchMessages({ ...searchInput, searchTokens: tokens.right })
+        .pipe(Effect.either);
+      if (loaded._tag === "Left") {
+        return yield* failAfterAudit("service_unavailable");
+      }
+      if (loaded.right === null) {
+        return yield* failAfterAudit("authorization_denied", true);
+      }
+      const page = loaded.right;
+      const plaintexts = yield* encryption
+        .decryptMany({
+          accountKey: page.accountKey,
+          connectionKey: page.connectionKey,
+          items: page.messages.map((message) => ({
+            ciphertext: message.content,
+            context: {
+              accountId: page.accountKey.personalAccountId,
+              connectionId: page.connectionKey.connectionId,
+              entity: "stored-message",
+              fieldOrObjectPurpose: "content",
+              recordId: message.messageIdentity,
+            },
+          })),
+        })
+        .pipe(Effect.either);
+      if (plaintexts._tag === "Left") {
+        return yield* failAfterAudit("service_unavailable");
+      }
+      const decoded = yield* Effect.acquireUseRelease(
+        Effect.succeed(plaintexts.right),
+        (values) =>
+          Effect.try({
+            try: () => {
+              const decoder = new TextDecoder("utf-8", {
+                fatal: true,
+                ignoreBOM: false,
+              });
+              return page.messages.map((message, index) => {
+                const value = values[index];
+                if (value === undefined) {
+                  throw new RestPersistenceError();
+                }
+                const content = JSON.parse(decoder.decode(value)) as {
+                  readonly text?: unknown;
+                };
+                if (
+                  content === null ||
+                  (content.text !== null && typeof content.text !== "string")
+                ) {
+                  throw new RestPersistenceError();
+                }
+                const text = content.text as string | null;
+                if (
+                  text === null ||
+                  !verifyMessageSearchCandidate(text, query)
+                ) {
+                  throw new RestPersistenceError();
+                }
+                return {
+                  content_type: message.contentType,
+                  conversation_id: Schema.decodeUnknownSync(ConversationId)(
+                    message.conversationPublicId,
+                  ),
+                  direction: message.direction,
+                  edited_at: message.editedAt ?? null,
+                  message_id: message.publicId,
+                  sent_at: message.sentAt,
+                  text,
+                };
+              });
+            },
+            catch: () => new RestPersistenceError(),
+          }),
+        (values) =>
+          Effect.sync(() => {
+            for (const value of values) value.fill(0);
+          }),
+      ).pipe(Effect.either);
+      if (decoded._tag === "Left") {
+        return yield* failAfterAudit("service_unavailable");
+      }
+
+      const encoder = new TextEncoder();
+      const makeBody = (
+        selected: typeof decoded.right,
+        nextCursor: string | null,
+        sizeLimited: boolean,
+      ): RestSearchMessagesList => {
+        const reasons: Array<"index_backfill" | "ingestion_gap"> = [];
+        if (!page.coverage.backfillComplete) reasons.push("index_backfill");
+        if (page.coverage.gaps.length > 0) reasons.push("ingestion_gap");
+        return decodeRestSearchMessagesList({
+          data: selected,
+          meta: {
+            backfill_complete: page.coverage.backfillComplete,
+            gaps: page.coverage.gaps.map((gap) => ({
+              cause: gap.cause,
+              ends_at: gap.endsAt,
+              starts_at: gap.startsAt,
+            })),
+            history_start_reason: page.coverage.historyStartReason,
+            history_starts_at: page.coverage.historyStartsAt,
+            index_version: "v1",
+            partial: reasons.length > 0,
+            partial_reasons: reasons,
+            searchable_history_starts_at:
+              page.coverage.searchableHistoryStartsAt,
+            size_limited: sizeLimited,
+          },
+          pagination: {
+            has_more: page.hasMore || selected.length < decoded.right.length,
+            next_cursor: nextCursor,
+          },
+        });
+      };
+      const cursorFor = (selected: typeof decoded.right) =>
+        Effect.gen(function* () {
+          const oldest = selected.at(-1);
+          if (
+            oldest === undefined ||
+            (!page.hasMore && selected.length === decoded.right.length)
+          ) {
+            return null;
+          }
+          return yield* cursors.encode({
+            boundary: [oldest.sent_at, oldest.message_id],
+            context: cursorContext,
+            expiresAtEpochSeconds:
+              Math.floor(startedAt.valueOf() / 1_000) + CURSOR_TTL_SECONDS,
+          });
+        });
+
+      let selected = decoded.right;
+      let responseBody: RestSearchMessagesList | null = null;
+      while (selected.length > 0) {
+        const nextCursor = yield* cursorFor(selected).pipe(Effect.either);
+        if (nextCursor._tag === "Left") {
+          return yield* failAfterAudit("service_unavailable");
+        }
+        const candidate = makeBody(
+          selected,
+          nextCursor.right,
+          page.sizeLimited || selected.length < decoded.right.length,
+        );
+        if (
+          encoder.encode(JSON.stringify(candidate)).byteLength <=
+            REST_MESSAGE_PAGE_MAX_JSON_BYTES ||
+          selected.length === 1
+        ) {
+          responseBody = candidate;
+          break;
+        }
+        selected = selected.slice(0, -1);
+      }
+      if (responseBody === null) {
+        responseBody = makeBody([], null, page.sizeLimited);
+      } else if (
+        encoder.encode(JSON.stringify(responseBody)).byteLength >
+        REST_MESSAGE_PAGE_MAX_JSON_BYTES
+      ) {
+        return yield* failAfterAudit("service_unavailable");
+      }
+
+      const completion = yield* persistence
+        .completeMessageRecordRead({
+          apiKeyGrantId: grant.grantId,
+          auditLogId,
+          dailyRecordLimit: options.dailyRecordLimit,
+          observedAt: yield* clock.now,
+          personalAccountId: grant.personalAccountId,
+          resultCount: responseBody.data.length,
+        })
+        .pipe(Effect.either);
+      if (completion._tag === "Left") {
+        yield* emitCompletion(SEARCH_MESSAGES, "audit_unavailable");
+        return problemResponse("unavailable", 503);
+      }
+      if (completion.right.outcome === "record_quota_exhausted") {
+        return yield* failAfterAudit("rate_limited", false, {
+          resetsAt: completion.right.resetsAt,
+        });
+      }
+      yield* emitCompletion(
+        SEARCH_MESSAGES,
+        "success",
+        responseBody.data.length,
+      );
+      return noStoreJsonResponse(responseBody, 200);
+    }).pipe(
+      Effect.provide(layer),
+      Effect.match({
+        onFailure: (failure) =>
+          failure instanceof Response
+            ? failure
+            : problemResponse("unavailable", 503),
+        onSuccess: (response) => response,
+      }),
+    ),
+  );
+
 const sanitizeAttachmentFilename = (value: string): string | null => {
   const leaf = value.split(/[\\/]/u).at(-1) ?? "";
   const sanitized = Array.from(leaf)
@@ -2708,6 +3226,22 @@ const parseIdempotencyKey = (request: Request): string | null => {
   }
 };
 
+const parseSearchBody = async (request: Request) => {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().startsWith("application/json")) {
+    return null;
+  }
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).byteLength > MAX_SEND_BODY_BYTES) {
+    return null;
+  }
+  try {
+    return decodeRestSearchMessagesRequest(JSON.parse(raw) as unknown);
+  } catch {
+    return null;
+  }
+};
+
 const parseSendBody = async (request: Request) => {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().startsWith("application/json")) {
@@ -2852,6 +3386,10 @@ export const createRestHandler =
         options,
         layer,
       );
+    }
+    const searchMatch = SEARCH_MESSAGES_PATH.exec(path);
+    if (request.method === "POST" && searchMatch?.[1] !== undefined) {
+      return searchMessages(request, searchMatch[1], options, layer);
     }
     const media = parseRestStoredMediaPath(path);
     if (request.method === "GET" && media !== null) {

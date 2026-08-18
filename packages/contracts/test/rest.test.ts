@@ -20,6 +20,8 @@ import {
   decodeRestCreateSendOperation,
   decodeRestGroupList,
   decodeRestMessageList,
+  decodeRestSearchMessagesList,
+  decodeRestSearchMessagesRequest,
   decodeRestSendOperation,
   ProblemDetailsContract,
   parseRestStoredMediaPath,
@@ -30,6 +32,8 @@ import {
   RestCreateSendOperationContract,
   RestGroupListContract,
   RestMessageListContract,
+  RestSearchMessagesListContract,
+  RestSearchMessagesRequestContract,
   RestSendOperationContract,
 } from "../src/rest";
 import { serializedOpenApiDocument } from "../src/write-openapi";
@@ -384,6 +388,88 @@ describe("REST contracts", () => {
     ).toBeNull();
   });
 
+  test("keeps private search request and result contracts closed", () => {
+    const request = {
+      conversation_id: "cvs_xxxxxxxxxxxxxxxxxxxxx",
+      direction: "inbound",
+      limit: 20,
+      query: "invoice",
+    } as const;
+    expect(decodeRestSearchMessagesRequest(request) as unknown).toEqual(
+      request,
+    );
+    expect(() =>
+      decodeRestSearchMessagesRequest({
+        ...request,
+        snippet: "do-not-accept",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeRestSearchMessagesRequest({
+        query: "invoice",
+        conversation_id: "ctc_xxxxxxxxxxxxxxxxxxxxx",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeRestSearchMessagesRequest({
+        query: "a".repeat(257),
+      }),
+    ).toThrow();
+
+    const results = {
+      data: [
+        {
+          content_type: "text",
+          conversation_id: "cvs_xxxxxxxxxxxxxxxxxxxxx",
+          direction: "inbound",
+          edited_at: null,
+          message_id: "msg_xxxxxxxxxxxxxxxxxxxxx",
+          sent_at: "2026-08-14T11:58:00.000Z",
+          text: "The invoice is attached.",
+        },
+      ],
+      meta: {
+        backfill_complete: true,
+        gaps: [],
+        history_start_reason: "retention_policy",
+        history_starts_at: "2026-07-15T12:00:00.000Z",
+        index_version: "v1",
+        partial: false,
+        partial_reasons: [],
+        searchable_history_starts_at: "2026-07-15T12:00:00.000Z",
+        size_limited: false,
+      },
+      pagination: {
+        has_more: false,
+        next_cursor: null,
+      },
+    } as const;
+    expect(decodeRestSearchMessagesList(results) as unknown).toEqual(results);
+    expect(() =>
+      decodeRestSearchMessagesList({
+        ...results,
+        data: [
+          {
+            ...results.data[0],
+            text_truncated: true,
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeRestSearchMessagesList({
+        ...results,
+        data: [
+          {
+            ...results.data[0],
+            resource_uri:
+              "whatsapp-media://connections/con_xxxxxxxxxxxxxxxxxxxxx/messages/msg_xxxxxxxxxxxxxxxxxxxxx/media/med_xxxxxxxxxxxxxxxxxxxxx",
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   test("generates a complete OpenAPI 3.1 document with stable operation IDs", () => {
     expect(openApiDocument.openapi).toBe("3.1.0");
     expect(openApiDocument.info).toEqual(
@@ -441,6 +527,12 @@ describe("REST contracts", () => {
         permission: "messages:read",
       }),
       expect.objectContaining({
+        method: "POST",
+        operationId: "searchMessages",
+        path: "/v1/connections/{connection_id}/messages/search",
+        permission: "messages:read",
+      }),
+      expect.objectContaining({
         method: "GET",
         operationId: "getStoredMedia",
         path: "/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}",
@@ -463,10 +555,14 @@ describe("REST contracts", () => {
     expect(serialized).toContain('"operationId": "listGroups"');
     expect(serialized).toContain('"operationId": "listConversations"');
     expect(serialized).toContain('"operationId": "listMessages"');
+    expect(serialized).toContain('"operationId": "searchMessages"');
     expect(serialized).toContain('"operationId": "getStoredMedia"');
     expect(serialized).toContain('"operationId": "createSendOperation"');
     expect(serialized).toContain(
       "/v1/connections/{connection_id}/conversations/{conversation_id}/messages",
+    );
+    expect(serialized).toContain(
+      "/v1/connections/{connection_id}/messages/search",
     );
     expect(serialized).toContain(
       "/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}",
@@ -514,6 +610,12 @@ describe("REST contracts", () => {
       RestConversationListContract.jsonSchema,
     );
     expect(schemas.MessageList).toEqual(RestMessageListContract.jsonSchema);
+    expect(schemas.SearchMessagesList).toEqual(
+      RestSearchMessagesListContract.jsonSchema,
+    );
+    expect(schemas.SearchMessagesRequest).toEqual(
+      RestSearchMessagesRequestContract.jsonSchema,
+    );
     expect(schemas.CreateSendOperation).toEqual(
       RestCreateSendOperationContract.jsonSchema,
     );
