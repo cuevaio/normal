@@ -419,8 +419,7 @@ for (const deployable of deployables) {
   }
 }
 
-const docsInstallCommand =
-  "cd ../.. && bun install --frozen-lockfile";
+const docsInstallCommand = "cd ../.. && bun install --frozen-lockfile";
 const docsBuildCommand =
   "cd ../.. && bun x turbo run build --filter=@whatsapp-mcp/docs --cache-dir=.turbo/cache";
 
@@ -437,7 +436,9 @@ for (const app of ["web", "docs"] as const) {
   }
   if (app === "docs") {
     if (vercelManifest.framework !== "astro") {
-      throw new Error("The Vercel docs deployment must use static Astro output.");
+      throw new Error(
+        "The Vercel docs deployment must use static Astro output.",
+      );
     }
     if (vercelManifest.outputDirectory !== "dist") {
       throw new Error(
@@ -455,7 +456,9 @@ for (const app of ["web", "docs"] as const) {
       );
     }
     if ("env" in vercelManifest || "envVars" in vercelManifest) {
-      throw new Error("The Vercel docs deployment must not receive a runtime secret.");
+      throw new Error(
+        "The Vercel docs deployment must not receive a runtime secret.",
+      );
     }
   }
 }

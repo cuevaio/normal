@@ -8,26 +8,25 @@ const json = (body: unknown, status = 200, headers?: Record<string, string>) =>
   });
 
 const docsHome = () =>
-  new Response("<html>/vendor/scalar/1.65.1/standalone.js /openapi.json</html>", {
-    headers: {
-      "content-security-policy":
-        "default-src 'self'; script-src 'self' 'nonce-normal-docs-scalar'",
-      "content-type": "text/html",
-      "referrer-policy": "no-referrer",
-      "x-content-type-options": "nosniff",
-      "x-frame-options": "DENY",
-    },
-  });
-
-const docsOpenApi = () =>
-  json(
-    { openapi: "3.1.0", paths: { "/v1/connections": {} } },
-    200,
+  new Response(
+    "<html>/vendor/scalar/1.65.1/standalone.js /openapi.json</html>",
     {
-      "cache-control": "public, max-age=300, must-revalidate",
-      "x-content-type-options": "nosniff",
+      headers: {
+        "content-security-policy":
+          "default-src 'self'; script-src 'self' 'nonce-normal-docs-scalar'",
+        "content-type": "text/html",
+        "referrer-policy": "no-referrer",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY",
+      },
     },
   );
+
+const docsOpenApi = () =>
+  json({ openapi: "3.1.0", paths: { "/v1/connections": {} } }, 200, {
+    "cache-control": "public, max-age=300, must-revalidate",
+    "x-content-type-options": "nosniff",
+  });
 
 const smokeOrigins = {
   apiOrigin: "https://api.example.test",
@@ -283,7 +282,9 @@ describe("deployed production smoke command", () => {
     } catch (cause) {
       error = cause as Error;
     }
-    expect(error?.message).toBe("docs failed; remediate with: bun run deploy:smoke");
+    expect(error?.message).toBe(
+      "docs failed; remediate with: bun run deploy:smoke",
+    );
     expect(error?.message).not.toContain("must-not-leak-openapi");
   });
 });
