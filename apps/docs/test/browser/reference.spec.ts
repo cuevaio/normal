@@ -10,11 +10,15 @@ const assertReference = async (
   const response = await page.goto("/");
   expect(response?.ok()).toBe(true);
   await expect(page.getByRole("heading", { name: "Normal API" })).toBeVisible();
-  await expect(page.getByText("Getting started", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Getting started" }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: /test request/i })).toHaveCount(
     0,
   );
-  await expect(page.getByRole("button", { name: "Shell Curl" })).toBeVisible();
+  await expect(
+    page.getByText("curl -sS https://api.normal.fast/v1/connections"),
+  ).toBeVisible();
   expect(await page.locator("input[type='password']").count()).toBe(0);
 };
 
