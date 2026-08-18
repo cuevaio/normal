@@ -27,12 +27,13 @@ const insertApiKey = async (
     `INSERT INTO public.api_keys (
        id, personal_account_id, public_id, name, credential_digest,
        credential_hint, permissions, state, created_at, reverified_at,
-       revoked_at
+       revoked_at, metadata_expires_at
      ) VALUES (
        $1, $2, $3, $4,
        CASE WHEN $5::text IS NULL THEN NULL ELSE decode($5, 'hex') END,
        $6, ARRAY['connections:read'], $7,
-       '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z', $8
+       '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z', $8,
+       CASE WHEN $8::timestamptz IS NULL THEN NULL ELSE $8::timestamptz + interval '90 days' END
      )`,
     [
       input.id,
@@ -327,7 +328,7 @@ describe("Personal Account repository", () => {
       },
       {
         digest: null,
-        metadata_expires_at: null,
+        metadata_expires_at: new Date("2026-11-01T00:30:00.000Z"),
         name: "Already revoked",
         public_id: "apk_bbbbbbbbbbbbbbbbbbbbb",
         revoked_at: new Date("2026-08-03T00:30:00.000Z"),
