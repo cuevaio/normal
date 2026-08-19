@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { DialogBody, DialogFooter } from "@/components/ui/dialog";
 import {
   Field,
@@ -40,6 +40,7 @@ export type ConnectionSetupState =
   | "connecting"
   | "qr_available"
   | "connected"
+  | "number_confirmation_failed"
   | "provisioned"
   | "provider_capacity_unavailable"
   | "provisioning_failed"
@@ -101,6 +102,21 @@ interface FirstConnectionConnection {
   readonly displayName: string;
   readonly numberSuffix: string;
   readonly retentionDays: number | null;
+  readonly state:
+    | "connected"
+    | "connecting"
+    | "degraded"
+    | "deleting"
+    | "disconnected"
+    | "reconnect_required";
+}
+
+export interface FirstConnectionSuccessModel {
+  readonly authorizationCopy: string;
+  readonly clientName: string;
+  readonly connection: FirstConnectionConnection;
+  readonly nextActionHref: string | null;
+  readonly nextStepCopy: string;
 }
 
 type VerificationClient = Extract<IntendedMcpClient, "claude" | "chatgpt">;
@@ -228,6 +244,7 @@ const setupCompletionFailures = new Map<
 >([
   ["cancelled", "cancelled"],
   ["expired", "cancelled"],
+  ["number_confirmation_failed", "failed"],
   ["provider_capacity_unavailable", "capacity_unavailable"],
   ["provisioning_failed", "failed"],
   ["provisioning_quarantined", "failed"],
@@ -311,6 +328,39 @@ function makeDraft(profile: OnboardingProfile | null): ProfileDraft {
   };
 }
 
+function isActiveConnection(
+  connection: FirstConnectionConnection | null,
+): connection is FirstConnectionConnection {
+  return connection !== null && connection.state === "connected";
+}
+
+export function getFirstConnectionSuccessModel(
+  connection: FirstConnectionConnection | null,
+  intendedMcpClient: IntendedMcpClient,
+): FirstConnectionSuccessModel | null {
+  if (!isActiveConnection(connection)) return null;
+
+  const clientName =
+    intendedMcpClient === "claude"
+      ? "Claude"
+      : intendedMcpClient === "chatgpt"
+        ? "ChatGPT"
+        : "your MCP Client";
+
+  return {
+    authorizationCopy: `${clientName} still needs its own MCP Authorization for this WhatsApp Connection.`,
+    clientName,
+    connection,
+    nextActionHref:
+      intendedMcpClient === "claude"
+        ? "https://claude.ai/settings/connectors"
+        : intendedMcpClient === "chatgpt"
+          ? "https://chatgpt.com/plugins"
+          : null,
+    nextStepCopy: `Create the MCP Authorization in ${clientName} next so it can access only the WhatsApp Connections and permissions you choose.`,
+  };
+}
+
 function isCompleteDraft(draft: ProfileDraft): draft is {
   readonly primaryUseCase: PrimaryUseCase;
   readonly whatsappUsageContext: WhatsAppUsageContext;
@@ -346,6 +396,9 @@ function connectionSetupStatusText(
     return "Waiting for WhatsApp to finish connecting.";
   }
   if (setupState === "connected") return "WhatsApp Connection active.";
+  if (setupState === "number_confirmation_failed") {
+    return "We couldn't confirm that this QR code was scanned by the WhatsApp account you entered. Start again and scan with that same account.";
+  }
   if (setupState === "provisioned") return "Connection Setup is ready.";
   if (setupState === "provider_capacity_unavailable") {
     return "WhatsApp Connection capacity is temporarily unavailable. Please try again later.";
@@ -910,7 +963,9 @@ export function ConnectionSetupForm({
       ) : null}
       {setupState === "cancelled" ||
       (setupId !== null &&
-        (setupState === "expired" || setupState === "unavailable")) ? (
+        (setupState === "expired" ||
+          setupState === "number_confirmation_failed" ||
+          setupState === "unavailable")) ? (
         <Button onClick={onResetSetup} type="button" variant="outline">
           Start again
         </Button>
@@ -951,6 +1006,9 @@ export function FirstConnectionOnboarding({
   onProfileSaved,
   setupForm,
 }: FirstConnectionOnboardingProps) {
+  const activeConnection = isActiveConnection(connectedConnection)
+    ? connectedConnection
+    : null;
   const [profile, setProfile] = useState(initialProfile);
   const [draft, setDraft] = useState<ProfileDraft>(() =>
     makeDraft(initialProfile),
@@ -959,7 +1017,7 @@ export function FirstConnectionOnboarding({
     "idle" | "saving" | "unavailable"
   >("idle");
   const [stage, setStage] = useState<OnboardingStage>(
-    setupForm.setupState === "connected" && connectedConnection !== null
+    setupForm.setupState === "connected" && activeConnection !== null
       ? "success"
       : setupForm.setupId !== null
         ? "connection_setup"
@@ -986,7 +1044,7 @@ export function FirstConnectionOnboarding({
   useEffect(() => {
     if (
       setupForm.setupState === "connected" &&
-      connectedConnection !== null &&
+      activeConnection !== null &&
       stage !== "success"
     ) {
       if (!reportedSetupOutcome.current) {
@@ -1014,7 +1072,7 @@ export function FirstConnectionOnboarding({
         outcome,
       });
     }
-  }, [connectedConnection, setupForm.setupState, stage]);
+  }, [activeConnection, setupForm.setupState, stage]);
 
   const completeStage = (
     completedStage: OnboardingStage,
@@ -1086,6 +1144,10 @@ export function FirstConnectionOnboarding({
   const intendedMcpClient =
     profile?.intendedMcpClient ??
     (draft.intendedMcpClient === "" ? "not_sure" : draft.intendedMcpClient);
+  const successModel = getFirstConnectionSuccessModel(
+    activeConnection,
+    intendedMcpClient,
+  );
 
   return (
     <section
@@ -1302,20 +1364,36 @@ export function FirstConnectionOnboarding({
         </div>
       ) : null}
 
-      {stage === "success" && connectedConnection !== null ? (
+      {stage === "success" && successModel !== null ? (
         <div className="flex flex-col gap-6">
           <div className="rounded-2xl bg-background p-5 ring-1 ring-border">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl bg-muted/40 p-4">
+                <p className="text-sm font-medium">Completed</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Your WhatsApp Connection is active.
+                </p>
+              </div>
+              <div className="rounded-xl bg-muted/40 p-4">
+                <p className="text-sm font-medium">Next required step</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  {successModel.authorizationCopy}
+                </p>
+              </div>
+            </div>
             <dl className="grid gap-3 text-sm md:grid-cols-3">
               <div className="rounded-xl bg-muted/40 p-4">
                 <dt className="text-muted-foreground">Name</dt>
                 <dd className="mt-1 font-medium">
-                  {connectedConnection.displayName}
+                  {successModel.connection.displayName}
                 </dd>
               </div>
               <div className="rounded-xl bg-muted/40 p-4">
-                <dt className="text-muted-foreground">WhatsApp Number</dt>
+                <dt className="text-muted-foreground">
+                  Active WhatsApp Number
+                </dt>
                 <dd className="mt-1 font-medium">
-                  ending {connectedConnection.numberSuffix}
+                  ending {successModel.connection.numberSuffix}
                 </dd>
               </div>
               <div className="rounded-xl bg-muted/40 p-4">
@@ -1323,9 +1401,9 @@ export function FirstConnectionOnboarding({
                   Message Retention Policy
                 </dt>
                 <dd className="mt-1 font-medium">
-                  {connectedConnection.retentionDays === null
+                  {successModel.connection.retentionDays === null
                     ? "Retain until Connection Deletion"
-                    : `${connectedConnection.retentionDays} days`}
+                    : `${successModel.connection.retentionDays} days`}
                 </dd>
               </div>
             </dl>
@@ -1334,11 +1412,30 @@ export function FirstConnectionOnboarding({
               Normal observes supported WhatsApp Conversations from activation
               forward. Earlier WhatsApp history is not imported.
             </p>
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm leading-6 text-muted-foreground">
+                {successModel.nextStepCopy}
+              </p>
+              {successModel.nextActionHref !== null ? (
+                <a
+                  className={buttonVariants()}
+                  href={successModel.nextActionHref}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Open {successModel.clientName}
+                </a>
+              ) : (
+                <div className="min-w-0 sm:max-w-sm">
+                  <CopyServerUrl serverUrl={mcpServerUrl} />
+                </div>
+              )}
+            </div>
           </div>
           {intendedMcpClient === "claude" || intendedMcpClient === "chatgpt" ? (
             <VerificationPromptCard
               client={intendedMcpClient}
-              connection={connectedConnection}
+              connection={successModel.connection}
             />
           ) : null}
           {intendedMcpClient === "claude" || intendedMcpClient === "chatgpt" ? (

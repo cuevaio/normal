@@ -64,6 +64,8 @@ export const makeProviderControlLayers = (provider: ProviderControlService) => {
         lifecycleWrite(() => provider.disconnectSession(input)),
       getQrCode: (input) => safeRead(() => provider.getQrCode(input)),
       reconcile,
+      verifyNumber: (input) =>
+        safeRead(() => provider.verifySessionNumber(input)),
     }),
   } as const;
 };

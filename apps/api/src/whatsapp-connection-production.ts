@@ -73,5 +73,10 @@ export const makeWhatsAppConnectionPersistenceLayer = (
         try: () => getRepository().loadSetupForActivation(input),
         catch: persistenceError,
       }),
+    failSetupActivation: (input) =>
+      Effect.tryPromise({
+        try: () => getRepository().failSetupActivation(input),
+        catch: persistenceError,
+      }),
   });
 };

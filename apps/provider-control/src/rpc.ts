@@ -7,6 +7,7 @@ import {
   decodeListSessionsRequest,
   decodeReconcileSessionRequest,
   decodeRepairSessionConfigurationRequest,
+  decodeVerifySessionNumberRequest,
   type LifecycleSession,
   type ProviderControlFailure,
   type ProviderControlFailureCode,
@@ -16,6 +17,7 @@ import {
   type ProviderControlService,
   type QrCodeObservation,
   type SessionDeletionObservation,
+  type SessionNumberVerification,
   type SessionReconciliation,
 } from "@whatsapp-mcp/contracts/provider-control";
 import {
@@ -220,6 +222,21 @@ const qrCodeObservation = (value: unknown): QrCodeObservation => {
     image: value.image,
     state: "available",
   };
+};
+
+const sessionNumberVerification = (
+  value: unknown,
+): SessionNumberVerification => {
+  if (
+    !isRecord(value) ||
+    !hasExactlyKeys(value, ["outcome"]) ||
+    (value.outcome !== "match" &&
+      value.outcome !== "mismatch" &&
+      value.outcome !== "unverified")
+  ) {
+    throw invalidResponseFailure("safe-read");
+  }
+  return { outcome: value.outcome };
 };
 
 const reconciliationObservation = (value: unknown): SessionReconciliation => {
@@ -463,6 +480,19 @@ export const makeProviderControlRpc = (
             ) as WebhookEndpoint,
           }),
         (value) => lifecycleSession(value, "lifecycle-write"),
+      ),
+    verifySessionNumber: (input) =>
+      invoke(
+        "verifySessionNumber",
+        input,
+        decodeVerifySessionNumberRequest,
+        "safe-read",
+        (lifecycle, request) =>
+          lifecycle.verifySessionNumber({
+            phoneNumber: Redacted.make(request.phoneNumber) as WhatsAppNumber,
+            session: request.session as never,
+          }),
+        sessionNumberVerification,
       ),
   };
 };

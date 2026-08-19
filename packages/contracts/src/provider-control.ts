@@ -46,6 +46,10 @@ const CreateSessionRequest = Schema.Struct({
 const SessionRequest = Schema.Struct({
   session: SessionLocator,
 });
+const VerifySessionNumberRequest = Schema.Struct({
+  phoneNumber: WhatsAppNumber,
+  session: SessionLocator,
+});
 
 const strictDecode = <A, I>(schema: Schema.Schema<A, I>) =>
   Schema.decodeUnknownSync(schema, { onExcessProperty: "error" });
@@ -62,6 +66,9 @@ export const decodeConnectSessionRequest = strictDecode(SessionRequest);
 export const decodeDisconnectSessionRequest = strictDecode(SessionRequest);
 export const decodeGetQrCodeRequest = strictDecode(SessionRequest);
 export const decodeDeleteSessionRequest = strictDecode(SessionRequest);
+export const decodeVerifySessionNumberRequest = strictDecode(
+  VerifySessionNumberRequest,
+);
 
 export interface ReconcileSessionRequest {
   readonly setupMarker: string;
@@ -83,6 +90,11 @@ export interface CreateSessionRequest {
 }
 
 export interface SessionRequest {
+  readonly session: string;
+}
+
+export interface VerifySessionNumberRequest {
+  readonly phoneNumber: string;
   readonly session: string;
 }
 
@@ -134,6 +146,10 @@ export interface SessionDeletionObservation {
   readonly state: "absent" | "present";
 }
 
+export interface SessionNumberVerification {
+  readonly outcome: "match" | "mismatch" | "unverified";
+}
+
 export type ProviderControlFailureCode =
   | "authentication_failed"
   | "configuration_invalid"
@@ -182,7 +198,8 @@ export type ProviderControlRpcMethod =
   | "getQrCode"
   | "listSessions"
   | "repairSessionConfiguration"
-  | "reconcileSession";
+  | "reconcileSession"
+  | "verifySessionNumber";
 
 export interface ProviderControlRpcTelemetryEvent {
   readonly durationMs: number;
@@ -217,4 +234,7 @@ export interface ProviderControlService {
   readonly repairSessionConfiguration: (
     request: RepairSessionConfigurationRequest,
   ) => Promise<ProviderControlResult<LifecycleSession>>;
+  readonly verifySessionNumber: (
+    request: VerifySessionNumberRequest,
+  ) => Promise<ProviderControlResult<SessionNumberVerification>>;
 }

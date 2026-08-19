@@ -153,6 +153,16 @@ export const validEnvironment = () => ({
       },
       ok: false as const,
     }),
+    verifySessionNumber: async () => ({
+      error: {
+        _tag: "ProviderControlFailure" as const,
+        code: "configuration_invalid" as const,
+        operation: "boundary" as const,
+        retryAfterMs: null,
+        retryDecision: "do_not_retry" as const,
+      },
+      ok: false as const,
+    }),
   },
   STORED_MEDIA: {
     createMultipartUpload: async () => ({

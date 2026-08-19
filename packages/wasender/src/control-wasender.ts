@@ -16,6 +16,7 @@ import {
   type SessionDeletionObservation,
   SessionLifecycle,
   type SessionLifecycle as SessionLifecycleService,
+  type SessionNumberVerification,
   type SessionReconciliation,
   type SetupMarker,
 } from "./control";
@@ -79,6 +80,10 @@ interface ProviderSession {
   readonly webhookEvents: ReadonlyArray<string> | null;
   readonly webhookSecret: string | null;
   readonly webhookUrl: string | null;
+}
+
+interface SessionUserInfo {
+  readonly id: string;
 }
 
 interface BoundedBody {
@@ -199,6 +204,14 @@ const parseData = (value: unknown): unknown =>
   isRecord(value) && value.success === true && "data" in value
     ? value.data
     : undefined;
+
+const parseSessionUserInfo = (value: unknown): SessionUserInfo => {
+  const data = parseData(value);
+  if (!isRecord(data) || typeof data.id !== "string" || data.id.length === 0) {
+    throw safeFailure("invalid_response");
+  }
+  return { id: data.id };
+};
 
 const parseSessionList = (value: unknown): ReadonlyArray<ProviderSession> => {
   const data = parseData(value);
@@ -378,6 +391,7 @@ export const makeWasenderSessionLifecycle = (
     attempt: number,
     timeoutMs: number,
     init?: { readonly body?: unknown; readonly method?: string },
+    requestCredential = validated.credential,
   ): Promise<{ readonly body: BoundedBody; readonly response: Response }> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -386,7 +400,7 @@ export const makeWasenderSessionLifecycle = (
     try {
       const headers = new Headers({
         accept: "application/json",
-        authorization: `Bearer ${validated.credential}`,
+        authorization: `Bearer ${requestCredential}`,
       });
       const body =
         init?.body === undefined ? undefined : JSON.stringify(init.body);
@@ -422,7 +436,10 @@ export const makeWasenderSessionLifecycle = (
     }
   };
 
-  const safeJson = async (path: string): Promise<BoundedBody> => {
+  const safeJson = async (
+    path: string,
+    requestCredential = validated.credential,
+  ): Promise<BoundedBody> => {
     const startedAt = now();
     for (let attempt = 1; attempt <= safeReadMaximumAttempts; attempt += 1) {
       const remaining = safeReadTotalTimeoutMs - (now() - startedAt);
@@ -434,6 +451,8 @@ export const makeWasenderSessionLifecycle = (
           "safe-read",
           attempt,
           Math.min(safeReadAttemptTimeoutMs, remaining),
+          undefined,
+          requestCredential,
         );
         if (response.ok) {
           if (!body.jsonValid) {
@@ -599,6 +618,14 @@ export const makeWasenderSessionLifecycle = (
     );
     if (detail.id !== id) throw safeFailure("invalid_response");
     return detail;
+  };
+
+  const normalizedPhoneFromUserId = (value: string): string | null => {
+    const trimmed = value.trim().toLowerCase();
+    const match = /^([1-9]\d{7,14})(?::\d{1,5})?@s\.whatsapp\.net$/u.exec(
+      trimmed,
+    );
+    return match?.[1] ? `+${match[1]}` : null;
   };
 
   const toLifecycleSession = async (
@@ -806,6 +833,24 @@ export const makeWasenderSessionLifecycle = (
           if (isProviderFailure(cause)) throw cause;
           throw safeFailure("invalid_response");
         }
+      }),
+    verifySessionNumber: ({ phoneNumber, session }) =>
+      effect(async (): Promise<SessionNumberVerification> => {
+        const expectedNumber = Redacted.value(phoneNumber);
+        const providerSession = await resolveProviderSession(session);
+        if (providerSession === null) throw safeFailure("invalid_response");
+        const detail = await loadDetail(providerSession.id);
+        if (!detail.apiKey) throw safeFailure("invalid_response");
+        const user = parseSessionUserInfo(
+          (await safeJson("/api/user", detail.apiKey)).value,
+        );
+        const actualNumber = normalizedPhoneFromUserId(user.id);
+        if (actualNumber === null) {
+          return { outcome: "unverified" };
+        }
+        return {
+          outcome: actualNumber === expectedNumber ? "match" : "mismatch",
+        };
       }),
     listSessions: ({ setupMarker }) => effect(() => listSessions(setupMarker)),
     reconcileSession: ({ setupMarker, webhookEndpoint }) =>

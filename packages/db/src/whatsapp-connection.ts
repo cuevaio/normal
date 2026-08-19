@@ -243,6 +243,12 @@ export interface WhatsAppConnectionRepository {
     readonly observedAt: string;
     readonly setupId: string;
   }) => Promise<ConnectionSetupActivation | null>;
+  readonly failSetupActivation: (input: {
+    readonly failureCode: string;
+    readonly observedAt: string;
+    readonly personalAccountId: string;
+    readonly setupId: string;
+  }) => Promise<boolean>;
 }
 
 const enterPersonalAccountContext = async (
@@ -1164,6 +1170,23 @@ export const makeWhatsAppConnectionRepository = (
         return activation(input.setupId, row);
       }),
     ),
+  failSetupActivation: (input) =>
+    provider.withConnection((connection) => {
+      const db = makeDatabase(connection);
+      return withTransaction(connection, async () => {
+        await enterPersonalAccountContext(db, input.personalAccountId);
+        const rows = await db.execute<{ failed: unknown }>(
+          sql`SELECT public.fail_connection_setup_activation(
+            ${input.personalAccountId}, ${input.setupId}, ${input.failureCode},
+            ${input.observedAt}
+          ) AS failed`,
+        );
+        if (typeof rows[0]?.failed !== "boolean") {
+          throw new Error("invalid Connection Setup activation failure");
+        }
+        return rows[0].failed;
+      });
+    }),
 });
 
 const makePgConnectionProvider = (

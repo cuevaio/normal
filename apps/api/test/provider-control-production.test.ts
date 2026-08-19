@@ -18,6 +18,7 @@ const provider = () => ({
   listSessions: vi.fn().mockResolvedValue(success),
   reconcileSession: vi.fn().mockResolvedValue(success),
   repairSessionConfiguration: vi.fn().mockResolvedValue(success),
+  verifySessionNumber: vi.fn().mockResolvedValue(success),
 });
 
 const allLayers = (service: ProviderControlService) => {

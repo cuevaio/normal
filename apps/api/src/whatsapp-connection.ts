@@ -2,6 +2,7 @@ import type {
   LifecycleSession,
   ProviderControlResult,
   QrCodeObservation,
+  SessionNumberVerification,
   SessionReconciliation,
 } from "@whatsapp-mcp/contracts/provider-control";
 import type {
@@ -23,6 +24,11 @@ import {
   type HumanIdentityService,
 } from "./auth/human-identity";
 import { decodeBase64 } from "./base64-url";
+import {
+  ConnectionSetupProvisioningQueue,
+  type ConnectionSetupProvisioningQueueError,
+  type ConnectionSetupProvisioningQueueService,
+} from "./connection-setup-provisioning";
 import {
   type EncryptionError,
   type EnvelopeEncryption,
@@ -143,6 +149,12 @@ export interface WhatsAppConnectionPersistenceService {
     ConnectionSetupActivation | null,
     WhatsAppConnectionPersistenceError
   >;
+  readonly failSetupActivation: (input: {
+    readonly failureCode: string;
+    readonly observedAt: string;
+    readonly personalAccountId: string;
+    readonly setupId: string;
+  }) => Effect.Effect<boolean, WhatsAppConnectionPersistenceError>;
 }
 
 export const WhatsAppConnectionPersistence =
@@ -163,6 +175,10 @@ export interface WhatsAppConnectionProviderService {
   readonly reconcile: (input: {
     readonly setupMarker: string;
   }) => Effect.Effect<ProviderControlResult<SessionReconciliation>>;
+  readonly verifyNumber: (input: {
+    readonly phoneNumber: string;
+    readonly session: string;
+  }) => Effect.Effect<ProviderControlResult<SessionNumberVerification>>;
 }
 
 export const WhatsAppConnectionProvider =
@@ -192,6 +208,7 @@ export const WhatsAppConnectionIdentifiers =
   );
 
 export type WhatsAppConnectionRequirements =
+  | ConnectionSetupProvisioningQueueService
   | EnvelopeEncryption
   | HumanIdentityService
   | SafeTelemetryService
@@ -215,7 +232,10 @@ type SetupObservation =
       readonly outcome: "connecting" | "pending" | "provisioning_quarantined";
     }
   | {
-      readonly outcome: "provider_capacity_unavailable" | "provisioning_failed";
+      readonly outcome:
+        | "number_confirmation_failed"
+        | "provider_capacity_unavailable"
+        | "provisioning_failed";
     };
 
 type LifecycleObservation =
@@ -498,6 +518,61 @@ const activate = (
     );
   });
 
+const revealSetupNumber = (
+  setup: Extract<
+    ConnectionSetupActivation,
+    { readonly outcome: "provisioned" }
+  >["setup"],
+) =>
+  Effect.gen(function* () {
+    const encryption = yield* EnvelopeEncryptionService;
+    const numberBytes = yield* encryption.decrypt({
+      accountKey: setup.accountKey,
+      ciphertext: setup.numberCiphertext,
+      connectionKey: setup.setupKey,
+      context: {
+        accountId: setup.personalAccountId,
+        connectionId: setup.setupId,
+        entity: "connection-setup",
+        fieldOrObjectPurpose: "whatsapp-number",
+        recordId: setup.setupId,
+      },
+    });
+    return yield* withZeroedBytes(numberBytes, (numberPlaintext) =>
+      Effect.sync(() => {
+        const number = new TextDecoder().decode(numberPlaintext);
+        if (!/^\+[1-9]\d{7,14}$/u.test(number)) {
+          throw new WhatsAppConnectionActivationError();
+        }
+        return number;
+      }),
+    );
+  });
+
+const rejectSetupActivation = (
+  setup: Extract<
+    ConnectionSetupActivation,
+    { readonly outcome: "provisioned" }
+  >["setup"],
+  failureCode: "scanned_number_mismatch" | "scanned_number_unverified",
+) =>
+  Effect.gen(function* () {
+    const clock = yield* WhatsAppConnectionClock;
+    const persistence = yield* WhatsAppConnectionPersistence;
+    const failed = yield* persistence.failSetupActivation({
+      failureCode,
+      observedAt: yield* clock.now,
+      personalAccountId: setup.personalAccountId,
+      setupId: setup.setupId,
+    });
+    if (!failed) {
+      return yield* Effect.fail(new WhatsAppConnectionActivationError());
+    }
+    const queue = yield* ConnectionSetupProvisioningQueue;
+    yield* queue.enqueueCleanup(setup.setupId);
+    return { outcome: "number_confirmation_failed" as const };
+  });
+
 const providerValue = <Value>(
   result: ProviderControlResult<Value>,
 ): Effect.Effect<Value, WhatsAppConnectionProviderError> =>
@@ -511,11 +586,13 @@ export const observeConnectionSetup = (
 ): Effect.Effect<
   SetupObservation,
   | EncryptionError
+  | ConnectionSetupProvisioningQueueError
   | WhatsAppConnectionActivationError
   | WhatsAppConnectionNotAccessible
   | WhatsAppConnectionPersistenceError
   | WhatsAppConnectionProviderError,
   | EnvelopeEncryption
+  | ConnectionSetupProvisioningQueueService
   | WhatsAppConnectionClockService
   | WhatsAppConnectionIdentifiersService
   | WhatsAppConnectionPersistenceService
@@ -546,6 +623,13 @@ export const observeConnectionSetup = (
       ) {
         return { outcome: "provider_capacity_unavailable" };
       }
+      if (
+        loaded.outcome === "provisioning_failed" &&
+        (loaded.failureCode === "scanned_number_mismatch" ||
+          loaded.failureCode === "scanned_number_unverified")
+      ) {
+        return { outcome: "number_confirmation_failed" };
+      }
       return { outcome: loaded.outcome };
     }
 
@@ -567,6 +651,25 @@ export const observeConnectionSetup = (
       );
     }
     if (session.connectionState === "connected") {
+      const number = yield* revealSetupNumber(loaded.setup);
+      const verification = yield* providerValue(
+        yield* provider.verifyNumber({
+          phoneNumber: number,
+          session: session.session,
+        }),
+      );
+      if (verification.outcome === "mismatch") {
+        return yield* rejectSetupActivation(
+          loaded.setup,
+          "scanned_number_mismatch",
+        );
+      }
+      if (verification.outcome === "unverified") {
+        return yield* rejectSetupActivation(
+          loaded.setup,
+          "scanned_number_unverified",
+        );
+      }
       return {
         connection: yield* activate(loaded.setup, session),
         outcome: "connected",
@@ -1146,6 +1249,16 @@ export const createWhatsAppConnectionHandler =
               case "connecting":
               case "pending":
                 return stateResponse(observation.outcome, browserOrigin);
+              case "number_confirmation_failed":
+                return jsonResponse(
+                  {
+                    error: observation.outcome,
+                    message:
+                      "Retry by scanning the same WhatsApp account you entered.",
+                  },
+                  409,
+                  browserOrigin,
+                );
               case "provisioning_failed":
               case "provider_capacity_unavailable":
               case "provisioning_quarantined":

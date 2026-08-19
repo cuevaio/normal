@@ -1354,6 +1354,7 @@ export function PublicBoundaryJourney({
       if (!isCurrent()) return;
       replaceQrImage(null);
       if (
+        body.error === "number_confirmation_failed" ||
         body.error === "provider_capacity_unavailable" ||
         body.error === "provisioning_failed" ||
         body.error === "provisioning_quarantined"

@@ -4,6 +4,7 @@ import {
   HumanIdentity,
   InvalidHumanIdentity,
 } from "../src/auth/human-identity";
+import { ConnectionSetupProvisioningQueue } from "../src/connection-setup-provisioning";
 import { EnvelopeEncryptionService } from "../src/encryption/envelope";
 import {
   RestoreSafeDeletion,
@@ -65,6 +66,7 @@ const makeHarness = (
     readonly disconnectFailureState?: "connected" | "degraded" | "disconnected";
     readonly identityValid?: boolean;
     readonly initialFailureCode?: string;
+    readonly numberVerification?: "match" | "mismatch" | "unverified";
     readonly initialSetupState?:
       | "activated"
       | "pending"
@@ -75,6 +77,7 @@ const makeHarness = (
 ) => {
   const events: SafeTelemetryEvent[] = [];
   const providerCalls: string[] = [];
+  const cleanupEnqueues: string[] = [];
   const encryptedPurposes: string[] = [];
   const connections: Array<{
     displayName: string;
@@ -92,6 +95,7 @@ const makeHarness = (
   let disconnectFailed = false;
   let lifecycleClaimId: string | null = null;
   let setupState = options.initialSetupState ?? "provisioned";
+  let setupFailureCode = options.initialFailureCode ?? "unavailable";
   let lastEncryptedName = "Personal WhatsApp";
   let deletionReceipt: {
     deletionMarkerId: string;
@@ -270,13 +274,19 @@ const makeHarness = (
                 }
               : setupState === "provisioning_failed"
                 ? {
-                    failureCode: options.initialFailureCode ?? "unavailable",
+                    failureCode: setupFailureCode,
                     outcome: "provisioning_failed" as const,
                   }
                 : {
                     outcome: setupState,
                   },
       ),
+    failSetupActivation: ({ failureCode }) =>
+      Effect.sync(() => {
+        setupState = "provisioning_failed";
+        setupFailureCode = failureCode;
+        return true;
+      }),
   };
 
   const provider: WhatsAppConnectionProviderService = {
@@ -343,6 +353,14 @@ const makeHarness = (
           },
         };
       }),
+    verifyNumber: () =>
+      Effect.sync(() => {
+        providerCalls.push("verifySessionNumber");
+        return {
+          ok: true as const,
+          value: { outcome: options.numberVerification ?? "match" },
+        };
+      }),
   };
 
   const layer = Layer.mergeAll(
@@ -355,6 +373,13 @@ const makeHarness = (
     }),
     Layer.succeed(WhatsAppConnectionPersistence, persistence),
     Layer.succeed(WhatsAppConnectionProvider, provider),
+    Layer.succeed(ConnectionSetupProvisioningQueue, {
+      enqueue: () => Effect.die("not used"),
+      enqueueCleanup: (requestedSetupId) =>
+        Effect.sync(() => {
+          cleanupEnqueues.push(requestedSetupId);
+        }),
+    }),
     Layer.succeed(WhatsAppConnectionClock, {
       now: Effect.succeed("2026-07-31T12:04:00.000Z"),
     }),
@@ -442,6 +467,7 @@ const makeHarness = (
   );
 
   return {
+    cleanupEnqueues,
     connections,
     encryptedPurposes,
     events,
@@ -496,6 +522,7 @@ describe("WhatsApp Connection HTTP boundary", () => {
     expect(JSON.stringify(harness.events)).not.toContain("<svg");
     expect(JSON.stringify(harness.events)).not.toContain("cst_");
     expect(harness.connections).toEqual([]);
+    expect(harness.cleanupEnqueues).toEqual([]);
   });
 
   test("activates once from trusted connected state and lists only safe fields", async () => {
@@ -509,7 +536,10 @@ describe("WhatsApp Connection HTTP boundary", () => {
     expect(observed.status).toBe(204);
     expect(replay.status).toBe(204);
     expect(harness.connections).toHaveLength(1);
-    expect(harness.providerCalls).toEqual(["reconcileSession"]);
+    expect(harness.providerCalls).toEqual([
+      "reconcileSession",
+      "verifySessionNumber",
+    ]);
     expect(harness.encryptedPurposes).toEqual([
       "display-name",
       "provider-session-locator",
@@ -576,6 +606,65 @@ describe("WhatsApp Connection HTTP boundary", () => {
       error: "provider_capacity_unavailable",
     });
     expect(harness.providerCalls).toEqual([]);
+  });
+
+  test.each(["scanned_number_mismatch", "scanned_number_unverified"])(
+    "preserves actionable number confirmation failure for persisted %s polls",
+    async (initialFailureCode) => {
+      const harness = makeHarness({
+        initialFailureCode,
+        initialSetupState: "provisioning_failed",
+      });
+
+      const response = await harness.handler(request(qrEndpoint));
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: "number_confirmation_failed",
+        message: "Retry by scanning the same WhatsApp account you entered.",
+      });
+      expect(harness.providerCalls).toEqual([]);
+    },
+  );
+
+  test("fails closed when the scanned WhatsApp account does not match the reserved number", async () => {
+    const harness = makeHarness({ numberVerification: "mismatch" });
+    harness.scanQr();
+
+    const response = await harness.handler(request(qrEndpoint));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "number_confirmation_failed",
+      message: "Retry by scanning the same WhatsApp account you entered.",
+    });
+    expect(harness.connections).toEqual([]);
+    expect(harness.cleanupEnqueues).toEqual([setupId]);
+    expect(harness.providerCalls).toEqual([
+      "reconcileSession",
+      "verifySessionNumber",
+    ]);
+    expect(JSON.stringify(harness.events)).not.toContain("+15550123456");
+    expect(JSON.stringify(harness.providerCalls)).not.toContain("wsl_");
+  });
+
+  test("fails closed when provider identity evidence is unavailable", async () => {
+    const harness = makeHarness({ numberVerification: "unverified" });
+    harness.scanQr();
+
+    const response = await harness.handler(request(qrEndpoint));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "number_confirmation_failed",
+      message: "Retry by scanning the same WhatsApp account you entered.",
+    });
+    expect(harness.connections).toEqual([]);
+    expect(harness.cleanupEnqueues).toEqual([setupId]);
+    expect(harness.providerCalls).toEqual([
+      "reconcileSession",
+      "verifySessionNumber",
+    ]);
   });
 
   test("makes deletion immediately terminal and idempotent at the authenticated boundary", async () => {

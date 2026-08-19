@@ -42,6 +42,7 @@ const makeLifecycle = (
   reconcileSession: () =>
     Effect.succeed({ outcome: "present", session: lifecycleSession }),
   repairSessionConfiguration: () => Effect.succeed(lifecycleSession),
+  verifySessionNumber: () => Effect.succeed({ outcome: "match" as const }),
   ...overrides,
 });
 
@@ -105,6 +106,32 @@ describe("provider-control RPC authority", () => {
 
     expect(result.ok).toBe(true);
     expect(reconciledWebhookEndpoint).toBe(webhookUrl);
+  });
+
+  test("passes the expected number into session verification without exposing it in telemetry", async () => {
+    let verifiedPhoneNumber: string | null = null;
+    const events: ProviderControlRpcTelemetryEvent[] = [];
+    const rpc = makeProviderControlRpc({
+      loadLifecycle: async () =>
+        makeLifecycle({
+          verifySessionNumber: ({ phoneNumber }) => {
+            verifiedPhoneNumber = Redacted.value(phoneNumber);
+            return Effect.succeed({ outcome: "mismatch" as const });
+          },
+        }),
+      telemetry: (event) => {
+        events.push(event);
+      },
+    });
+
+    const result = await rpc.verifySessionNumber({
+      phoneNumber: "+15550123456",
+      session: lifecycleSession.session,
+    });
+
+    expect(result).toEqual({ ok: true, value: { outcome: "mismatch" } });
+    expect(verifiedPhoneNumber).toBe("+15550123456");
+    expect(JSON.stringify(events)).not.toContain("+15550123456");
   });
 
   test("rejects excess properties without constructing production authority", async () => {
@@ -306,16 +333,28 @@ describe("provider-control RPC authority", () => {
       loadLifecycle: async () => makeLifecycle(),
     });
 
-    const [connected, disconnected, listed, qr, reconciled, repaired, deleted] =
-      await Promise.all([
-        rpc.connectSession({ session: lifecycleSession.session }),
-        rpc.disconnectSession({ session: lifecycleSession.session }),
-        rpc.listSessions({ setupMarker }),
-        rpc.getQrCode({ session: lifecycleSession.session }),
-        rpc.reconcileSession({ setupMarker }),
-        rpc.repairSessionConfiguration({ setupMarker, webhookUrl }),
-        rpc.deleteSession({ session: lifecycleSession.session }),
-      ]);
+    const [
+      connected,
+      disconnected,
+      listed,
+      qr,
+      reconciled,
+      repaired,
+      verified,
+      deleted,
+    ] = await Promise.all([
+      rpc.connectSession({ session: lifecycleSession.session }),
+      rpc.disconnectSession({ session: lifecycleSession.session }),
+      rpc.listSessions({ setupMarker }),
+      rpc.getQrCode({ session: lifecycleSession.session }),
+      rpc.reconcileSession({ setupMarker }),
+      rpc.repairSessionConfiguration({ setupMarker, webhookUrl }),
+      rpc.verifySessionNumber({
+        phoneNumber: "+15550123456",
+        session: lifecycleSession.session,
+      }),
+      rpc.deleteSession({ session: lifecycleSession.session }),
+    ]);
 
     expect(connected.ok).toBe(true);
     expect(repaired.ok).toBe(true);
@@ -339,6 +378,7 @@ describe("provider-control RPC authority", () => {
       value: { state: "not_available" },
     });
     expect(reconciled.ok).toBe(true);
+    expect(verified).toEqual({ ok: true, value: { outcome: "match" } });
     expect(deleted).toEqual({
       ok: true,
       value: { state: "absent" },

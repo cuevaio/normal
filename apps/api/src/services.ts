@@ -122,6 +122,7 @@ export interface ConnectionSetupQrCompletedEvent {
   readonly outcome:
     | "connected"
     | "connecting"
+    | "number_confirmation_failed"
     | "pending"
     | "provider_capacity_unavailable"
     | "provisioning_failed"

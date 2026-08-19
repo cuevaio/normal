@@ -75,6 +75,7 @@ describe("first-connection onboarding verification prompt", () => {
             displayName: "Personal WhatsApp",
             numberSuffix: "3456",
             retentionDays: 30,
+            state: "connected",
           }}
           getToken={async () => null}
           initialProfile={{

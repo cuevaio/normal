@@ -5,6 +5,7 @@ import type {
   ReconcileSessionRequest,
   RepairSessionConfigurationRequest,
   SessionRequest,
+  VerifySessionNumberRequest,
 } from "@whatsapp-mcp/contracts/provider-control";
 import {
   createProductionHandler,
@@ -49,5 +50,9 @@ export default class ProviderControl extends WorkerEntrypoint<Env> {
 
   repairSessionConfiguration(request: RepairSessionConfigurationRequest) {
     return createProductionRpc(this.env).repairSessionConfiguration(request);
+  }
+
+  verifySessionNumber(request: VerifySessionNumberRequest) {
+    return createProductionRpc(this.env).verifySessionNumber(request);
   }
 }

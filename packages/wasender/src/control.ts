@@ -74,6 +74,17 @@ export type QrCodeObservation =
       readonly state: "available";
     };
 
+export type SessionNumberVerification =
+  | {
+      readonly outcome: "match";
+    }
+  | {
+      readonly outcome: "mismatch";
+    }
+  | {
+      readonly outcome: "unverified";
+    };
+
 export interface SessionDeletionObservation {
   /**
    * A present result requires another reconciliation before delete is repeated.
@@ -103,6 +114,10 @@ export interface SessionLifecycle {
   readonly getQrCode: (request: {
     readonly session: LifecycleSessionLocator;
   }) => AdapterEffect<QrCodeObservation>;
+  readonly verifySessionNumber: (request: {
+    readonly phoneNumber: WhatsAppNumber;
+    readonly session: LifecycleSessionLocator;
+  }) => AdapterEffect<SessionNumberVerification>;
   readonly reconcileSession: (request: {
     readonly setupMarker: SetupMarker;
     readonly webhookEndpoint?: WebhookEndpoint | undefined;

@@ -326,6 +326,122 @@ describe("WhatsApp Connection repository", () => {
     ]);
   });
 
+  test("fails activation closed, retains the number reservation, and allows retry only after cleanup completes", async () => {
+    const connections = makeWhatsAppConnectionRepository(provider);
+    const setups = makeConnectionSetupRepository(provider);
+
+    await expect(
+      connections.failSetupActivation({
+        failureCode: "scanned_number_mismatch",
+        observedAt: connectedAt,
+        personalAccountId: accountA,
+        setupId,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      connections.loadSetupForActivation({
+        clerkUserId: "user_connectiona",
+        observedAt: connectedAt,
+        setupId,
+      }),
+    ).resolves.toEqual({
+      failureCode: "scanned_number_mismatch",
+      outcome: "provisioning_failed",
+    });
+
+    const retained = await database.query<{
+      cleanup_state: string;
+      connection_count: number;
+      reservation_count: number;
+      setup_state: string;
+    }>(
+      `
+      SELECT
+        (SELECT cleanup_state FROM public.connection_setups WHERE id = $1) AS cleanup_state,
+        (SELECT count(*)::integer FROM public.whatsapp_connections) AS connection_count,
+        (SELECT count(*)::integer FROM public.whatsapp_number_reservations WHERE released_at IS NULL) AS reservation_count,
+        (SELECT state FROM public.connection_setups WHERE id = $1) AS setup_state
+    `,
+      [setupId],
+    );
+    expect(retained.rows).toEqual([
+      {
+        cleanup_state: "pending",
+        connection_count: 0,
+        reservation_count: 1,
+        setup_state: "provisioning_failed",
+      },
+    ]);
+
+    await expect(
+      setups.claimCleanup({
+        claimedAt: "2026-07-31T12:04:30.000Z",
+        setupId,
+        workerId: "cscw_0000000000000000000000000000000000000000031",
+      }),
+    ).resolves.toEqual({ outcome: "claimed" });
+    await expect(
+      setups.renewCleanupLease({
+        observedAt: "2026-07-31T12:04:30.500Z",
+        setupId,
+        workerId: "cscw_0000000000000000000000000000000000000000031",
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      setups.releaseCleanupLease({
+        failureCode: "timed_out",
+        observedAt: "2026-07-31T12:04:31.000Z",
+        setupId,
+        workerId: "cscw_0000000000000000000000000000000000000000031",
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      setups.claimCleanup({
+        claimedAt: "2026-07-31T12:04:31.500Z",
+        setupId,
+        workerId: "cscw_0000000000000000000000000000000000000000032",
+      }),
+    ).resolves.toEqual({ outcome: "claimed" });
+    await expect(
+      setups.finishCleanup({
+        observedAt: "2026-07-31T12:04:32.000Z",
+        setupId,
+        workerId: "cscw_0000000000000000000000000000000000000000032",
+      }),
+    ).resolves.toBe(true);
+
+    await expect(
+      setups.start({
+        accountKey: {
+          ciphertext: "AQID",
+          keyVersion: 1,
+          kmsKeyId: "arn:aws:kms:us-east-1:111122223333:key/content-root-key",
+          personalAccountId: accountA,
+          version: 1,
+        },
+        connectionKeyCiphertext: new Uint8Array(32).fill(30),
+        connectionKeyNonce: new Uint8Array(12).fill(31),
+        connectionKeyVersion: 1,
+        createdAt: "2026-07-31T12:05:00.000Z",
+        displayNameCiphertext: new Uint8Array(32).fill(32),
+        displayNameCiphertextNonce: new Uint8Array(12).fill(33),
+        displayNameCiphertextVersion: 1,
+        displayNameKeyVersion: 1,
+        idempotencyKey: "123456789012345678932",
+        numberCiphertext: new Uint8Array(32).fill(34),
+        numberCiphertextNonce: new Uint8Array(12).fill(35),
+        numberCiphertextVersion: 1,
+        numberKeyVersion: 1,
+        numberToken: new Uint8Array(32).fill(7),
+        personalAccountId: accountA,
+        setupId: "cst_000000000000000000099",
+      }),
+    ).resolves.toMatchObject({
+      outcome: "created",
+      setup: { state: "provisioning_pending" },
+    });
+  });
+
   test("rejects activation when the ingress does not belong to the Setup", async () => {
     const repository = makeWhatsAppConnectionRepository(provider);
 

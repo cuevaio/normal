@@ -131,8 +131,15 @@
     {
       "idx": 18,
       "version": "7",
-      "when": 1787115601000,
-      "tag": "0018_allow_api_keys_on_mcp",
+      "when": 1787119200000,
+      "tag": "0018_reject_mismatched_qr_activation",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787119201000,
+      "tag": "0019_allow_api_keys_on_mcp",
       "breakpoints": true
     }
   ]

@@ -328,6 +328,61 @@ describe("public-boundary Worker harness", () => {
     });
   });
 
+  test("rejects a QR scan from a different WhatsApp number without activating a Connection", async () => {
+    const started = await exports.default.fetch(
+      new Request("https://api.example.test/v1/connection-setups", {
+        body: JSON.stringify({
+          idempotency_key: "423456789012345678901",
+          name: "Work WhatsApp",
+          whatsapp_number: "+1 (555) 012-3457",
+        }),
+        headers: {
+          authorization: "Bearer signed-test-user",
+          "content-type": "application/json",
+          origin: "http://127.0.0.1:3000",
+        },
+        method: "POST",
+      }),
+    );
+    const body = (await started.json()) as {
+      readonly connection_setup: { readonly id: string };
+    };
+
+    const qrRequest = () =>
+      new Request(
+        `https://api.example.test/v1/connection-setups/${body.connection_setup.id}/qr`,
+        {
+          headers: {
+            authorization: "Bearer signed-test-user",
+            origin: "http://127.0.0.1:3000",
+          },
+        },
+      );
+    const qr = await exports.default.fetch(qrRequest());
+    const rejected = await exports.default.fetch(qrRequest());
+    const listed = await exports.default.fetch(
+      new Request("https://api.example.test/v1/whatsapp-connections", {
+        headers: {
+          authorization: "Bearer signed-test-user",
+          origin: "http://127.0.0.1:3000",
+        },
+      }),
+    );
+
+    expect(qr.status).toBe(200);
+    expect(qr.headers.get("content-type")).toBe("image/svg+xml");
+    expect(rejected.status).toBe(409);
+    expect(await rejected.json()).toEqual({
+      error: "number_confirmation_failed",
+      message: "Retry by scanning the same WhatsApp account you entered.",
+    });
+    expect(await listed.json()).not.toMatchObject({
+      whatsapp_connections: expect.arrayContaining([
+        expect.objectContaining({ number_suffix: "3457" }),
+      ]),
+    });
+  });
+
   test("bootstraps another Clerk-authenticated User without a provider reservation", async () => {
     const response = await exports.default.fetch(
       new Request("https://api.example.test/v1/personal-account/bootstrap", {

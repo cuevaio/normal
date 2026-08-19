@@ -218,6 +218,7 @@ let providerConnectionState:
   | "disconnected"
   | "reconnect_required"
   | "degraded" = "disconnected";
+const activationFailureCodes = new Map<string, string>();
 let lifecycleClaimId: string | null = null;
 let connectionDeletionReceipt: {
   readonly deletionMarkerId: string;
@@ -250,6 +251,7 @@ const whatsAppConnections: Array<{
   displayName: string;
   numberSuffix: string;
   publicId: string;
+  setupId: string;
   state:
     | "connected"
     | "connecting"
@@ -1322,7 +1324,9 @@ const makeTestLayer = (
     Layer.succeed(WhatsAppConnectionPersistence, {
       activate: (input) =>
         Effect.sync(() => {
-          const existing = whatsAppConnections[0];
+          const existing = whatsAppConnections.find(
+            (candidate) => candidate.setupId === input.setupId,
+          );
           if (existing !== undefined) return protectedTestConnection(existing);
           const connection = {
             displayName:
@@ -1331,6 +1335,7 @@ const makeTestLayer = (
               )?.displayName ?? "Test WhatsApp",
             numberSuffix: input.numberSuffix,
             publicId: input.publicId,
+            setupId: input.setupId,
             state: "connected" as const,
             stateChangedAt: input.connectedAt,
           };
@@ -1501,10 +1506,16 @@ const makeTestLayer = (
               entry.setup.setupId === setupId,
           );
           if (!exists) return null;
-          const connection =
-            clerkUserId === "user_test_public_boundary"
-              ? whatsAppConnections[0]
-              : undefined;
+          const failureCode = activationFailureCodes.get(setupId);
+          if (failureCode !== undefined) {
+            return {
+              failureCode,
+              outcome: "provisioning_failed" as const,
+            };
+          }
+          const connection = whatsAppConnections.find(
+            (candidate) => candidate.setupId === setupId,
+          );
           if (connection !== undefined) {
             return {
               connection: protectedTestConnection(connection),
@@ -1551,6 +1562,11 @@ const makeTestLayer = (
               webhookIngressId: "30000000-0000-4000-8000-000000000018",
             },
           };
+        }),
+      failSetupActivation: ({ failureCode, setupId }) =>
+        Effect.sync(() => {
+          activationFailureCodes.set(setupId, failureCode);
+          return true;
         }),
     }),
     Layer.succeed(WhatsAppConnectionProvider, {
@@ -1618,6 +1634,16 @@ const makeTestLayer = (
                 connectionState: providerConnectionState,
                 session,
               },
+            },
+          };
+        }),
+      verifyNumber: ({ phoneNumber }) =>
+        Effect.sync(() => {
+          providerObservations.push("verifySessionNumber");
+          return {
+            ok: true as const,
+            value: {
+              outcome: phoneNumber === "+15550123456" ? "match" : "mismatch",
             },
           };
         }),

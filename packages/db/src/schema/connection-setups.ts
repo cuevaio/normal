@@ -183,7 +183,7 @@ export const connectionSetupsInApp = publicSchema.table(
     ),
     check(
       "connection_setup_cleanup_state_matches_terminal",
-      sql`(state = ANY (ARRAY['cancelled'::text, 'expired'::text])) = (cleanup_state IS NOT NULL)`,
+      sql`((cleanup_state IS NULL) OR (state = ANY (ARRAY['cancelled'::text, 'expired'::text, 'provisioning_failed'::text]))) AND ((state <> ALL (ARRAY['cancelled'::text, 'expired'::text])) OR (cleanup_state IS NOT NULL))`,
     ),
     check(
       "connection_setup_cleanup_lease_complete",

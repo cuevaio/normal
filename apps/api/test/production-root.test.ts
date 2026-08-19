@@ -87,6 +87,20 @@ describe("API production root", () => {
     expect(response.status).toBe(503);
   });
 
+  test("fails closed when the provider-control binding cannot verify a number", async () => {
+    const environment = validEnvironment();
+    const {
+      verifySessionNumber: _missing,
+      ...providerControlWithoutVerification
+    } = environment.PROVIDER_CONTROL;
+    const response = await createProductionHandler({
+      ...environment,
+      PROVIDER_CONTROL: providerControlWithoutVerification,
+    })(new Request("https://api.example.test/health"));
+
+    expect(response.status).toBe(503);
+  });
+
   test("fails closed when Stored Media cannot start multipart uploads", async () => {
     const environment = validEnvironment();
     const { createMultipartUpload: _missing, ...storedMediaWithoutMultipart } =
