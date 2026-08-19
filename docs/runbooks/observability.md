@@ -35,6 +35,48 @@ Confirm the `alert-delivery-canary` arrives in the ticket destination with only 
 - REST `rest.operation.completed` is an allowlisted Worker telemetry event with
   only operation name, outcome, optional result count, and service. Do not add
   credentials, search terms, message content, raw bodies, or tenant identifiers.
+- Connection Setup timing uses privacy-safe transition events. Anonymous
+  browser `connection_setup_timing_recorded` events measure
+  `start_to_code_observed` and `code_observed_to_active_observed` once per flow.
+  API `connection_setup.provision.claimed.queueDelayMs` measures durable setup
+  creation to its persisted first Neon claim, while
+  `connection_setup.provision.completed.durationMs` measures that first claim
+  to a committed terminal provisioning transition. Retry events carry no
+  duration, and a legacy in-flight setup without a persisted first claim emits
+  no fabricated sample. `provider_control.rpc.completed.durationMs`, grouped by
+  method, measures the private control boundary. `provider.call.completed`,
+  grouped by operation, measures Wasender attempts; safe-read calls are the
+  Wasender component of reconciliation. None may include identifiers, numbers,
+  names, code payloads, or provider session values.
+
+## Connection Setup performance verification
+
+The committed deterministic scheduler regression is the only locally asserted
+percentile. Run `bun test test/connection-setup-observation.test.ts` from
+`apps/web`; its fixed 18-transition corpus reports the documented before/after
+values and enforces p95 first-party observation lag at or below 750 ms. It does
+not emulate Wasender or WhatsApp and must not be presented as an end-to-end
+production baseline.
+
+After deployment, query a minimum seven complete days with at least 100
+successful Connection Setups. Compute p50/p95/p99 separately for each browser
+phase and each Worker event/field above, grouping only by phase, event, method,
+operation, normalized outcome, and service. Filter provisioning duration to
+terminal `provisioned`, `quarantined`, and `failed` outcomes because retries
+intentionally have no duration. Compare aggregate first-claim and terminal
+counts with successful setup counts to detect duplicate or missing transition
+samples; do not join on or add a setup, User, tenant, number, or provider
+identifier. Record sample count, environment, release commit, window, and the
+three percentiles in the release evidence. Browser phases provide the
+observable end-to-end distributions; Worker, provider-control, and Wasender
+distributions attribute aggregate components and must not be added together as
+if independently sampled percentiles belonged to the same setup.
+
+Provider-dependent end-to-end p50/p95/p99 cannot be asserted from local fake
+provider runs. Platform Operations must use that production baseline to propose
+and approve total start-to-code and code-to-active targets. Until then, only the
+750 ms p95 first-party observation target is approved; Wasender and WhatsApp
+time remains reported separately and has no invented objective.
 - API Key retention telemetry is limited to `api_key.retention.completed`, the
   bounded expired and purged counts, and the API service name. Do not add
   handles, names, hints, digests, credentials, or tenant identifiers.

@@ -630,4 +630,71 @@ describe("Deletion Capsules", () => {
     expect(storage.objects.size).toBe(1);
     expect(storage.deleteCount()).toBe(0);
   });
+
+  test("retains failed cleanup for retry and eventually completes idempotently", async () => {
+    const storage = makeBucket();
+    const markerId = "1".repeat(64);
+    const capsules = makeDeletionCapsuleStore({
+      bucket: storage.bucket,
+      environment: "production",
+      keyId: "arn:aws:kms:us-east-1:111122223333:key/deletion-coordinator-key",
+      kmsWriter: {
+        encrypt: () => Effect.succeed(new Uint8Array([1, 2, 3])),
+      },
+    });
+    await Effect.runPromise(
+      capsules.create({
+        deletionMarkerId: markerId,
+        keyVersion: 1,
+        providerCleanupIdentifiers: {
+          sessionLocator: "wsl_retry-until-absent",
+        },
+      }),
+    );
+    let providerAttempts = 0;
+    let absenceConfirmations = 0;
+    const coordinator = makeDeletionCapsuleCoordinator({
+      capsuleStore: capsules,
+      kmsReader: {
+        decrypt: () =>
+          Effect.succeed(
+            new TextEncoder().encode(
+              JSON.stringify({
+                providerCleanupIdentifiers: {
+                  sessionLocator: "wsl_retry-until-absent",
+                },
+                version: 1,
+              }),
+            ),
+          ),
+      },
+      confirmProviderAbsence: () => {
+        absenceConfirmations += 1;
+        return Effect.succeed({ state: "complete" as const });
+      },
+      reconcileProviderAbsence: () => {
+        providerAttempts += 1;
+        return providerAttempts === 1
+          ? Effect.fail(new Error("provider unavailable"))
+          : Effect.succeed({ state: "absent" as const });
+      },
+    });
+
+    await expect(
+      Effect.runPromise(coordinator.reconcile({ deletionMarkerId: markerId })),
+    ).rejects.toThrow();
+    expect(storage.objects.size).toBe(1);
+    expect(storage.deleteCount()).toBe(0);
+
+    await expect(
+      Effect.runPromise(coordinator.reconcile({ deletionMarkerId: markerId })),
+    ).resolves.toEqual({ state: "complete" });
+    await expect(
+      Effect.runPromise(coordinator.reconcile({ deletionMarkerId: markerId })),
+    ).resolves.toEqual({ state: "complete" });
+    expect(providerAttempts).toBe(2);
+    expect(absenceConfirmations).toBe(1);
+    expect(storage.objects.size).toBe(0);
+    expect(storage.deleteCount()).toBe(1);
+  });
 });

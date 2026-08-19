@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { captureProductAnalyticsEvent } from "../effect/product-analytics";
 import { McpConnectionGuides } from "./mcp-connection-guides";
@@ -102,6 +103,8 @@ interface FirstConnectionConnection {
   readonly retentionDays: number | null;
 }
 
+type VerificationClient = Extract<IntendedMcpClient, "claude" | "chatgpt">;
+
 interface ProfileDraft {
   readonly primaryUseCase: PrimaryUseCase | "";
   readonly whatsappUsageContext: WhatsAppUsageContext | "";
@@ -140,6 +143,7 @@ interface FirstConnectionOnboardingProps {
   readonly mcpServerUrl: string;
   readonly onboardingProfileEndpoint: string;
   readonly onComplete: () => void;
+  readonly onProfileSaved: (profile: OnboardingProfile) => void;
   readonly setupForm: Omit<ConnectionSetupFormProps, "idPrefix" | "layout">;
 }
 
@@ -396,6 +400,136 @@ function canCancelSetup(
   );
 }
 
+function isConnectionSetupLoadingState(
+  setupState: ConnectionSetupState,
+): boolean {
+  return (
+    setupState === "loading" ||
+    setupState === "pending" ||
+    setupState === "replayed" ||
+    setupState === "connecting"
+  );
+}
+
+function connectionSetupPanelCopy(
+  setupState: ConnectionSetupState,
+  cleanupState: ConnectionSetupCleanupState | null,
+): {
+  readonly body: string;
+  readonly hint: string;
+  readonly title: string;
+} | null {
+  if (setupState === "loading") {
+    return {
+      body: "Normal is starting your Connection Setup and reserving space for the QR step.",
+      hint: "Keep this page open while the setup starts.",
+      title: "Starting Connection Setup",
+    };
+  }
+  if (setupState === "pending") {
+    return {
+      body: "Your Connection Setup is active. The QR code will appear here as soon as it is ready.",
+      hint: "If this takes too long, you can cancel setup below and try again.",
+      title: "Preparing your QR code",
+    };
+  }
+  if (setupState === "replayed") {
+    return {
+      body: "This Connection Setup was already started. Normal is waiting for the current QR code.",
+      hint: "Leave this page open or cancel setup below if you want to restart.",
+      title: "Resuming Connection Setup",
+    };
+  }
+  if (setupState === "connecting") {
+    return {
+      body: "The QR code was scanned. Keep WhatsApp open on your phone while the connection finishes.",
+      hint: "This area updates automatically when WhatsApp finishes linking.",
+      title: "Waiting for WhatsApp",
+    };
+  }
+  if (setupState === "provider_capacity_unavailable") {
+    return {
+      body: "WhatsApp Connection capacity is temporarily unavailable for new setups.",
+      hint: "Please try again later.",
+      title: "Temporarily unavailable",
+    };
+  }
+  if (setupState === "provisioning_failed") {
+    return {
+      body: "Normal could not finish preparing this Connection Setup before the QR step.",
+      hint: "Cancel setup below, then start again to request a fresh QR code.",
+      title: "Connection Setup could not be prepared",
+    };
+  }
+  if (setupState === "provisioning_quarantined") {
+    return {
+      body: "This Connection Setup needs support review before Normal can continue.",
+      hint: "Please contact support if you still need help connecting.",
+      title: "Connection Setup needs review",
+    };
+  }
+  if (setupState === "cancelling") {
+    return {
+      body: "Normal is cancelling this Connection Setup and removing its temporary resources.",
+      hint: "You can start again after cancellation finishes.",
+      title: "Cancelling Connection Setup",
+    };
+  }
+  if (setupState === "cancelled") {
+    return {
+      body:
+        cleanupState === "complete"
+          ? "This Connection Setup was cancelled and cleanup is complete."
+          : cleanupState === "retrying"
+            ? "This Connection Setup was cancelled and cleanup is retrying."
+            : "This Connection Setup was cancelled and cleanup is still in progress.",
+      hint: "Use Start again to request a new QR code when you are ready.",
+      title: "Connection Setup cancelled",
+    };
+  }
+  if (setupState === "expired") {
+    return {
+      body:
+        cleanupState === "complete"
+          ? "This QR code expired before WhatsApp finished linking. Cleanup is complete."
+          : cleanupState === "retrying"
+            ? "This QR code expired before WhatsApp finished linking. Cleanup is retrying."
+            : "This QR code expired before WhatsApp finished linking. Cleanup is still in progress.",
+      hint: "Use Start again to request a fresh QR code.",
+      title: "Connection Setup expired",
+    };
+  }
+  if (setupState === "number_unavailable") {
+    return {
+      body: "That WhatsApp Number is already reserved by another Connection Setup or WhatsApp Connection.",
+      hint: "Enter a different WhatsApp Number and continue.",
+      title: "WhatsApp Number unavailable",
+    };
+  }
+  if (setupState === "connection_limit_reached") {
+    return {
+      body: "Your Personal Account already has three active setup or Connection slots.",
+      hint: "Delete or finish another setup before starting a new one.",
+      title: "Connection limit reached",
+    };
+  }
+  if (setupState === "invalid") {
+    return {
+      body: "Enter a valid international WhatsApp Number to continue.",
+      hint: "Include the country code, for example +51.",
+      title: "Check the WhatsApp Number",
+    };
+  }
+  if (setupState === "unavailable") {
+    return {
+      body: "Normal cannot continue this Connection Setup right now.",
+      hint: "Use Start again or try again later.",
+      title: "Connection Setup unavailable",
+    };
+  }
+  return null;
+}
+
 function SelectField({
   description,
   id,
@@ -472,6 +606,153 @@ function CopyServerUrl({ serverUrl }: { readonly serverUrl: string }) {
   );
 }
 
+function CopyPrompt({
+  ariaLabel,
+  label,
+  value,
+}: {
+  readonly ariaLabel: string;
+  readonly label: string;
+  readonly value: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(value);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  return (
+    <div className="rounded-xl border bg-muted/25 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <Button
+          aria-label={ariaLabel}
+          onClick={copy}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+        >
+          {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+        </Button>
+      </div>
+      <pre className="mt-3 whitespace-pre-wrap text-sm leading-6">{value}</pre>
+    </div>
+  );
+}
+
+export function buildVerificationPromptCopy(
+  client: VerificationClient,
+  connection: FirstConnectionConnection,
+) {
+  const clientName = client === "claude" ? "Claude" : "ChatGPT";
+  const invocation =
+    client === "claude" ? "Usa Normal" : "Usa el conector Normal";
+  const authorizationHelpClient = client === "claude" ? "Claude" : "ChatGPT";
+
+  const spanishPrompt = `${invocation} para verificar, solo en modo de lectura, que puedes ver mi conexión de WhatsApp llamada "${connection.displayName}" terminada en ${connection.numberSuffix}. Responde solo con el nombre visible y el sufijo del número; nunca muestres el número completo. Si Normal no aparece, dímelo y recuérdame revisar la autorización de ${authorizationHelpClient}. Si Normal aparece pero esta conexión activa no está en los resultados, recuérdame modificar o crear una autorización MCP que la seleccione explícitamente. Recomienda reconectarla en Normal solo si aparece como no disponible. No envíes mensajes ni pidas permisos adicionales.`;
+
+  const englishPrompt = `Use Normal for a read-only check that you can see my WhatsApp Connection named "${connection.displayName}" ending in ${connection.numberSuffix}. Reply with the display name and the number suffix only, never the full number. If Normal is unavailable, tell me and remind me to review the ${authorizationHelpClient} authorization. If Normal is available but this active connection is missing from the results, remind me to revise or create an MCP Authorization that explicitly selects it. Recommend reconnecting it in Normal only if it is listed as unavailable. Do not send messages or request any additional permissions.`;
+
+  return {
+    clientName,
+    englishPrompt,
+    expectedEnglishResponse: `${connection.displayName}, number ending in ${connection.numberSuffix}.`,
+    expectedSpanishResponse: `${connection.displayName}, número terminado en ${connection.numberSuffix}.`,
+    missingConnectionHelp:
+      "If Normal is enabled but this active WhatsApp Connection is missing from the results, revise the existing MCP Authorization or create a new one that explicitly selects this connection.",
+    missingToolHelp: `If ${clientName} says Normal is unavailable, reopen MCP Authorization and confirm that this WhatsApp Connection is selected for ${clientName}.`,
+    spanishPrompt,
+    unavailableConnectionHelp:
+      "Reconnect in Normal only when the WhatsApp Connection is listed but its lifecycle state is unavailable.",
+  };
+}
+
+function VerificationPromptCard({
+  client,
+  connection,
+}: {
+  readonly client: VerificationClient;
+  readonly connection: FirstConnectionConnection;
+}) {
+  const copy = buildVerificationPromptCopy(client, connection);
+
+  return (
+    <section
+      className="rounded-2xl bg-background p-5 ring-1 ring-border"
+      data-testid="mcp-verification-prompt"
+    >
+      <p className="text-sm font-medium text-muted-foreground">
+        First-run verification
+      </p>
+      <h3 className="mt-1 text-lg font-semibold tracking-tight">
+        Verify {copy.clientName} can see this WhatsApp Connection
+      </h3>
+      <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+        Paste this before any broader read request or send. It performs a
+        read-only connection check and asks for display name plus number suffix
+        only.
+      </p>
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <CopyPrompt
+          ariaLabel={`Copy ${copy.clientName} verification prompt in Spanish`}
+          label="Spanish prompt"
+          value={copy.spanishPrompt}
+        />
+        <CopyPrompt
+          ariaLabel={`Copy ${copy.clientName} verification prompt in English`}
+          label="English equivalent"
+          value={copy.englishPrompt}
+        />
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div className="rounded-xl bg-muted/40 p-4 text-sm leading-6">
+          <p className="font-medium">Expected response</p>
+          <p className="mt-2 text-muted-foreground">
+            The reply should mention <strong>{connection.displayName}</strong>{" "}
+            and suffix <strong>{connection.numberSuffix}</strong> only, never
+            the full WhatsApp Number.
+          </p>
+          <p className="mt-2 text-muted-foreground">
+            Example: {copy.expectedSpanishResponse}
+          </p>
+          <p className="text-muted-foreground">
+            English: {copy.expectedEnglishResponse}
+          </p>
+        </div>
+        <div className="rounded-xl bg-muted/40 p-4 text-sm leading-6">
+          <p className="font-medium">If the tool or connection is missing</p>
+          <p className="mt-2 text-muted-foreground">{copy.missingToolHelp}</p>
+          <p className="mt-2 text-muted-foreground">
+            {copy.missingConnectionHelp}
+          </p>
+          <p className="mt-2 text-muted-foreground">
+            {copy.unavailableConnectionHelp}
+          </p>
+          <p className="mt-2 text-muted-foreground">
+            Use{" "}
+            <a
+              className="underline underline-offset-4"
+              href="/dashboard/authorizations"
+            >
+              MCP Authorizations
+            </a>{" "}
+            for access review and{" "}
+            <a
+              className="underline underline-offset-4"
+              href="/dashboard/connections"
+            >
+              WhatsApp Connections
+            </a>{" "}
+            for reconnection help.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function ConnectionSetupForm({
   connectionName,
   idPrefix,
@@ -490,6 +771,11 @@ export function ConnectionSetupForm({
   const connectionNameId = `${idPrefix}-connection-name`;
   const whatsappNumberId = `${idPrefix}-whatsapp-number`;
   const inputsDisabled = setupState === "loading" || setupId !== null;
+  const statusText = connectionSetupStatusText(setupState, setupCleanupState);
+  const panelCopy = connectionSetupPanelCopy(setupState, setupCleanupState);
+  const showSetupPanel = setupState !== "idle";
+  const showLoadingPanel = isConnectionSetupLoadingState(setupState);
+  const showSetupVisual = qrImageUrl !== null || showLoadingPanel;
   const fields = (
     <>
       <FieldGroup>
@@ -528,35 +814,91 @@ export function ConnectionSetupForm({
           </FieldDescription>
         </Field>
       </FieldGroup>
-      {setupState === "idle" ? null : (
-        <p
-          aria-live="polite"
-          className="rounded-lg bg-muted px-3 py-2.5 text-sm text-muted-foreground"
-          data-testid="connection-setup-status"
-        >
-          {connectionSetupStatusText(setupState, setupCleanupState)}
-        </p>
-      )}
-      {qrImageUrl === null ? null : (
-        <div className="grid gap-5 sm:grid-cols-[auto_1fr] sm:items-center">
-          {/* The object URL is created from the authenticated, non-persisted
-          SVG response and is revoked as soon as setup completes. */}
-          {/* biome-ignore lint/performance/noImgElement: QR bytes are already a complete generated SVG. */}
-          <img
-            alt="Scan this WhatsApp QR code"
-            className="size-64 self-center rounded-lg bg-background p-3 ring-1 ring-border"
-            src={qrImageUrl}
-          />
-          <div>
-            <p className="font-medium">Scan with WhatsApp</p>
-            <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6 text-muted-foreground">
-              <li>Open WhatsApp on your phone.</li>
-              <li>Open Settings, then Linked Devices.</li>
-              <li>Choose Link a Device and scan this QR code.</li>
-            </ol>
+      {showSetupPanel ? (
+        <>
+          <p aria-atomic="true" aria-live="polite" className="sr-only">
+            {statusText}
+          </p>
+          <div
+            className={`grid gap-5 rounded-2xl border bg-muted/20 p-4 ${showSetupVisual ? "sm:grid-cols-[auto_1fr] sm:items-center" : ""}`}
+            data-testid="connection-setup-panel"
+          >
+            {showSetupVisual ? (
+              <div className="flex justify-center sm:justify-start">
+                {qrImageUrl === null ? (
+                  <div
+                    aria-hidden="true"
+                    className="flex size-64 items-center justify-center rounded-xl bg-background p-4 ring-1 ring-border"
+                    data-testid="connection-setup-loading-placeholder"
+                  >
+                    <div className="flex w-full flex-col gap-3">
+                      <Skeleton className="aspect-square w-full rounded-lg motion-reduce:animate-none" />
+                      <Skeleton className="h-4 w-2/3 motion-reduce:animate-none" />
+                      <Skeleton className="h-4 w-5/6 motion-reduce:animate-none" />
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* The object URL is created from the authenticated, non-persisted
+                  SVG response and is revoked as soon as setup completes. */}
+                    {/* biome-ignore lint/performance/noImgElement: QR bytes are already a complete generated SVG. */}
+                    <img
+                      alt="Scan this WhatsApp QR code"
+                      className="size-64 self-center rounded-lg bg-background p-3 ring-1 ring-border"
+                      src={qrImageUrl}
+                    />
+                  </>
+                )}
+              </div>
+            ) : null}
+            <div className="space-y-3">
+              <p
+                className="text-sm font-medium text-foreground"
+                data-testid="connection-setup-status"
+              >
+                {statusText}
+              </p>
+              {qrImageUrl === null ? (
+                panelCopy === null ? null : (
+                  <div className="space-y-2">
+                    <p className="text-base font-medium">{panelCopy.title}</p>
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      {panelCopy.body}
+                    </p>
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      {panelCopy.hint}
+                    </p>
+                    {showLoadingPanel ? (
+                      <div
+                        className="inline-flex items-center gap-2 rounded-full bg-background px-3 py-1.5 text-sm text-muted-foreground ring-1 ring-border"
+                        data-testid="connection-setup-loading-progress"
+                      >
+                        <Spinner className="motion-reduce:animate-none" />
+                        <span>
+                          {setupState === "loading"
+                            ? "Provisioning setup"
+                            : setupState === "connecting"
+                              ? "Waiting for WhatsApp"
+                              : "Waiting for QR code"}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              ) : (
+                <div>
+                  <p className="font-medium">Scan with WhatsApp</p>
+                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-6 text-muted-foreground">
+                    <li>Open WhatsApp on your phone.</li>
+                    <li>Open Settings, then Linked Devices.</li>
+                    <li>Choose Link a Device and scan this QR code.</li>
+                  </ol>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        </>
+      ) : null}
     </>
   );
   const actions = (
@@ -566,8 +908,9 @@ export function ConnectionSetupForm({
           Cancel setup
         </Button>
       ) : null}
-      {setupId !== null &&
-      (setupState === "expired" || setupState === "unavailable") ? (
+      {setupState === "cancelled" ||
+      (setupId !== null &&
+        (setupState === "expired" || setupState === "unavailable")) ? (
         <Button onClick={onResetSetup} type="button" variant="outline">
           Start again
         </Button>
@@ -605,6 +948,7 @@ export function FirstConnectionOnboarding({
   mcpServerUrl,
   onboardingProfileEndpoint,
   onComplete,
+  onProfileSaved,
   setupForm,
 }: FirstConnectionOnboardingProps) {
   const [profile, setProfile] = useState(initialProfile);
@@ -711,6 +1055,7 @@ export function FirstConnectionOnboarding({
       }
       setProfile(savedProfile);
       setDraft(makeDraft(savedProfile));
+      onProfileSaved(savedProfile);
       setProfileState("idle");
       captureProductAnalyticsEvent({
         event: "onboarding_stage_completed",
@@ -991,12 +1336,24 @@ export function FirstConnectionOnboarding({
             </p>
           </div>
           {intendedMcpClient === "claude" || intendedMcpClient === "chatgpt" ? (
+            <VerificationPromptCard
+              client={intendedMcpClient}
+              connection={connectedConnection}
+            />
+          ) : null}
+          {intendedMcpClient === "claude" || intendedMcpClient === "chatgpt" ? (
             <McpConnectionGuides
               client={intendedMcpClient}
               onGuideOpened={() =>
                 captureProductAnalyticsEvent({
                   event: "feature_used",
                   feature: "mcp_guide_opened",
+                })
+              }
+              onProminentChatGptOpened={() =>
+                captureProductAnalyticsEvent({
+                  event: "feature_used",
+                  feature: "onboarding_chatgpt_opened",
                 })
               }
               serverUrl={mcpServerUrl}

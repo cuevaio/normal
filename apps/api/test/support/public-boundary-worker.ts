@@ -156,6 +156,7 @@ const onboardingProfiles = new Map<
 const connectionSetups = new Map<
   string,
   {
+    readonly clerkUserId: string;
     readonly displayName: string;
     readonly numberToken: string;
     readonly setup: {
@@ -166,6 +167,7 @@ const connectionSetups = new Map<
     };
   }
 >();
+const preparedSetupOwners = new Map<string, string>();
 let nextConnectionSetupId = 0;
 const provisioningLeases = new Map<string, string>();
 const provisionedSetups = new Set<string>();
@@ -217,6 +219,11 @@ let providerConnectionState:
   | "reconnect_required"
   | "degraded" = "disconnected";
 let lifecycleClaimId: string | null = null;
+let connectionDeletionReceipt: {
+  readonly deletionMarkerId: string;
+  readonly publicId: string;
+  readonly requestedAt: string;
+} | null = null;
 const retentionPolicies = new Map<string, number | null>();
 const recipientExclusions = new Map<string, boolean>();
 const testRecipients = [
@@ -254,6 +261,7 @@ const whatsAppConnections: Array<{
 const publishedWebhookMessages: WebhookIngressQueueMessage[] = [];
 const encryptedWebhookPayloads = new Map<string, Uint8Array>();
 const encryptedDisplayNames = new Map<string, string>();
+const encryptedWhatsAppNumbers = new Map<string, string>();
 const testAccountKey = {
   ciphertext: "AQID",
   keyVersion: 1,
@@ -496,6 +504,8 @@ const makeTestLayer = (
                 personalAccountId: "10000000-0000-4000-8000-000000000018",
                 version: 1 as const,
               },
+              createdAt: "2026-08-01T12:00:00.000Z",
+              firstClaim: true,
               numberCiphertext: {
                 ciphertext: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcY",
                 keyVersion: 1,
@@ -503,6 +513,7 @@ const makeTestLayer = (
                 version: 1 as const,
               },
               personalAccountId: "10000000-0000-4000-8000-000000000018",
+              provisioningStartedAt: "2026-08-01T12:00:00.000Z",
               setupId,
               webhookIngressId: "30000000-0000-4000-8000-000000000018",
             },
@@ -1192,9 +1203,10 @@ const makeTestLayer = (
     Layer.succeed(ConnectionSetupPersistence, {
       cancel: ({ clerkUserId, setupId }) =>
         Effect.sync(() => {
-          if (clerkUserId !== "user_test_public_boundary") return null;
           const entry = [...connectionSetups.entries()].find(
-            ([, value]) => value.setup.setupId === setupId,
+            ([, value]) =>
+              value.clerkUserId === clerkUserId &&
+              value.setup.setupId === setupId,
           );
           if (entry === undefined) return null;
           const [idempotencyKey, value] = entry;
@@ -1242,6 +1254,7 @@ const makeTestLayer = (
           if (!onboardingProfiles.has(clerkUserId) && !hasRetainedConnection) {
             return { outcome: "onboarding_profile_required" as const };
           }
+          preparedSetupOwners.set(idempotencyKey, clerkUserId);
           return {
             accountKey: {
               ciphertext: "AQID",
@@ -1283,7 +1296,10 @@ const makeTestLayer = (
             setupId: input.setupId,
             state: "provisioning_pending" as const,
           };
+          providerConnectionState = "disconnected";
+          qrObservations.clear();
           connectionSetups.set(input.idempotencyKey, {
+            clerkUserId: preparedSetupOwners.get(input.idempotencyKey) ?? "",
             displayName:
               encryptedDisplayNames.get(input.setupId) ?? "Test WhatsApp",
             numberToken: tokenKey(input.numberToken),
@@ -1416,16 +1432,79 @@ const makeTestLayer = (
             connection.displayName;
           return protectedTestConnection(connection);
         }),
-      prepareDeletion: () => Effect.die("not used"),
-      finishDeletion: () => Effect.die("not used"),
+      prepareDeletion: ({ clerkUserId, publicId }) =>
+        Effect.sync(() => {
+          if (
+            connectionDeletionReceipt !== null &&
+            connectionDeletionReceipt.publicId === publicId
+          ) {
+            return {
+              outcome: "complete" as const,
+              ...connectionDeletionReceipt,
+            };
+          }
+          const connection = whatsAppConnections.find(
+            (candidate) =>
+              clerkUserId === "user_test_public_boundary" &&
+              candidate.publicId === publicId,
+          );
+          if (connection === undefined) return null;
+          return {
+            outcome: "prepared" as const,
+            publicId,
+            personalAccountId: testAccountKey.personalAccountId,
+            connectionId: "20000000-0000-4000-8000-000000000018",
+            accountKey: testAccountKey,
+            connectionKey: testConnectionKey(
+              "20000000-0000-4000-8000-000000000018",
+            ),
+            providerLocator: {
+              ciphertext: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcY",
+              keyVersion: 1,
+              nonce: "AQIDBAUGBwgJCgsM",
+              version: 1 as const,
+            },
+          };
+        }),
+      finishDeletion: ({
+        clerkUserId,
+        deletionMarkerId,
+        publicId,
+        requestedAt,
+      }) =>
+        Effect.sync(() => {
+          if (
+            connectionDeletionReceipt !== null &&
+            connectionDeletionReceipt.publicId === publicId
+          ) {
+            return connectionDeletionReceipt;
+          }
+          if (clerkUserId !== "user_test_public_boundary") return null;
+          const index = whatsAppConnections.findIndex(
+            (candidate) => candidate.publicId === publicId,
+          );
+          if (index < 0) return null;
+          whatsAppConnections.splice(index, 1);
+          lifecycleClaimId = null;
+          connectionDeletionReceipt = {
+            deletionMarkerId,
+            publicId,
+            requestedAt,
+          };
+          return connectionDeletionReceipt;
+        }),
       loadSetup: ({ clerkUserId, setupId }) =>
         Effect.sync(() => {
-          if (clerkUserId !== "user_test_public_boundary") return null;
           const exists = [...connectionSetups.values()].some(
-            ({ setup }) => setup.setupId === setupId,
+            (entry) =>
+              entry.clerkUserId === clerkUserId &&
+              entry.setup.setupId === setupId,
           );
           if (!exists) return null;
-          const connection = whatsAppConnections[0];
+          const connection =
+            clerkUserId === "user_test_public_boundary"
+              ? whatsAppConnections[0]
+              : undefined;
           if (connection !== undefined) {
             return {
               connection: protectedTestConnection(connection),
@@ -1479,6 +1558,10 @@ const makeTestLayer = (
         Effect.sync(() => {
           providerObservations.push("connectSession");
           providerConnectionState = "connecting";
+          qrObservations.set(
+            "wsl_0000000000000000000000000000000000000000000",
+            0,
+          );
           return {
             ok: true as const,
             value: {
@@ -1541,10 +1624,29 @@ const makeTestLayer = (
     }),
     Layer.succeed(RestoreSafeDeletion, {
       markers: {
-        create: () => Effect.die("not used"),
+        create: ({ deletionKind, keyUnavailableAt, requestedAt }) =>
+          Effect.succeed({
+            markerId: "a".repeat(64),
+            objectKey: `markers/v1/${"a".repeat(64)}.json`,
+            marker: {
+              version: 1,
+              deletionKind,
+              requestedAt,
+              keyUnavailableAt,
+            },
+          }),
         enumerate: () => Effect.succeed([]),
       },
-      capsules: { create: () => Effect.die("not used") },
+      capsules: {
+        create: ({ deletionMarkerId, keyVersion }) =>
+          Effect.succeed({
+            ciphertext: new Uint8Array([1]),
+            deletionMarkerId,
+            encryptionContext: {},
+            keyId: "deletion-key",
+            keyVersion,
+          }),
+      },
     }),
     Layer.succeed(StoredMediaContainerService, {
       read: () => Effect.die("not used"),
@@ -1571,7 +1673,12 @@ const makeTestLayer = (
         }),
       decrypt: ({ context }) =>
         context.fieldOrObjectPurpose === "whatsapp-number"
-          ? Effect.succeed(new TextEncoder().encode("+15550123456"))
+          ? Effect.succeed(
+              new TextEncoder().encode(
+                encryptedWhatsAppNumbers.get(context.recordId) ??
+                  "+15550123456",
+              ),
+            )
           : context.fieldOrObjectPurpose === "display-name"
             ? Effect.succeed(
                 new TextEncoder().encode(
@@ -1583,30 +1690,36 @@ const makeTestLayer = (
                     "Test WhatsApp",
                 ),
               )
-            : context.fieldOrObjectPurpose === "provider-session-authority"
+            : context.fieldOrObjectPurpose === "provider-session-locator"
               ? Effect.succeed(
                   new TextEncoder().encode(
-                    JSON.stringify({
-                      sessionCredential: "test-session-credential",
-                      webhookVerificationSecret: "test-webhook-secret",
-                    }),
+                    "wsl_0000000000000000000000000000000000000000000",
                   ),
                 )
-              : context.fieldOrObjectPurpose === "webhook-identity-key"
-                ? Effect.succeed(new Uint8Array(32).fill(18))
-                : context.fieldOrObjectPurpose === "message-search-key"
-                  ? Effect.succeed(new Uint8Array(32).fill(19))
-                  : context.fieldOrObjectPurpose === "original-request"
-                    ? Effect.sync(() => {
-                        const payload = encryptedWebhookPayloads.get(
-                          context.recordId,
-                        );
-                        if (payload === undefined) {
-                          throw new Error("missing encrypted test payload");
-                        }
-                        return payload.slice();
-                      })
-                    : Effect.die("not used"),
+              : context.fieldOrObjectPurpose === "provider-session-authority"
+                ? Effect.succeed(
+                    new TextEncoder().encode(
+                      JSON.stringify({
+                        sessionCredential: "test-session-credential",
+                        webhookVerificationSecret: "test-webhook-secret",
+                      }),
+                    ),
+                  )
+                : context.fieldOrObjectPurpose === "webhook-identity-key"
+                  ? Effect.succeed(new Uint8Array(32).fill(18))
+                  : context.fieldOrObjectPurpose === "message-search-key"
+                    ? Effect.succeed(new Uint8Array(32).fill(19))
+                    : context.fieldOrObjectPurpose === "original-request"
+                      ? Effect.sync(() => {
+                          const payload = encryptedWebhookPayloads.get(
+                            context.recordId,
+                          );
+                          if (payload === undefined) {
+                            throw new Error("missing encrypted test payload");
+                          }
+                          return payload.slice();
+                        })
+                      : Effect.die("not used"),
       decryptMany: () => Effect.die("not used"),
       encrypt: ({ context, plaintext }) =>
         Effect.sync(() => {
@@ -1618,6 +1731,12 @@ const makeTestLayer = (
           }
           if (context.fieldOrObjectPurpose === "display-name") {
             encryptedDisplayNames.set(
+              context.recordId,
+              new TextDecoder().decode(plaintext),
+            );
+          }
+          if (context.fieldOrObjectPurpose === "whatsapp-number") {
+            encryptedWhatsAppNumbers.set(
               context.recordId,
               new TextDecoder().decode(plaintext),
             );

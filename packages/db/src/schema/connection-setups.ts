@@ -54,6 +54,10 @@ export const connectionSetupsInApp = publicSchema.table(
     provisioningAttemptCount: integer("provisioning_attempt_count")
       .default(0)
       .notNull(),
+    provisioningStartedAt: timestamp("provisioning_started_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
     provisioningLastFailureCode: text("provisioning_last_failure_code"),
     cleanupState: text("cleanup_state"),
     cleanupLeaseOwner: text("cleanup_lease_owner"),
@@ -148,6 +152,10 @@ export const connectionSetupsInApp = publicSchema.table(
     check(
       "connection_setups_provisioning_attempt_count_check",
       sql`provisioning_attempt_count >= 0`,
+    ),
+    check(
+      "connection_setups_provisioning_started_at_check",
+      sql`(provisioning_started_at IS NULL) OR (provisioning_started_at >= created_at)`,
     ),
     check(
       "connection_setups_provisioning_last_failure_code_check",

@@ -556,6 +556,16 @@ describe("Send Operation grant identities", () => {
       }),
       encrypt,
     );
+    const mcpAfterDeletion = await sends.commit(
+      commitInput(mcpGrant, {
+        auditLogId: "51000000-0000-4000-8000-000000000094",
+        fingerprint: `sf1_${"G".repeat(43)}`,
+        idempotencyKey: "123456789012345678994",
+        sendId: "60000000-0000-4000-8000-000000000094",
+        sendPublicId: "snd_123456789012345678994",
+      }),
+      encrypt,
+    );
     const unknownConnection = await sends.commit(
       {
         ...commitInput(apiGrantB, {
@@ -570,6 +580,7 @@ describe("Send Operation grant identities", () => {
       encrypt,
     );
     expect(afterDeletion).toEqual({ outcome: "authorization_denied" });
+    expect(mcpAfterDeletion).toEqual(afterDeletion);
     expect(unknownConnection).toEqual(afterDeletion);
   });
 

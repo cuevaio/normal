@@ -1,19 +1,24 @@
 ---
 title: How to connect WhatsApp to ChatGPT with MCP
-description: Add Normal to ChatGPT, authorize selected connections, and keep sending under confirmation.
+description: Add Normal to ChatGPT, authorize selected connections, and keep WhatsApp access explicit.
 eyebrow: ChatGPT setup
 promise: Use WhatsApp context from ChatGPT without handing over blanket access.
 order: 3
 ---
 
-A ChatGPT environment that supports custom MCP servers can connect to Normal through OAuth. You choose the WhatsApp Connections and capabilities ChatGPT may use.
+ChatGPT's current docs place custom MCP setup under Apps with developer mode enabled where your plan requires it. Once custom MCP access is available in your workspace, you can connect Normal through OAuth and choose the exact WhatsApp Connections and capabilities ChatGPT may use.
 
 ## Connect ChatGPT
 
-1. Enable the ChatGPT setting required for custom MCP servers.
-2. Add your Normal MCP server URL with OAuth enabled.
-3. Sign in to Normal and select each allowed WhatsApp Connection and capability.
-4. Start a new chat, enable the tools, and test with a read request.
+1. In ChatGPT, open `Settings -> Apps`.
+2. If your workspace requires it, turn on Developer mode under `Settings -> Apps -> Advanced Settings`, or ask your workspace admin to enable custom MCP apps in workspace settings.
+3. Open `Apps -> Create`, add the Normal MCP server with OAuth, and finish tool scanning if ChatGPT prompts for it.
+4. Sign in to Normal and explicitly select each allowed WhatsApp Connection and each permission area you want ChatGPT to use.
+5. Start a new chat, enable Normal from the apps or tools menu, and test with a read request.
+
+## Need to reconnect Normal later?
+
+If ChatGPT later loses access because authorization expired, was revoked, or the saved app entry disappeared, follow [How to reconnect Normal MCP in ChatGPT](/guides/reconnect-normal-mcp-in-chatgpt).
 
 ## Try asking
 
@@ -24,3 +29,5 @@ A ChatGPT environment that supports custom MCP servers can connect to Normal thr
 ## Can ChatGPT send after receiving read access?
 
 No. Stored Message read permission and send permission are separate. Every outbound messaging tool invocation also requires Client Confirmation in the MCP Client.
+
+Need to remove access later? Follow the complete [ChatGPT and Claude removal guide](/guides/remove-normal-from-chatgpt-and-claude) so you both disconnect Normal in ChatGPT and revoke its MCP Authorization in Normal.

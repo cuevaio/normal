@@ -13,7 +13,13 @@ import {
   ChevronRightIcon,
   MoreHorizontalIcon,
 } from "lucide-react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -57,6 +63,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { captureProductAnalyticsEvent } from "../effect/product-analytics";
+import {
+  nextConnectionSetupPollDelayMs,
+  observationMetricDurationMs,
+} from "./connection-setup-observation";
 import {
   type ConnectionSetupCleanupState,
   ConnectionSetupForm,
@@ -505,10 +515,15 @@ export function PublicBoundaryJourney({
     readonly url: string;
   } | null>(null);
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
+  const setupStateRef = useRef<ConnectionSetupState>("idle");
   const [whatsappNumber, setWhatsappNumber] = useState("");
   const [deletionState, setDeletionState] = useState<
     "idle" | "deleting" | "unavailable"
   >("idle");
+  const [deletingConnectionId, setDeletingConnectionId] = useState<
+    string | null
+  >(null);
+  const [connectionDeletionStatus, setConnectionDeletionStatus] = useState("");
   const setupIntent = useRef<{
     readonly idempotencyKey: string;
     readonly name: string;
@@ -519,6 +534,18 @@ export function PublicBoundaryJourney({
   const lifecycleGeneration = useRef(0);
   const lifecycleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const observationGeneration = useRef(0);
+  const observationAttempt = useRef(0);
+  const setupObservationMetrics = useRef<{
+    readonly qrObservedAtMs: number | null;
+    readonly setupStartedAtMs: number | null;
+    readonly startToQrCaptured: boolean;
+    readonly qrToActiveCaptured: boolean;
+  }>({
+    qrObservedAtMs: null,
+    setupStartedAtMs: null,
+    startToQrCaptured: false,
+    qrToActiveCaptured: false,
+  });
   const observationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const automaticallyInitialized = useRef(false);
 
@@ -690,6 +717,91 @@ export function PublicBoundaryJourney({
     }
   };
 
+  const deleteConnection = async (connection: SafeWhatsAppConnection) => {
+    if (deletingConnectionId !== null) return;
+    if (
+      !window.confirm(
+        `Start irreversible Connection Deletion for the WhatsApp Connection ending ${connection.numberSuffix}? Access stops immediately while provider cleanup continues.`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingConnectionId(connection.id);
+    setConnectionDeletionStatus("");
+    try {
+      const token = await getToken();
+      if (token === null) throw new Error("signed out");
+      const response = await fetch(
+        `${connectionsEndpoint}/${encodeURIComponent(connection.id)}/delete`,
+        {
+          headers: { authorization: `Bearer ${token}` },
+          method: "POST",
+        },
+      );
+      const body = (await response.json()) as {
+        readonly deletion?: { readonly outcome?: unknown };
+        readonly whatsapp_connection_id?: unknown;
+      };
+      if (
+        !response.ok ||
+        body.deletion?.outcome !== "complete" ||
+        body.whatsapp_connection_id !== connection.id
+      ) {
+        throw new Error("invalid deletion response");
+      }
+
+      setConnections((current) =>
+        current.filter((candidate) => candidate.id !== connection.id),
+      );
+      setConfigurationConnectionId((current) =>
+        current === connection.id ? null : current,
+      );
+      setReconnectConnectionId((current) =>
+        current === connection.id ? null : current,
+      );
+      setConnectionLifecycleStatus((current) => {
+        const next = { ...current };
+        delete next[connection.id];
+        return next;
+      });
+      setNameDrafts((current) => {
+        const next = { ...current };
+        delete next[connection.id];
+        return next;
+      });
+      setNameStatus((current) => {
+        const next = { ...current };
+        delete next[connection.id];
+        return next;
+      });
+      setRetentionAcknowledgements((current) => {
+        const next = { ...current };
+        delete next[connection.id];
+        return next;
+      });
+      setRetentionDrafts((current) => {
+        const next = { ...current };
+        delete next[connection.id];
+        return next;
+      });
+      setRetentionStatus((current) => {
+        const next = { ...current };
+        delete next[connection.id];
+        return next;
+      });
+      setConnectionDeletionStatus(
+        `Connection Deletion started for the WhatsApp Connection ending ${connection.numberSuffix}. Access stops immediately while provider cleanup continues.`,
+      );
+    } catch {
+      setConnectionDeletionStatus(
+        `Connection Deletion is temporarily unavailable for the WhatsApp Connection ending ${connection.numberSuffix}.`,
+      );
+    } finally {
+      setDeletingConnectionId(null);
+    }
+  };
+
   const replaceQrImage = (next: string | null) => {
     if (activeQrImageUrl.current !== null) {
       URL.revokeObjectURL(activeQrImageUrl.current);
@@ -710,18 +822,32 @@ export function PublicBoundaryJourney({
 
   const stopObserving = () => {
     observationGeneration.current += 1;
+    observationAttempt.current = 0;
     if (observationTimer.current !== null) {
       clearTimeout(observationTimer.current);
       observationTimer.current = null;
     }
     replaceQrImage(null);
   };
+  const stopObservingOnIdentityChange = useEffectEvent(stopObserving);
+
+  useEffect(() => {
+    if (identityState === "signed_in") return;
+    stopObservingOnIdentityChange();
+  }, [identityState, stopObservingOnIdentityChange]);
 
   const resetSetupForDraftChange = () => {
     stopObserving();
     setupIntent.current = null;
+    setupObservationMetrics.current = {
+      qrObservedAtMs: null,
+      setupStartedAtMs: null,
+      startToQrCaptured: false,
+      qrToActiveCaptured: false,
+    };
     setSetupCleanupState(null);
     setSetupId(null);
+    setupStateRef.current = "idle";
     setSetupState("idle");
   };
 
@@ -738,9 +864,16 @@ export function PublicBoundaryJourney({
   const clearSetupDraft = () => {
     stopObserving();
     setupIntent.current = null;
+    setupObservationMetrics.current = {
+      qrObservedAtMs: null,
+      setupStartedAtMs: null,
+      startToQrCaptured: false,
+      qrToActiveCaptured: false,
+    };
     setConnectionName("");
     setSetupCleanupState(null);
     setSetupId(null);
+    setupStateRef.current = "idle";
     setSetupState("idle");
     setWhatsappNumber("");
   };
@@ -1118,10 +1251,65 @@ export function PublicBoundaryJourney({
   ): Promise<void> => {
     const isCurrent = () => observationGeneration.current === generation;
     const observeAgain = () => {
+      const delayMs = nextConnectionSetupPollDelayMs(
+        setupStateRef.current,
+        observationAttempt.current,
+      );
+      observationAttempt.current += 1;
       observationTimer.current = setTimeout(() => {
         observationTimer.current = null;
         void observeSetup(setupId, generation);
-      }, 750);
+      }, delayMs);
+    };
+    const markState = (nextState: SetupState) => {
+      const previousState = setupStateRef.current;
+      if (previousState !== nextState) {
+        observationAttempt.current = 0;
+      }
+      setupStateRef.current = nextState;
+      setSetupState(nextState);
+      if (
+        nextState === "qr_available" &&
+        !setupObservationMetrics.current.startToQrCaptured
+      ) {
+        const observedAtMs = performance.now();
+        const durationMs = observationMetricDurationMs(
+          setupObservationMetrics.current.setupStartedAtMs,
+          observedAtMs,
+        );
+        if (durationMs !== null) {
+          captureProductAnalyticsEvent({
+            durationMs,
+            event: "connection_setup_timing_recorded",
+            phase: "start_to_code_observed",
+          });
+          setupObservationMetrics.current = {
+            ...setupObservationMetrics.current,
+            qrObservedAtMs: observedAtMs,
+            startToQrCaptured: true,
+          };
+        }
+      }
+      if (
+        nextState === "connected" &&
+        !setupObservationMetrics.current.qrToActiveCaptured
+      ) {
+        const durationMs = observationMetricDurationMs(
+          setupObservationMetrics.current.qrObservedAtMs,
+          performance.now(),
+        );
+        if (durationMs !== null) {
+          captureProductAnalyticsEvent({
+            durationMs,
+            event: "connection_setup_timing_recorded",
+            phase: "code_observed_to_active_observed",
+          });
+          setupObservationMetrics.current = {
+            ...setupObservationMetrics.current,
+            qrToActiveCaptured: true,
+          };
+        }
+      }
     };
 
     try {
@@ -1129,7 +1317,7 @@ export function PublicBoundaryJourney({
       if (!isCurrent()) return;
       if (token === null) {
         replaceQrImage(null);
-        setSetupState("unavailable");
+        markState("unavailable");
         return;
       }
       const response = await fetch(`${connectionSetupEndpoint}/${setupId}/qr`, {
@@ -1140,13 +1328,13 @@ export function PublicBoundaryJourney({
         const image = await response.blob();
         if (!isCurrent()) return;
         replaceQrImage(URL.createObjectURL(image));
-        setSetupState("qr_available");
+        markState("qr_available");
         observeAgain();
         return;
       }
       if (response.status === 202) {
         replaceQrImage(null);
-        setSetupState(
+        markState(
           response.headers.get("x-connection-setup-state") === "connecting"
             ? "connecting"
             : "pending",
@@ -1156,9 +1344,9 @@ export function PublicBoundaryJourney({
       }
       if (response.status === 204) {
         replaceQrImage(null);
-        setSetupState("connected");
+        markState("connected");
         if ((await loadConnections(token)) === null) {
-          if (isCurrent()) setSetupState("unavailable");
+          if (isCurrent()) markState("unavailable");
         }
         return;
       }
@@ -1170,20 +1358,21 @@ export function PublicBoundaryJourney({
         body.error === "provisioning_failed" ||
         body.error === "provisioning_quarantined"
       ) {
-        setSetupState(body.error);
+        markState(body.error);
         return;
       }
-      setSetupState("unavailable");
+      markState("unavailable");
     } catch {
       if (isCurrent()) {
         replaceQrImage(null);
-        setSetupState("unavailable");
+        markState("unavailable");
       }
     }
   };
 
   const startObserving = (setupId: string) => {
     stopObserving();
+    observationAttempt.current = 0;
     void observeSetup(setupId, observationGeneration.current);
   };
 
@@ -1363,6 +1552,13 @@ export function PublicBoundaryJourney({
     event.preventDefault();
     stopObserving();
     const requestGeneration = observationGeneration.current;
+    setupObservationMetrics.current = {
+      qrObservedAtMs: null,
+      setupStartedAtMs: performance.now(),
+      startToQrCaptured: false,
+      qrToActiveCaptured: false,
+    };
+    setupStateRef.current = "loading";
     setSetupState("loading");
     setSetupCleanupState(null);
 
@@ -1381,6 +1577,7 @@ export function PublicBoundaryJourney({
       const token = await getToken();
       if (observationGeneration.current !== requestGeneration) return;
       if (token === null) {
+        setupStateRef.current = "unavailable";
         setSetupState("unavailable");
         return;
       }
@@ -1415,6 +1612,8 @@ export function PublicBoundaryJourney({
         ) {
           setSetupId(setup.id);
           if (setup.state === "pending") {
+            setupStateRef.current =
+              setup.idempotent_replay === true ? "replayed" : "pending";
             setSetupState(
               setup.idempotent_replay === true ? "replayed" : "pending",
             );
@@ -1429,6 +1628,8 @@ export function PublicBoundaryJourney({
             setup.state === "provisioning_failed" ||
             setup.state === "provisioning_quarantined"
           ) {
+            setupStateRef.current =
+              setup.state === "activated" ? "connected" : setup.state;
             setSetupState(
               setup.state === "activated" ? "connected" : setup.state,
             );
@@ -1439,6 +1640,7 @@ export function PublicBoundaryJourney({
               (await loadConnections(token)) === null &&
               observationGeneration.current === requestGeneration
             ) {
+              setupStateRef.current = "unavailable";
               setSetupState("unavailable");
             }
             return;
@@ -1446,6 +1648,7 @@ export function PublicBoundaryJourney({
         }
       }
       if (body.error === "invalid_request") {
+        setupStateRef.current = "invalid";
         setSetupState("invalid");
         return;
       }
@@ -1453,6 +1656,10 @@ export function PublicBoundaryJourney({
         body.error === "whatsapp_number_unavailable" ||
         body.error === "connection_limit_reached"
       ) {
+        setupStateRef.current =
+          body.error === "whatsapp_number_unavailable"
+            ? "number_unavailable"
+            : body.error;
         setSetupState(
           body.error === "whatsapp_number_unavailable"
             ? "number_unavailable"
@@ -1460,8 +1667,10 @@ export function PublicBoundaryJourney({
         );
         return;
       }
+      setupStateRef.current = "unavailable";
       setSetupState("unavailable");
     } catch {
+      setupStateRef.current = "unavailable";
       setSetupState("unavailable");
     }
   };
@@ -1469,11 +1678,19 @@ export function PublicBoundaryJourney({
   const cancelSetup = async () => {
     if (setupId === null) return;
     stopObserving();
+    setupObservationMetrics.current = {
+      qrObservedAtMs: null,
+      setupStartedAtMs: null,
+      startToQrCaptured: false,
+      qrToActiveCaptured: false,
+    };
+    setupStateRef.current = "cancelling";
     setSetupState("cancelling");
 
     try {
       const token = await getToken();
       if (token === null) {
+        setupStateRef.current = "unavailable";
         setSetupState("unavailable");
         return;
       }
@@ -1502,11 +1719,14 @@ export function PublicBoundaryJourney({
         setupIntent.current = null;
         setSetupId(null);
         setSetupCleanupState(body.connection_setup.cleanup_state);
+        setupStateRef.current = body.connection_setup.state;
         setSetupState(body.connection_setup.state);
         return;
       }
+      setupStateRef.current = "unavailable";
       setSetupState("unavailable");
     } catch {
+      setupStateRef.current = "unavailable";
       setSetupState("unavailable");
     }
   };
@@ -1581,6 +1801,7 @@ export function PublicBoundaryJourney({
             clearSetupDraft();
             setShowFirstConnectionOnboarding(false);
           }}
+          onProfileSaved={setOnboardingProfile}
           setupForm={{
             connectionName,
             onCancelSetup: cancelSetup,
@@ -2127,6 +2348,11 @@ export function PublicBoundaryJourney({
               </DialogContent>
             </Dialog>
           </div>
+          {connectionDeletionStatus.length > 0 ? (
+            <p aria-live="polite" className="text-sm text-muted-foreground">
+              {connectionDeletionStatus}
+            </p>
+          ) : null}
           {connections.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No WhatsApp Connections yet.
@@ -2194,15 +2420,29 @@ export function PublicBoundaryJourney({
                       <DropdownMenuContent align="end">
                         <DropdownMenuGroup>
                           <DropdownMenuItem
+                            disabled={deletingConnectionId === connection.id}
                             onClick={() =>
                               setConfigurationConnectionId(connection.id)
                             }
                           >
                             Configure
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={
+                              deletingConnectionId === connection.id ||
+                              connectionLifecycleAction !== null
+                            }
+                            onClick={() => void deleteConnection(connection)}
+                            variant="destructive"
+                          >
+                            Delete Connection
+                          </DropdownMenuItem>
                           {connection.state === "connected" ? (
                             <DropdownMenuItem
-                              disabled={connectionLifecycleAction !== null}
+                              disabled={
+                                connectionLifecycleAction !== null ||
+                                deletingConnectionId === connection.id
+                              }
                               onClick={() =>
                                 startConnectionLifecycle(
                                   connection,
@@ -2218,6 +2458,7 @@ export function PublicBoundaryJourney({
                             connection.state === "degraded" ||
                             connection.state === "reconnect_required" ? (
                             <DropdownMenuItem
+                              disabled={deletingConnectionId === connection.id}
                               onClick={() =>
                                 setReconnectConnectionId(connection.id)
                               }

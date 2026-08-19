@@ -124,8 +124,15 @@
     {
       "idx": 17,
       "version": "7",
-      "when": 1787112001000,
-      "tag": "0017_allow_api_keys_on_mcp",
+      "when": 1787115600000,
+      "tag": "0017_record_connection_setup_provisioning_start",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787115601000,
+      "tag": "0018_allow_api_keys_on_mcp",
       "breakpoints": true
     }
   ]

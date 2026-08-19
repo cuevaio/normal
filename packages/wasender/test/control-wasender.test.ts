@@ -711,6 +711,54 @@ describe("real Wasender lifecycle adapter", () => {
     expect(calls).toBe(5);
   });
 
+  test("reconciles an ambiguous successful delete before repeating the side effect", async () => {
+    const listPresent = () =>
+      json({
+        success: true,
+        data: [providerSession({ api_key: undefined })],
+      });
+    const responses: Array<Response | Error> = [
+      listPresent(),
+      json({ success: true, data: providerSession() }),
+      listPresent(),
+      new Error("connection closed after Wasender accepted deletion"),
+      json({ success: true, data: [] }),
+    ];
+    const methods: string[] = [];
+    let calls = 0;
+    const lifecycle = makeWasenderSessionLifecycle(
+      { credential, referenceSecret },
+      {
+        fetch: async (request) => {
+          methods.push(request.method);
+          const response = responses[calls++] ?? json({}, { status: 500 });
+          if (response instanceof Error) throw response;
+          return response;
+        },
+      },
+    );
+    const sessions = await Effect.runPromise(
+      lifecycle.listSessions({ setupMarker }),
+    );
+    const session = sessions[0];
+    if (!session) throw new Error("missing session fixture");
+
+    const ambiguous = await runFailure(
+      lifecycle.deleteSession({ session: session.session }),
+    );
+    const reconciled = await Effect.runPromise(
+      lifecycle.deleteSession({ session: session.session }),
+    );
+
+    expect(ambiguous).toMatchObject({
+      operation: "lifecycle-write",
+      retryDecision: "reconcile_before_repeat",
+    });
+    expect(reconciled).toEqual({ state: "absent" });
+    expect(methods).toEqual(["GET", "GET", "GET", "DELETE", "GET"]);
+    expect(methods.filter((method) => method === "DELETE")).toHaveLength(1);
+  });
+
   test("returns ephemeral SVG QR bytes without retaining the provider payload", async () => {
     const responses = [
       json({

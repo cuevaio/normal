@@ -273,7 +273,9 @@ const makeHarness = (
                     failureCode: options.initialFailureCode ?? "unavailable",
                     outcome: "provisioning_failed" as const,
                   }
-                : { outcome: setupState },
+                : {
+                    outcome: setupState,
+                  },
       ),
   };
 
@@ -481,6 +483,11 @@ describe("WhatsApp Connection HTTP boundary", () => {
     expect(response.headers.get("content-type")).toBe("image/svg+xml");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(qrBytes);
+    expect(harness.events).toContainEqual({
+      event: "connection_setup.qr.completed",
+      outcome: "qr_available",
+      service: "api",
+    });
     expect(harness.providerCalls).toEqual([
       "reconcileSession",
       "connectSession",
@@ -577,6 +584,9 @@ describe("WhatsApp Connection HTTP boundary", () => {
     await harness.handler(request(qrEndpoint));
     const deleted = await harness.handler(request(deleteEndpoint, "POST"));
     const replay = await harness.handler(request(deleteEndpoint, "POST"));
+    const reconnectAfterDeletion = await harness.handler(
+      request(reconnectEndpoint, "POST"),
+    );
     const listed = await harness.handler(request(listEndpoint));
     expect(deleted.status).toBe(200);
     expect(await deleted.json()).toMatchObject({
@@ -584,6 +594,7 @@ describe("WhatsApp Connection HTTP boundary", () => {
       whatsapp_connection_id: connectionId,
     });
     expect(replay.status).toBe(200);
+    expect(reconnectAfterDeletion.status).toBe(404);
     expect(await listed.json()).toEqual({ whatsapp_connections: [] });
   });
 

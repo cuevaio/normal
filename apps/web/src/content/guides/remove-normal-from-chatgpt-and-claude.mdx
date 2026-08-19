@@ -1,0 +1,53 @@
+---
+title: How to remove Normal from ChatGPT and Claude
+description: Completely remove Normal from ChatGPT or Claude by removing the client connection and revoking the MCP Authorization in Normal.
+eyebrow: Remove access
+promise: Shut off MCP access cleanly without confusing revocation with Connection Deletion.
+order: 7
+---
+
+Complete removal has two parts:
+
+1. Remove or disable Normal inside the MCP Client.
+2. Revoke that MCP Authorization in Normal.
+
+If you do only the client side, the MCP Authorization can still remain active in Normal until you revoke it. If you do only the Normal side, access stops immediately, but the MCP Client can still show Normal until you remove or disconnect it there.
+
+## Remove Normal from ChatGPT
+
+Open ChatGPT **Settings > Apps** and find **Normal** in your connected apps. Disconnect it there.
+
+If your ChatGPT workspace is managed, an admin can also disable the app from **Workspace settings > Apps**. That is workspace control, not your Normal authorization control.
+
+Changing ChatGPT's app permission setting is not the same as removing access. Permission settings only change when ChatGPT asks before using the app. They do not revoke the MCP Authorization.
+
+## Remove Normal from Claude
+
+Open Claude **Customize > Connectors** and find **Normal**.
+
+1. Choose **Remove** to remove the custom connector completely.
+2. If you only want to stop using it in one conversation, turn it off from the chat's connector controls instead.
+
+Turning a connector off for one conversation is not the same as removing it from Claude, and neither action revokes the MCP Authorization in Normal.
+
+## Revoke the MCP Authorization in Normal
+
+Open [MCP Authorizations in the dashboard](/dashboard/authorizations), find the ChatGPT or Claude entry, and revoke it.
+
+Revocation stops that MCP Client's access immediately. New reads, sends, protected media access, refreshes, and other tool use under that MCP Authorization stop as soon as revocation succeeds.
+
+Revocation does **not** delete the WhatsApp Connection, disconnect the WhatsApp Connection, or erase retained history by itself. Your WhatsApp Connection and retained Stored Messages stay governed by their current state and Message Retention Policy. Connection Deletion is a different action.
+
+## Verify access is gone
+
+Use both checks:
+
+1. In Normal, confirm the MCP Authorization no longer shows as active in [MCP Authorizations](/dashboard/authorizations).
+2. In the MCP Client, confirm Normal is disconnected, removed, or unavailable for the conversation.
+
+If you reconnect later, you will create a new MCP Authorization. It does not silently restore the old grant.
+
+## Need the setup steps again?
+
+- [Connect WhatsApp to ChatGPT](/guides/connect-whatsapp-to-chatgpt)
+- [Connect WhatsApp to Claude](/guides/connect-whatsapp-to-claude)

@@ -25,6 +25,7 @@
         "method",
         "tool",
         "durationMs",
+        "queueDelayMs",
         "attemptCount",
         "responseBytes",
         "failureCode",

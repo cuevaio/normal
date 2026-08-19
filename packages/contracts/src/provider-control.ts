@@ -185,6 +185,7 @@ export type ProviderControlRpcMethod =
   | "reconcileSession";
 
 export interface ProviderControlRpcTelemetryEvent {
+  readonly durationMs: number;
   readonly event: "provider_control.rpc.completed";
   readonly method: ProviderControlRpcMethod;
   readonly outcome: "success" | ProviderControlFailureCode;

@@ -798,8 +798,10 @@ counts through the restricted API role only. A second User requesting the same
 setup-scoped QR route must receive the ordinary not-found boundary without a
 provider-control call.
 
-Safe telemetry may show only `connection_setup.qr.completed` with a normalized
-outcome and `whatsapp_connection.list.completed` with a bounded count. A QR
+Safe telemetry may show `connection_setup.qr.completed` with a normalized
+outcome, `connection_setup.provision.claimed` with setup-to-first-claim delay,
+`connection_setup.provision.completed` with first-claim-to-terminal duration and safe
+outcome, and `whatsapp_connection.list.completed` with a bounded count. A QR
 byte, full number, setup or connection handle, provider locator, session
 authority, webhook value, ciphertext, or key reference in telemetry is a
 credential-handling incident. No infrastructure apply should add a new public

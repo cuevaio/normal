@@ -5,6 +5,8 @@ import {
   type ConnectionSetupConnectionProvider,
   makeConnectionSetupRepository,
 } from "../src/connection-setup";
+import { makeMcpAuthorizationRepository } from "../src/mcp-authorization";
+import { makeMcpToolRepository } from "../src/mcp-tool";
 import { runMigrations } from "../src/migrations";
 import {
   makePersonalAccountRepository,
@@ -407,13 +409,41 @@ describe("WhatsApp Connection repository", () => {
   test("makes Connection Deletion terminal and revokes keys and inventory atomically", async () => {
     const repository = makeWhatsAppConnectionRepository(provider);
     await repository.activate(activationInput);
+    const authorizationId = "40000000-0000-4000-8000-000000000031";
+    const oauthSubject = "A".repeat(43);
+    const refreshCredentialHash = new Uint8Array(32).fill(30);
+    const authorizations = makeMcpAuthorizationRepository(provider);
+    expect(
+      await authorizations.create({
+        authorizationId,
+        authorizedAt: new Date("2026-07-31T12:05:00.000Z"),
+        clientClass: "approved",
+        clientId: "approved-client",
+        clientName: "Approved MCP Client",
+        clerkUserId: "user_connectiona",
+        connectionIds: [publicId],
+        expiresAt: new Date("2026-10-29T12:05:00.000Z"),
+        oauthSubject,
+        reverifiedAt: new Date("2026-07-31T12:04:30.000Z"),
+        scopes: ["connections:read", "messages:send"],
+      }),
+    ).toBe(true);
+    expect(
+      await authorizations.registerRefreshCredential({
+        clientId: "approved-client",
+        credentialHash: refreshCredentialHash,
+        oauthSubject,
+        observedAt: new Date("2026-07-31T12:05:01.000Z"),
+      }),
+    ).toBe(true);
     const apiKeyPublicId = "apk_000000000000000000031";
+    const apiKeyDigest = new Uint8Array(32).fill(31);
     expect(
       await makeApiKeyRepository(provider).create({
         clerkUserId: "user_connectiona",
         connectionIds: [publicId],
         createdAt: new Date("2026-07-31T12:05:00.000Z"),
-        credentialDigest: new Uint8Array(32).fill(31),
+        credentialDigest: apiKeyDigest,
         credentialHint: `normal_${apiKeyPublicId}.…wxyz`,
         expiresAt: null,
         id: "50000000-0000-4000-8000-000000000031",
@@ -449,6 +479,15 @@ describe("WhatsApp Connection repository", () => {
     await expect(repository.listForUser("user_connectiona")).resolves.toEqual(
       [],
     );
+    await expect(
+      repository.claimLifecycle({
+        action: "reconnect",
+        claimId: "70000000-0000-4000-8000-000000000031",
+        clerkUserId: "user_connectiona",
+        publicId,
+        requestedAt: "2026-07-31T12:08:01.000Z",
+      }),
+    ).resolves.toBeNull();
     await expect(
       repository.prepareDeletion({ clerkUserId: "user_connectiona", publicId }),
     ).resolves.toEqual({
@@ -490,6 +529,48 @@ describe("WhatsApp Connection repository", () => {
       state: "deleting",
     });
     expect(state.rows[0]?.key_unavailable_at).not.toBeNull();
+
+    await expect(
+      authorizations.isActive({
+        authorizationId,
+        clientId: "approved-client",
+        observedAt: new Date("2026-07-31T12:08:01.000Z"),
+        oauthSubject,
+      }),
+    ).resolves.toBe(false);
+    let refreshIssueCount = 0;
+    await expect(
+      authorizations.rotateRefreshCredential(
+        {
+          clientId: "approved-client",
+          credentialHash: refreshCredentialHash,
+          oauthSubject,
+          observedAt: new Date("2026-07-31T12:08:01.000Z"),
+        },
+        async () => {
+          refreshIssueCount += 1;
+          return {
+            credentialHash: new Uint8Array(32).fill(32),
+            value: "must-not-be-issued",
+          };
+        },
+      ),
+    ).resolves.toEqual({ outcome: "invalid" });
+    expect(refreshIssueCount).toBe(0);
+    await expect(
+      makeMcpToolRepository(provider).listConnections({
+        authorizationId,
+        clientId: "approved-client",
+        observedAt: new Date("2026-07-31T12:08:01.000Z"),
+        oauthSubject,
+      }),
+    ).resolves.toEqual([]);
+    await expect(
+      makeApiKeyRepository(provider).authenticate({
+        digest: apiKeyDigest,
+        publicId: apiKeyPublicId,
+      }),
+    ).resolves.toBeNull();
   });
 
   test("purges a provider-absent Connection and permanently reserves its public handle", async () => {

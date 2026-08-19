@@ -40,6 +40,8 @@ export default defineConfig({
         NEXT_PUBLIC_CLERK_JS_URL: `${webOrigin}/clerk-test.js`,
         NEXT_PUBLIC_CLERK_UI_URL: `${webOrigin}/clerk-ui-test.js`,
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA",
+        NEXT_PUBLIC_POSTHOG_HOST: "https://analytics.example.test",
+        NEXT_PUBLIC_POSTHOG_KEY: "phc_browser_test",
       },
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,

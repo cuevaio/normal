@@ -9,6 +9,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 interface McpConnectionGuidesProps {
   readonly client?: "all" | "claude" | "chatgpt";
   readonly onGuideOpened?: (() => void) | undefined;
+  readonly onProminentChatGptOpened?: (() => void) | undefined;
   readonly serverUrl: string;
 }
 
@@ -109,6 +110,7 @@ function GuideCard({
   connectUrl,
   name,
   onGuideOpened,
+  onProminentChatGptOpened,
   serverUrl,
   steps,
 }: {
@@ -116,9 +118,12 @@ function GuideCard({
   readonly connectUrl: string;
   readonly name: string;
   readonly onGuideOpened?: (() => void) | undefined;
+  readonly onProminentChatGptOpened?: (() => void) | undefined;
   readonly serverUrl: string;
   readonly steps: ReadonlyArray<GuideStep>;
 }) {
+  const isChatGpt = accent === "chatgpt";
+
   return (
     <article className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
       <header className="flex items-center justify-between gap-4 border-b px-5 py-4">
@@ -140,16 +145,41 @@ function GuideCard({
           <h3 className="text-lg font-semibold tracking-tight">{name}</h3>
         </div>
         <a
+          aria-label={`Open ${name} guide in a new tab`}
           className={buttonVariants({ variant: "outline" })}
           href={connectUrl}
           onClick={onGuideOpened}
-          rel="noreferrer"
+          rel="noopener noreferrer"
           target="_blank"
         >
           Open {name}
           <ExternalLink aria-hidden="true" data-icon="inline-end" />
         </a>
       </header>
+      {isChatGpt ? (
+        <div className="border-b bg-muted/20 px-5 py-5">
+          <div className="flex flex-col gap-4 rounded-2xl bg-background p-4 ring-1 ring-border sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Open ChatGPT now</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Finish the connector setup in ChatGPT, then come back here for
+                the server URL and access choices.
+              </p>
+            </div>
+            <a
+              aria-label="Open ChatGPT in a new tab"
+              className={buttonVariants({ size: "lg" })}
+              href={connectUrl}
+              onClick={onProminentChatGptOpened}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              Open ChatGPT
+              <ExternalLink aria-hidden="true" data-icon="inline-end" />
+            </a>
+          </div>
+        </div>
+      ) : null}
       <ol className="flex flex-col px-5 py-6">
         {steps.map((step, index) => (
           <li className="grid grid-cols-[2rem_1fr] gap-3" key={step.title}>
@@ -192,6 +222,7 @@ const prompts = [
 export function McpConnectionGuides({
   client = "all",
   onGuideOpened,
+  onProminentChatGptOpened,
   serverUrl,
 }: McpConnectionGuidesProps) {
   const showClaude = client === "all" || client === "claude";
@@ -236,6 +267,7 @@ export function McpConnectionGuides({
             connectUrl="https://chatgpt.com/plugins"
             name="ChatGPT"
             onGuideOpened={onGuideOpened}
+            onProminentChatGptOpened={onProminentChatGptOpened}
             serverUrl={serverUrl}
             steps={chatGptSteps}
           />

@@ -562,11 +562,12 @@ events through a small analytics boundary that:
 
 Allowed funnel events cover onboarding stage viewed/completed, profile
 completed, security education reached, Connection Setup started/completed by
-normalized outcome, onboarding completed, and selected aggregate feature-use
-events. Events must not contain or derive from Clerk IDs, email, Personal
-Account IDs, public handles, WhatsApp Connection IDs, WhatsApp Numbers,
-connection names, profile answers tied to a persistent User identity, message,
-contact, media, provider, request-body, or QR material.
+normalized outcome, anonymous Connection Setup timing by bounded phase and
+duration, onboarding completed, and selected aggregate feature-use events.
+Events must not contain or derive from Clerk IDs, email, Personal Account IDs,
+public handles, WhatsApp Connection IDs, WhatsApp Numbers, connection names,
+profile answers tied to a persistent User identity, message, contact, media,
+provider, request-body, or code material.
 
 `NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST` are public browser
 configuration validated per environment. When either is absent, analytics is
@@ -658,11 +659,12 @@ and is not selected by recovery; it cannot become a repeated create loop.
 Queue delivery
 uses batches of one, a three-minute visibility timeout, ten 30-second delivery
 retries, and seven-day retention. The durable setup and minute recovery scan
-remain authoritative if Cloudflare exhausts a delivery. Telemetry contains
-only `connection_setup.provision.completed`, service, allowlisted outcome and
-optional normalized failure code, plus recovery candidate counts; it never
-contains setup/account identifiers, number material, provider values, or
-ciphertext.
+remain authoritative if Cloudflare exhausts a delivery. Telemetry contains only
+`connection_setup.provision.claimed` with first-claim delay,
+`connection_setup.provision.completed` with service, allowlisted outcome,
+optional normalized failure code, and terminal duration, plus recovery candidate
+counts. It never contains setup/account identifiers, number material, provider
+values, or ciphertext.
 
 ## Connection Setup cancellation, expiry, and cleanup
 
@@ -757,11 +759,34 @@ provider-control binding. Production cannot select the protocol-observable
 provider used by the acceptance tests.
 
 Safe QR telemetry is limited to `connection_setup.qr.completed`, service, and
-one normalized outcome. Safe listing telemetry adds only the connection count
+one normalized outcome. A setup's first successful provisioning claim emits
+`connection_setup.provision.claimed` with only `queueDelayMs`, measured from
+durable setup creation to the persisted first claim. Provision completion emits
+normalized outcome, optional normalized failure code, and
+first-claim-to-terminal-transition `durationMs`; retries carry no duration and
+legacy in-flight setups without a first-claim timestamp do not invent one. Safe listing
+telemetry adds only the connection count
 to `whatsapp_connection.list.completed`. Neither event contains a User,
 Personal Account, Connection Setup, WhatsApp Connection, number, QR byte,
 provider value, credential, ingress identity, secret, ciphertext, or key
 reference.
+
+The approved first-party target is p95 observation lag at or below 750 ms in
+the deterministic browser scheduler fixture, independent of provider time. The
+fixture replays 18 fixed transition offsets from 0 through 5 seconds. The old
+fixed 750 ms policy measured p50/p95/p99 of 250/700/700 ms. The bounded policy
+measured 200/600/600 ms before code observation and 200/750/750 ms from code
+observation to active observation. These are measured fixture results, not
+production provider percentiles. The schedule starts at 250 ms, steps up by 250
+ms, and caps at 1 second before code display or 2 seconds while waiting for
+activation, reducing early waits and repeated reads without weakening the
+reconciled lifecycle boundaries.
+
+Anonymous browser metrics use the literal observable phases
+`start_to_code_observed` and `code_observed_to_active_observed`; they do not
+claim to know when WhatsApp accepted a scan. Each phase is emitted once per
+browser flow. Repeated API status reads emit outcomes without setup-age timing,
+so polling frequency cannot weight latency percentiles.
 
 ## WhatsApp Connection disconnect and reconnect
 

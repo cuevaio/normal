@@ -97,6 +97,7 @@ const makeHarness = (options: {
     readonly sessions: ReadonlyArray<object>;
   }> = [];
   let activeLease: string | null = null;
+  let claimCount = 0;
   let terminalFailure = false;
   let createAttempts = 0;
   let reconcileAttempts = 0;
@@ -113,13 +114,17 @@ const makeHarness = (options: {
           return { outcome: "leased" as const };
         }
         activeLease = requestedWorkerId;
+        claimCount += 1;
         return {
           outcome: "claimed" as const,
           setup: {
             accountKey,
             connectionKey,
+            createdAt: "2026-07-31T11:59:00.000Z",
+            firstClaim: claimCount === 1,
             numberCiphertext,
             personalAccountId,
+            provisioningStartedAt: observedAt,
             setupId,
             webhookIngressId: "30000000-0000-4000-8000-000000000021",
           },
@@ -256,6 +261,17 @@ describe("Connection Setup provisioning saga", () => {
       "create",
       "finish",
     ]);
+    expect(harness.events).toContainEqual({
+      event: "connection_setup.provision.claimed",
+      queueDelayMs: 60_000,
+      service: "api",
+    });
+    expect(harness.events).toContainEqual({
+      durationMs: 0,
+      event: "connection_setup.provision.completed",
+      outcome: "provisioned",
+      service: "api",
+    });
     expect(harness.reconcileInputs).toEqual([
       {
         setupMarker: setupId,
@@ -353,6 +369,11 @@ describe("Connection Setup provisioning saga", () => {
     expect(harness.calls.filter((call) => call === "reconcile")).toHaveLength(
       2,
     );
+    expect(
+      harness.events.filter(
+        (event) => event.event === "connection_setup.provision.claimed",
+      ),
+    ).toHaveLength(1);
   });
 
   test("records a definitive lifecycle rejection without scheduling another create", async () => {

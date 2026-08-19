@@ -152,6 +152,8 @@ export type ConnectionSetupProvisioningClaim =
           readonly personalAccountId: string;
           readonly version: 1;
         };
+        readonly createdAt: string;
+        readonly firstClaim: boolean;
         readonly numberCiphertext: {
           readonly ciphertext: string;
           readonly keyVersion: number;
@@ -159,6 +161,7 @@ export type ConnectionSetupProvisioningClaim =
           readonly version: 1;
         };
         readonly personalAccountId: string;
+        readonly provisioningStartedAt: string | null;
         readonly setupId: string;
         readonly webhookIngressId: string;
       };
@@ -505,12 +508,15 @@ interface ProvisioningClaimRow extends Record<string, unknown> {
   readonly connection_key_ciphertext: unknown;
   readonly connection_key_nonce: unknown;
   readonly connection_key_version: unknown;
+  readonly created_at?: unknown;
+  readonly first_claim?: unknown;
   readonly number_ciphertext: unknown;
   readonly number_ciphertext_version: unknown;
   readonly number_key_version: unknown;
   readonly number_nonce: unknown;
   readonly outcome: unknown;
   readonly personal_account_id: unknown;
+  readonly provisioning_started_at?: unknown;
 }
 
 interface CancelConnectionSetupRow extends Record<string, unknown> {
@@ -579,12 +585,14 @@ const provisioningClaim = (
   const connectionKeyCiphertext = bytes(row?.connection_key_ciphertext);
   const connectionKeyNonce = bytes(row?.connection_key_nonce);
   const connectionKeyVersion = positiveInteger(row?.connection_key_version);
+  const createdAt = timestamp(row?.created_at);
   const numberCiphertext = bytes(row?.number_ciphertext);
   const numberCiphertextVersion = positiveInteger(
     row?.number_ciphertext_version,
   );
   const numberKeyVersion = positiveInteger(row?.number_key_version);
   const numberNonce = bytes(row?.number_nonce);
+  const provisioningStartedAt = timestamp(row?.provisioning_started_at);
   if (
     row?.outcome !== "claimed" ||
     typeof row.personal_account_id !== "string" ||
@@ -595,6 +603,8 @@ const provisioningClaim = (
     connectionKeyCiphertext === null ||
     connectionKeyNonce === null ||
     connectionKeyVersion === null ||
+    createdAt === null ||
+    typeof row.first_claim !== "boolean" ||
     numberCiphertext === null ||
     numberCiphertextVersion !== 1 ||
     numberKeyVersion === null ||
@@ -625,6 +635,8 @@ const provisioningClaim = (
         personalAccountId: row.personal_account_id,
         version: 1,
       },
+      createdAt,
+      firstClaim: row.first_claim,
       numberCiphertext: {
         ciphertext: encodeBase64(numberCiphertext),
         keyVersion: numberKeyVersion,
@@ -632,6 +644,7 @@ const provisioningClaim = (
         version: numberCiphertextVersion,
       },
       personalAccountId: row.personal_account_id,
+      provisioningStartedAt,
       setupId,
       webhookIngressId: row.webhook_ingress_id,
     },
