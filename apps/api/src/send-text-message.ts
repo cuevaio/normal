@@ -157,6 +157,7 @@ export const makeAtomicSendTextMessageService = (
       const committed = await options.repository.commit(
         {
           auditLogId: options.nextAuditLogId(),
+          channel: input.channel,
           connectionPublicId: input.connectionId,
           fingerprint: requestFingerprint,
           grant,

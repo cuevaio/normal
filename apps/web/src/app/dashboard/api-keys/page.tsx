@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: "API Keys | Normal" };
 export default function ApiKeysPage() {
   return (
     <DashboardRoute
-      description="Create and revoke API Keys for personal server-side automations."
+      description="Create and revoke API Keys for REST automations and compatible MCP Clients."
       title="API Keys"
     />
   );

@@ -60,6 +60,30 @@ describe("API Worker entrypoint", () => {
     );
   });
 
+  test("routes API Key-shaped MCP credentials before OAuth validation", async () => {
+    const response = await exports.default.fetch(
+      new Request("https://api.example.test/mcp", {
+        body: JSON.stringify({
+          id: "request-1",
+          jsonrpc: "2.0",
+          method: "tools/list",
+        }),
+        headers: {
+          authorization: "bearer normal_apk_invalid",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("www-authenticate")).toBe(
+      'Bearer error="invalid_token"',
+    );
+    expect(await response.json()).toEqual({ error: "invalid_token" });
+  });
+
   test("admits only an exact allowlisted OAuth request through real Worker KV", async () => {
     const url = new URL("https://api.example.test/oauth/authorize");
     url.search = new URLSearchParams({

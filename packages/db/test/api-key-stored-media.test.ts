@@ -247,7 +247,6 @@ describe("API Key Stored Media", () => {
       minuteLimit: 10,
       observedAt,
       operationName: "read_stored_media",
-      permissions: ["connections:read", "messages:read"],
       personalAccountId: accountId,
       requiredPermission: "messages:read",
     });

@@ -31,6 +31,22 @@ const authorization = {
   clientId: "approved-client",
   oauthSubject: "A".repeat(43),
 } as const;
+const apiKeyGrant = {
+  apiKey: {
+    connectionIds: ["20000000-0000-4000-8000-000000000039"],
+    expiresAt: null,
+    grantId: "41000000-0000-4000-8000-000000000030",
+    id: "apk_123456789012345678901",
+    name: "Hermes on MacBook",
+    permissions: [
+      "connections:read",
+      "directory:read",
+      "messages:read",
+      "messages:send",
+    ],
+    personalAccountId: "10000000-0000-4000-8000-000000000030",
+  },
+} as const;
 const defaultCursorSigningKey = await Effect.runPromise(
   importCursorSigningKey(new Uint8Array(32).fill(17)),
 );
@@ -156,6 +172,8 @@ const makeHarness = (
     readonly searchKind: "name" | "phone" | null;
   }> = [];
   const messageSearchQueries: Array<ReadonlyArray<string> | null> = [];
+  const principals: Array<"api_key" | "mcp_authorization"> = [];
+  const sendGrantKinds: Array<"api" | "mcp"> = [];
   const layer = Layer.mergeAll(
     Layer.succeed(McpToolClock, {
       now: Effect.succeed(new Date("2026-07-31T12:00:00.000Z")),
@@ -217,8 +235,9 @@ const makeHarness = (
       write: () => Effect.die("not used"),
     }),
     Layer.succeed(SendTextMessage, {
-      send: () =>
-        Effect.succeed(
+      send: (input) => {
+        sendGrantKinds.push(input.grant.kind);
+        return Effect.succeed(
           overrides.sendResult ?? {
             outcome: "receipt" as const,
             receipt: {
@@ -229,7 +248,8 @@ const makeHarness = (
               idempotent_replay: false,
             },
           },
-        ),
+        );
+      },
     }),
     Layer.succeed(McpToolPersistence, {
       failStoredMediaRead: () => {
@@ -238,6 +258,7 @@ const makeHarness = (
       },
       beginProtectedOperation: (input) => {
         observations.push("begin");
+        principals.push("apiKey" in input ? "api_key" : "mcp_authorization");
         beginTargets.push({
           connectionPublicId: input.connectionPublicId ?? null,
           sendPublicId: input.sendPublicId ?? null,
@@ -793,6 +814,8 @@ const makeHarness = (
     observations,
     contactQueries,
     messageSearchQueries,
+    principals,
+    sendGrantKinds,
     telemetry,
   };
 };
@@ -1652,7 +1675,7 @@ describe("stateless MCP list_groups boundary", () => {
     expect(JSON.stringify(body)).not.toContain("provider");
   });
 
-  test("returns authorization-bound keyset pages and rejects changed filters", async () => {
+  test("returns grant-bound keyset pages and rejects changed grants and filters", async () => {
     const key = await Effect.runPromise(
       importCursorSigningKey(new Uint8Array(32).fill(39)),
     );
@@ -1670,7 +1693,7 @@ describe("stateless MCP list_groups boundary", () => {
       }),
       {},
       executionContext,
-      authorization,
+      apiKeyGrant,
     );
     const firstBody = (await first.json()) as {
       result: {
@@ -1697,7 +1720,7 @@ describe("stateless MCP list_groups boundary", () => {
       }),
       {},
       executionContext,
-      authorization,
+      apiKeyGrant,
     );
     expect(await second.json()).toMatchObject({
       result: {
@@ -1724,6 +1747,32 @@ describe("stateless MCP list_groups boundary", () => {
       authorization,
     );
     expect(await mismatch.json()).toMatchObject({
+      result: {
+        isError: true,
+        structuredContent: { error_code: "invalid_cursor" },
+      },
+    });
+
+    const otherGrant = await harness.handler(
+      jsonRpcRequest("tools/call", {
+        arguments: {
+          connection_id: "con_123456789012345678939",
+          cursor: firstBody.result.structuredContent.next_cursor,
+          limit: 1,
+        },
+        name: "list_groups",
+      }),
+      {},
+      executionContext,
+      {
+        apiKey: {
+          ...apiKeyGrant.apiKey,
+          grantId: "41000000-0000-4000-8000-000000000031",
+          id: "apk_123456789012345678902",
+        },
+      },
+    );
+    expect(await otherGrant.json()).toMatchObject({
       result: {
         isError: true,
         structuredContent: { error_code: "invalid_cursor" },
@@ -2451,6 +2500,26 @@ describe("atomic send_text_message MCP boundary", () => {
     expect(omittedBody.result.tools.map((tool) => tool.name)).not.toContain(
       "send_text_message",
     );
+  });
+
+  test("keeps an API-Key-authenticated MCP send on the API Key principal", async () => {
+    const harness = makeHarness({ scopes: ["messages:send"] });
+    await harness.handler(
+      jsonRpcRequest("tools/call", {
+        name: "send_text_message",
+        arguments: {
+          connection_id: "con_123456789012345678901",
+          idempotency_key: "idem_1234567890123456",
+          recipient_id: "ctc_123456789012345678901",
+          text: "Hello from Hermes",
+        },
+      }),
+      {},
+      executionContext,
+      apiKeyGrant,
+    );
+
+    expect(harness.sendGrantKinds).toEqual(["api"]);
   });
 
   test("preserves exact valid text and returns only a compact receipt", async () => {

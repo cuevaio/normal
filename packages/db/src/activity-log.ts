@@ -195,15 +195,14 @@ export const makeActivityLogRepository = (
         const logs: ActivityLogSummary[] = pageRows.map((row) => {
           const channel = row.channel === "api" ? "api" : "mcp";
           const apiKeyId = row.apiKeyPublicId;
-          const clientId =
-            channel === "api" ? (apiKeyId ?? "") : (row.clientId ?? "");
+          const clientId = apiKeyId ?? row.clientId ?? "";
           return {
             apiKeyId,
             authorizationId: row.authorizationPublicId,
             channel,
             clientId,
             clientName:
-              channel === "api"
+              apiKeyId !== null
                 ? (row.apiKeyName ?? clientId)
                 : (row.clientName ?? row.clientId ?? ""),
             completedAt:

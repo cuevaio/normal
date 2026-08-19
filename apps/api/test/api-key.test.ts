@@ -6,6 +6,7 @@ import {
   ApiKeyIdentifiers,
   ApiKeyPersistence,
   type ApiKeyPersistenceService,
+  authenticateApiKeyRequest,
   createApiKeyManagementHandler,
   makeApiKeyHmac,
 } from "../src/api-key";
@@ -41,7 +42,21 @@ const makeHarness = (options?: { readonly requireRecent?: boolean }) => {
   }> = [];
   const telemetry: Array<SafeTelemetryEvent> = [];
   const persistence: ApiKeyPersistenceService = {
-    authenticate: () => Effect.succeed(null),
+    authenticate: (input) =>
+      Effect.succeed(
+        input.publicId === publicId &&
+          input.digest.every((byte, index) => byte === digest[index])
+          ? {
+              connectionIds: [connectionId],
+              expiresAt: null,
+              grantId: "50000000-0000-4000-8000-000000000078",
+              id: publicId,
+              name: "Hermes on MacBook",
+              permissions: ["connections:read"],
+              personalAccountId: "10000000-0000-4000-8000-000000000078",
+            }
+          : null,
+      ),
     create: (input) =>
       Effect.sync(() => {
         if (input.clerkUserId !== "user_owner") {
@@ -133,6 +148,7 @@ const makeHarness = (options?: { readonly requireRecent?: boolean }) => {
   );
   return {
     handler: createApiKeyManagementHandler(layer, browserOrigin),
+    layer,
     telemetry,
   };
 };
@@ -167,6 +183,47 @@ const createBody = {
 };
 
 describe("API Key management HTTP boundary", () => {
+  test("strictly authenticates an API Key bearer for data-plane adapters", async () => {
+    const harness = makeHarness();
+    const authenticated = await Effect.runPromise(
+      authenticateApiKeyRequest(
+        request("/mcp", {
+          authorization: `Bearer ${credential}`,
+          method: "POST",
+        }),
+      ).pipe(Effect.provide(harness.layer)),
+    );
+    expect(authenticated).toMatchObject({
+      grantId: "50000000-0000-4000-8000-000000000078",
+      id: publicId,
+      name: "Hermes on MacBook",
+    });
+    await expect(
+      Effect.runPromise(
+        authenticateApiKeyRequest(
+          request("/mcp", {
+            authorization: `bearer ${credential}`,
+            method: "POST",
+          }),
+        ).pipe(Effect.provide(harness.layer)),
+      ),
+    ).resolves.toMatchObject({ id: publicId });
+
+    for (const authorization of [
+      `Bearer ${credential},Bearer ${credential}`,
+      `Bearer ${credential} extra`,
+      "Bearer normal_apk_invalid",
+      "Basic credential",
+    ]) {
+      const outcome = await Effect.runPromise(
+        authenticateApiKeyRequest(
+          request("/mcp", { authorization, method: "POST" }),
+        ).pipe(Effect.provide(harness.layer), Effect.either),
+      );
+      expect(outcome._tag).toBe("Left");
+    }
+  });
+
   test("creates an API Key once and never redisplays the plaintext", async () => {
     const harness = makeHarness();
     const created = await harness.handler(

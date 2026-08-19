@@ -380,7 +380,6 @@ describe("API Key Stored Message search", () => {
         minuteLimit: 10,
         observedAt,
         operationName: "search_messages",
-        permissions: ["connections:read", "messages:read"],
         personalAccountId: accountId,
         requiredPermission: "messages:read",
       }),

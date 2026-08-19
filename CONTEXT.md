@@ -49,7 +49,7 @@ An internal secret used to provision or operate a WhatsApp Connection. Provider 
 _Avoid_: User API key
 
 **API Key**:
-A User-created, revocable credential for a server-side automation to call Normal's public API on behalf of one Personal Account. Each API Key grants an explicitly selected set of WhatsApp Connections and independently selected permissions for connection metadata, the WhatsApp Directory, Stored Messages, and outbound sends; Connections added later are not included automatically.
+A User-created, revocable credential for a server-side automation or compatible MCP Client to call Normal's public REST API or MCP endpoint on behalf of one Personal Account. An API Key used through MCP remains an API Key and never becomes an MCP Authorization. Each API Key grants an explicitly selected set of WhatsApp Connections and independently selected permissions for connection metadata, the WhatsApp Directory, Stored Messages, and outbound sends; Connections added later are not included automatically.
 _Avoid_: Provider API Credential, MCP Authorization, browser token
 
 **MCP Client**:

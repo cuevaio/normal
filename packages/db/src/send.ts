@@ -84,6 +84,7 @@ export { apiSendGrant, mcpSendGrant } from "./mcp-tool";
 
 export type CommitSendInput = {
   readonly auditLogId: string;
+  readonly channel: "api" | "mcp";
   readonly connectionPublicId: string;
   readonly fingerprint: string;
   readonly grant: SendGrantIdentity;
@@ -162,7 +163,7 @@ const receipt = (row: Record<string, unknown>): SendReceiptRecord => ({
   statusChangedAt: date(row.status_changed_at),
 });
 
-const grantPrincipal = (grant: SendGrantIdentity) =>
+const grantPrincipal = (grant: SendGrantIdentity, channel: "api" | "mcp") =>
   grant.kind === "mcp"
     ? {
         apiKeyId: null as string | null,
@@ -177,7 +178,7 @@ const grantPrincipal = (grant: SendGrantIdentity) =>
         apiKeyId: grant.apiKey.grantId,
         apiKeyName: grant.apiKey.name,
         apiKeyPublicId: grant.apiKey.publicId,
-        channel: "api" as const,
+        channel,
         grantId: grant.apiKey.grantId,
         grantType: "api" as const,
         mcpAuthorizationId: null as string | null,
@@ -192,7 +193,7 @@ export const makePgAtomicSendRepository = (
       let transactionCommitted = false;
       await db.execute(sql`BEGIN`);
       try {
-        const principal = grantPrincipal(input.grant);
+        const principal = grantPrincipal(input.grant, input.channel);
         const boot =
           input.grant.kind === "mcp"
             ? await db.execute<{ personal_account_id: unknown }>(

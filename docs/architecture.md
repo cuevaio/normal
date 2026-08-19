@@ -42,7 +42,7 @@ flowchart LR
     user -->|sign in and manage| web
     user -->|read public API reference| docs
     web -->|Clerk JWT over HTTPS| api
-    mcp -->|OAuth and MCP over HTTPS| api
+    mcp -->|OAuth or API Key, then MCP over HTTPS| api
     apiCaller -->|API Key over HTTPS| api
     web --> clerk
     api -->|OAuth protocol artifacts| oauth
@@ -109,13 +109,16 @@ flowchart LR
   MCP Authorization and API Key. Neon holds current state; a locked,
   restore-external R2 journal holds the append-only transitions and permanent
   purge cutoffs the restore coordinator replays before traffic reopens.
-* API Keys authenticate through a purpose-specific HMAC digest and a narrow
-  Neon bootstrap. Personal Account Deletion revokes every API Key and clears
+* API Keys authenticate REST and compatible MCP Clients through a
+  purpose-specific HMAC digest and a narrow Neon bootstrap. API Key-shaped MCP
+  credentials route before OAuth and never fall back to OAuth after failure.
+  Personal Account Deletion revokes every API Key and clears
   every digest in the same prepare transaction as MCP revocation; active rows
   later cascade during the bounded Personal Account purge. MCP and REST remain
   separate protocol adapters over shared protected WhatsApp operations, quotas,
-  and Activity Logs. Send Operations admit a protocol-neutral grant identity so
-  MCP Authorization and API Key stay distinct principals. REST pages complete
+  and Activity Logs. Activity Log channel is independent from principal type.
+  Send Operations admit a protocol-neutral grant identity so MCP Authorization
+  and API Key stay distinct principals across both adapters. REST pages complete
   retained Stored Messages at
   `GET /v1/connections/{connection_id}/conversations/{conversation_id}/messages`
   and creates or exactly replays a text Send Operation at

@@ -35,7 +35,9 @@ import {
   makeStoredMediaUri,
   parseStoredMediaUri,
 } from "@whatsapp-mcp/contracts/stored-media-uri";
+import type { AuthenticatedApiKey } from "@whatsapp-mcp/db/api-key";
 import {
+  apiSendGrant,
   type BeginProtectedOperationResult,
   type McpAccessAuthorization,
   type McpToolChatPage,
@@ -96,6 +98,25 @@ export class McpToolPersistenceError extends Data.TaggedError(
   "McpToolPersistenceError",
 ) {}
 
+export type McpAccessGrant =
+  | (McpAccessAuthorization & { readonly apiKey?: never })
+  | {
+      readonly apiKey: AuthenticatedApiKey;
+      readonly authorizationId?: never;
+      readonly clientId?: never;
+      readonly oauthSubject?: never;
+    };
+
+export const isMcpApiKeyGrant = (
+  grant: McpAccessGrant,
+): grant is Extract<McpAccessGrant, { readonly apiKey: AuthenticatedApiKey }> =>
+  grant.apiKey !== undefined;
+
+const cursorGrantId = (grant: McpAccessGrant): string =>
+  isMcpApiKeyGrant(grant)
+    ? `api:${grant.apiKey.grantId}`
+    : grant.authorizationId;
+
 export interface McpToolPersistenceService {
   readonly failStoredMediaRead: (input: {
     readonly auditLogId: string;
@@ -103,12 +124,14 @@ export interface McpToolPersistenceService {
     readonly errorCode: string;
   }) => Effect.Effect<void, McpToolPersistenceError>;
   readonly reserveStoredMediaRead: (
-    input: McpAccessAuthorization & {
+    input: McpAccessGrant & {
       readonly auditLogId: string;
       readonly connectionPublicId: string;
       readonly dailyByteLimit: number;
+      readonly hourLimit: number;
       readonly mediaPublicId: string;
       readonly messagePublicId: string;
+      readonly minuteLimit: number;
       readonly observedAt: Date;
     },
   ) => Effect.Effect<
@@ -116,7 +139,7 @@ export interface McpToolPersistenceService {
     McpToolPersistenceError
   >;
   readonly beginProtectedOperation: (
-    input: McpAccessAuthorization & {
+    input: McpAccessGrant & {
       readonly auditLogId: string;
       readonly connectionPublicId?: string;
       readonly hourLimit: number;
@@ -134,7 +157,7 @@ export interface McpToolPersistenceService {
     readonly resultCount: number | null;
   }) => Effect.Effect<void, McpToolPersistenceError>;
   readonly inspectAuthorization: (
-    input: McpAccessAuthorization & { readonly observedAt: Date },
+    input: McpAccessGrant & { readonly observedAt: Date },
   ) => Effect.Effect<
     {
       readonly scopes: ReadonlyArray<
@@ -147,7 +170,7 @@ export interface McpToolPersistenceService {
     McpToolPersistenceError
   >;
   readonly listConnections: (
-    input: McpAccessAuthorization & {
+    input: McpAccessGrant & {
       readonly authorizationContextEstablished?: true;
       readonly observedAt: Date;
     },
@@ -156,21 +179,21 @@ export interface McpToolPersistenceService {
     McpToolPersistenceError
   >;
   readonly getSendStatus?: (
-    input: McpAccessAuthorization & {
+    input: McpAccessGrant & {
       readonly connectionPublicId: string;
       readonly observedAt: Date;
       readonly sendPublicId: string;
     },
   ) => Effect.Effect<McpToolSendStatusRecord | null, McpToolPersistenceError>;
   readonly listGroups: (
-    input: McpAccessAuthorization & {
+    input: McpAccessGrant & {
       readonly connectionPublicId: string;
       readonly observedAt: Date;
       readonly searchIndex: string | null;
     },
   ) => Effect.Effect<McpToolGroupPage | null, McpToolPersistenceError>;
   readonly listChats?: (
-    input: McpAccessAuthorization & {
+    input: McpAccessGrant & {
       readonly authorizationContextEstablished?: true;
       readonly connectionPublicId: string;
       readonly cursorActivityAt: string | null;
@@ -181,7 +204,7 @@ export interface McpToolPersistenceService {
     },
   ) => Effect.Effect<McpToolChatPage | null, McpToolPersistenceError>;
   readonly readMessages?: (
-    input: McpAccessAuthorization & {
+    input: McpAccessGrant & {
       readonly auditLogId: string;
       readonly authorizationContextEstablished?: true;
       readonly connectionPublicId: string;
@@ -199,7 +222,7 @@ export interface McpToolPersistenceService {
     McpToolPersistenceError
   >;
   readonly searchMessages?: (
-    input: McpAccessAuthorization & {
+    input: McpAccessGrant & {
       readonly connectionPublicId: string;
       readonly conversationPublicId: string | null;
       readonly cursorSentAt: string | null;
@@ -213,7 +236,7 @@ export interface McpToolPersistenceService {
     },
   ) => Effect.Effect<McpToolMessageSearchPage | null, McpToolPersistenceError>;
   readonly completeMessageRecordRead: (
-    input: McpAccessAuthorization & {
+    input: McpAccessGrant & {
       readonly auditLogId: string;
       readonly authorizationContextEstablished?: true;
       readonly dailyRecordLimit: number;
@@ -226,7 +249,7 @@ export interface McpToolPersistenceService {
     McpToolPersistenceError
   >;
   readonly loadGroupSearchMaterial: (
-    input: McpAccessAuthorization & {
+    input: McpAccessGrant & {
       readonly connectionPublicId: string;
       readonly observedAt: Date;
     },
@@ -235,7 +258,7 @@ export interface McpToolPersistenceService {
     McpToolPersistenceError
   >;
   readonly loadContactReadMaterial: (
-    input: McpAccessAuthorization & {
+    input: McpAccessGrant & {
       readonly connectionPublicId: string;
       readonly observedAt: Date;
     },
@@ -244,7 +267,7 @@ export interface McpToolPersistenceService {
     McpToolPersistenceError
   >;
   readonly listEncryptedContacts: (
-    input: McpAccessAuthorization & {
+    input: McpAccessGrant & {
       readonly connectionPublicId: string;
       readonly cursorDisplayNameSort: string | null;
       readonly cursorPublicId: string | null;
@@ -258,7 +281,7 @@ export interface McpToolPersistenceService {
     McpToolPersistenceError
   >;
   readonly rejectProtectedOperation: (
-    input: McpAccessAuthorization & {
+    input: McpAccessGrant & {
       readonly auditLogId: string;
       readonly connectionPublicId?: string;
       readonly errorCode: string;
@@ -307,6 +330,7 @@ export type SendTextMessageResult =
 export interface SendTextMessageService {
   readonly send: (
     input: {
+      readonly channel: "api" | "mcp";
       readonly connectionId: string;
       readonly grant: SendGrantIdentity;
       readonly idempotencyKey: string;
@@ -833,7 +857,7 @@ const auditUnavailable = () =>
 const authorizationDenied = () =>
   makeExecutionErrorResult({
     error_code: "authorization_denied",
-    message: "The MCP Authorization does not permit this tool.",
+    message: "The current grant does not permit this tool.",
     retryable: false,
   });
 
@@ -909,7 +933,7 @@ const emitToolCompletion = (
   });
 
 const listConnections = (
-  authorization: McpAccessAuthorization,
+  authorization: McpAccessGrant,
   hourLimit: number,
   minuteLimit: number,
 ): Effect.Effect<
@@ -1100,7 +1124,7 @@ const listConnections = (
   }).pipe(Effect.catchAll(() => Effect.succeed(auditUnavailable())));
 
 const sendTextMessage = (
-  authorization: McpAccessAuthorization,
+  authorization: McpAccessGrant,
   input: z.infer<typeof SendTextMessageInput>,
   deferProviderAttempt?: (attempt: Promise<void>) => void,
 ) =>
@@ -1108,8 +1132,17 @@ const sendTextMessage = (
     const service = yield* SendTextMessage;
     const result = yield* service.send(
       {
+        channel: "mcp",
         connectionId: input.connection_id,
-        grant: mcpSendGrant(authorization),
+        grant: isMcpApiKeyGrant(authorization)
+          ? apiSendGrant({
+              grantId: authorization.apiKey.grantId,
+              name: authorization.apiKey.name,
+              permissions: authorization.apiKey.permissions,
+              personalAccountId: authorization.apiKey.personalAccountId,
+              publicId: authorization.apiKey.id,
+            })
+          : mcpSendGrant(authorization),
         idempotencyKey: input.idempotency_key,
         recipientId: input.recipient_id,
         text: input.text,
@@ -1144,7 +1177,7 @@ const compareText = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0;
 
 const getSendStatus = (
-  authorization: McpAccessAuthorization,
+  authorization: McpAccessGrant,
   input: z.infer<typeof GetSendStatusInput>,
   hourLimit: number,
   minuteLimit: number,
@@ -1234,7 +1267,7 @@ const getSendStatus = (
   }).pipe(Effect.catchAll(() => Effect.succeed(auditUnavailable())));
 
 const listGroups = (
-  authorization: McpAccessAuthorization,
+  authorization: McpAccessGrant,
   input: z.infer<typeof ListGroupsInput>,
   hourLimit: number,
   minuteLimit: number,
@@ -1252,7 +1285,7 @@ const listGroups = (
         ? null
         : normalizeGroupDisplayName(input.search);
     const cursorContext: CursorContext = {
-      authorizationId: authorization.authorizationId,
+      authorizationId: cursorGrantId(authorization),
       connectionId: input.connection_id as CursorContext["connectionId"],
       filters: { search: normalizedSearch },
       pageSize: input.limit,
@@ -1548,7 +1581,7 @@ interface OpenContactPage {
 }
 
 const listContacts = (
-  authorization: McpAccessAuthorization,
+  authorization: McpAccessGrant,
   input: z.infer<typeof ListContactsInput>,
   hourLimit: number,
   minuteLimit: number,
@@ -1567,7 +1600,7 @@ const listContacts = (
           ? input.search
           : normalizeContactDisplayName(input.search);
     const cursorContext: CursorContext = {
-      authorizationId: authorization.authorizationId,
+      authorizationId: cursorGrantId(authorization),
       connectionId: input.connection_id as CursorContext["connectionId"],
       filters: { search: normalizedSearch },
       pageSize: input.limit,
@@ -1955,7 +1988,7 @@ const streamToBase64 = async (
 };
 
 const listChats = (
-  authorization: McpAccessAuthorization,
+  authorization: McpAccessGrant,
   input: z.infer<typeof ListChatsInput>,
   hourLimit: number,
   minuteLimit: number,
@@ -1968,7 +2001,7 @@ const listChats = (
     const codec = yield* McpCursorCodec;
     const startedAt = yield* clock.now;
     const context: CursorContext = {
-      authorizationId: authorization.authorizationId,
+      authorizationId: cursorGrantId(authorization),
       connectionId: input.connection_id as CursorContext["connectionId"],
       filters: { kind: input.kind },
       pageSize: input.limit,
@@ -2262,7 +2295,7 @@ const listChats = (
   }).pipe(Effect.catchAll(() => Effect.succeed(auditUnavailable())));
 
 const readMessages = (
-  authorization: McpAccessAuthorization,
+  authorization: McpAccessGrant,
   input: z.infer<typeof ReadMessagesInput>,
   hourLimit: number,
   minuteLimit: number,
@@ -2276,7 +2309,7 @@ const readMessages = (
     const codec = yield* McpCursorCodec;
     const startedAt = yield* clock.now;
     const context: CursorContext = {
-      authorizationId: authorization.authorizationId,
+      authorizationId: cursorGrantId(authorization),
       connectionId: input.connection_id as CursorContext["connectionId"],
       filters: { conversation_id: input.conversation_id },
       pageSize: input.limit,
@@ -2759,7 +2792,7 @@ const readMessages = (
   }).pipe(Effect.catchAll(() => Effect.succeed(auditUnavailable())));
 
 const searchMessages = (
-  authorization: McpAccessAuthorization,
+  authorization: McpAccessGrant,
   input: z.infer<typeof SearchMessagesInput>,
   hourLimit: number,
   minuteLimit: number,
@@ -2779,7 +2812,7 @@ const searchMessages = (
       query.terms,
     );
     const context: CursorContext = {
-      authorizationId: authorization.authorizationId,
+      authorizationId: cursorGrantId(authorization),
       connectionId: input.connection_id as CursorContext["connectionId"],
       filters: {
         query_digest: queryDigest,
@@ -3177,7 +3210,7 @@ export const createMcpRequestHandler =
     request: Request,
     environment: unknown,
     context: ExecutionContext,
-    authorization: McpAccessAuthorization,
+    authorization: McpAccessGrant,
   ): Promise<Response> => {
     const payload = await request
       .clone()
@@ -3283,8 +3316,10 @@ export const createMcpRequestHandler =
                     connectionPublicId: parsed.connectionId,
                     dailyByteLimit:
                       options.storedMediaDailyByteLimit ?? 268_435_456,
+                    hourLimit: options.hourLimit,
                     mediaPublicId: parsed.mediaId,
                     messagePublicId: parsed.messageId,
+                    minuteLimit: options.minuteLimit,
                     observedAt: yield* clock.now,
                   });
                   if (material === null) return null;
@@ -3449,7 +3484,7 @@ export const createMcpRequestHandler =
         "list_connections",
         {
           description:
-            "List every non-deleted WhatsApp Connection selected by the current MCP Authorization.",
+            "List every non-deleted WhatsApp Connection selected by the current grant.",
           inputSchema: ListConnectionsInput,
           outputSchema: ListConnectionsOutputSchema,
           title: "List WhatsApp Connections",
@@ -3596,7 +3631,7 @@ export const createMcpRequestHandler =
         if (hasConnectionsRead) {
           tools.push({
             description:
-              "List every non-deleted WhatsApp Connection selected by the current MCP Authorization.",
+              "List every non-deleted WhatsApp Connection selected by the current grant.",
             inputSchema: z.toJSONSchema(ListConnectionsInput, {
               target: "draft-2020-12",
             }),

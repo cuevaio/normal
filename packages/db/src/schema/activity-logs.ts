@@ -85,7 +85,7 @@ export const activityLogsInApp = publicSchema.table(
         table.startedAt.asc().nullsLast().op("timestamptz_ops"),
         table.id.asc().nullsLast().op("uuid_ops"),
       )
-      .where(sql`(quota_reserved AND (channel = 'api'::text))`),
+      .where(sql`(quota_reserved AND (api_key_id IS NOT NULL))`),
     index("tool_call_logs_review_page").using(
       "btree",
       table.personalAccountId.asc().nullsLast().op("text_ops"),
@@ -175,7 +175,7 @@ export const activityLogsInApp = publicSchema.table(
     ),
     check(
       "tool_call_logs_channel_principal",
-      sql`((channel = 'mcp'::text) AND (mcp_authorization_id IS NOT NULL) AND (api_key_id IS NULL) AND (api_key_public_id IS NULL) AND (api_key_name IS NULL)) OR ((channel = 'api'::text) AND (mcp_authorization_id IS NULL) AND (api_key_id IS NOT NULL) AND (api_key_public_id ~ '^apk_[A-Za-z0-9_-]{21}$'::text) AND (api_key_name IS NOT NULL) AND (length(btrim(api_key_name)) >= 1) AND (length(btrim(api_key_name)) <= 64) AND (api_key_name = btrim(api_key_name)))`,
+      sql`((channel = 'mcp'::text) AND (mcp_authorization_id IS NOT NULL) AND (api_key_id IS NULL) AND (api_key_public_id IS NULL) AND (api_key_name IS NULL)) OR ((mcp_authorization_id IS NULL) AND (api_key_id IS NOT NULL) AND (api_key_public_id ~ '^apk_[A-Za-z0-9_-]{21}$'::text) AND (api_key_name IS NOT NULL) AND (length(btrim(api_key_name)) >= 1) AND (length(btrim(api_key_name)) <= 64) AND (api_key_name = btrim(api_key_name)))`,
     ),
   ],
 );

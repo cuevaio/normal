@@ -229,6 +229,7 @@ describe("Send Operation grant identities", () => {
       readonly sendPublicId: string;
     },
   ) => ({
+    channel: grant.kind === "mcp" ? ("mcp" as const) : ("api" as const),
     connectionPublicId,
     grant,
     hourRequestLimit: 100,
@@ -299,6 +300,38 @@ describe("Send Operation grant identities", () => {
       channel: "api",
       mcp_authorization_id: null,
       tool_name: "send_text_message",
+    });
+  });
+
+  test("records the MCP channel independently from an API Key principal", async () => {
+    const created = await sends.commit(
+      {
+        ...commitInput(apiGrantA, {
+          auditLogId: "51000000-0000-4000-8000-000000000086",
+          fingerprint: `sf1_${"Z".repeat(43)}`,
+          idempotencyKey: "123456789012345678986",
+          sendId: "60000000-0000-4000-8000-000000000086",
+          sendPublicId: "snd_123456789012345678986",
+        }),
+        channel: "mcp",
+      },
+      encrypt,
+    );
+    expect(created.outcome).toBe("created");
+
+    const audit = await database.query<{
+      api_key_id: string | null;
+      channel: string;
+      mcp_authorization_id: string | null;
+    }>(
+      `SELECT channel, mcp_authorization_id, api_key_id
+       FROM public.tool_call_logs
+       WHERE id = '51000000-0000-4000-8000-000000000086'`,
+    );
+    expect(audit.rows[0]).toEqual({
+      api_key_id: apiKeyIdA,
+      channel: "mcp",
+      mcp_authorization_id: null,
     });
   });
 

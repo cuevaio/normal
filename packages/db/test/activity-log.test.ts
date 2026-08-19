@@ -38,6 +38,26 @@ describe("Activity Log protected-operation admission", () => {
         "arn:aws:kms:us-east-1:111122223333:key/content-root-key",
       ],
     );
+    await database.query(
+      `INSERT INTO public.api_keys (
+         id, personal_account_id, public_id, name, credential_digest,
+         credential_hint, permissions, created_at, reverified_at
+       ) VALUES
+         ($1, $3, $4, 'Billing automation', decode(repeat('11', 32), 'hex'),
+          $6, ARRAY['connections:read', 'directory:read', 'messages:read', 'messages:send'], $8, $8),
+         ($2, $3, $5, 'Search automation', decode(repeat('22', 32), 'hex'),
+          $7, ARRAY['connections:read', 'directory:read', 'messages:read', 'messages:send'], $8, $8)`,
+      [
+        apiKeyId,
+        otherApiKeyId,
+        accountId,
+        apiKeyPublicId,
+        otherApiKeyPublicId,
+        `normal_${apiKeyPublicId}.…ABCD`,
+        `normal_${otherApiKeyPublicId}.…EFGH`,
+        observedAt,
+      ],
+    );
     const provider: McpToolConnectionProvider = {
       withConnection: async (use) => {
         await database.exec("SET ROLE whatsapp_api_runtime");
@@ -225,13 +245,18 @@ describe("Activity Log protected-operation admission", () => {
   });
 
   test("records missing API Key permission without reserving quota", async () => {
+    await database.query(
+      `UPDATE public.api_keys
+       SET permissions = ARRAY['messages:send']
+       WHERE id = $1`,
+      [apiKeyId],
+    );
     await expect(
       repository.beginProtectedOperation({
         ...apiPrincipal,
         auditLogId: "50000000-0000-4000-8000-000000000049",
         observedAt,
         operationName: "list_connections",
-        permissions: ["messages:send"],
         requiredPermission: "connections:read",
       }),
     ).resolves.toEqual({

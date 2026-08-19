@@ -1,4 +1,3 @@
-import { parseApiKeyCredential } from "@whatsapp-mcp/contracts/api-key";
 import {
   type CursorBoundary,
   type RestCursorContext,
@@ -59,10 +58,9 @@ import { apiSendGrant } from "@whatsapp-mcp/db/send";
 import { normalizeWhatsAppConnectionName } from "@whatsapp-mcp/domain/whatsapp-connection";
 import { Context, Data, Effect, type Layer, Schema } from "effect";
 import {
-  ApiKeyHmac,
   type ApiKeyHmacService,
-  ApiKeyPersistence,
   type ApiKeyPersistenceService,
+  authenticateApiKeyRequest,
 } from "./api-key";
 import {
   contactSearchIndex,
@@ -112,7 +110,6 @@ const SEND_OPERATIONS_PATH =
 const SEND_STATUS_PATH =
   /^\/v1\/connections\/(con_[A-Za-z0-9_-]{21})\/send-operations\/(snd_[A-Za-z0-9_-]{21})$/u;
 const READ_STORED_MEDIA = "read_stored_media" as const;
-const MAX_AUTHORIZATION_LENGTH = 128;
 const MAX_SEND_BODY_BYTES = 32_768;
 const SEND_OPERATION = "send_text_message" as const;
 const GET_SEND_STATUS = "get_send_status" as const;
@@ -394,22 +391,6 @@ const problemResponse = (
     "application/problem+json; charset=utf-8",
   );
 
-const parseBearerCredential = (request: Request) => {
-  let authorizationCount = 0;
-  for (const [name] of request.headers) {
-    if (name.toLowerCase() === "authorization") authorizationCount += 1;
-  }
-  const raw = request.headers.get("authorization");
-  if (authorizationCount !== 1 || raw === null) return null;
-  if (raw.length > MAX_AUTHORIZATION_LENGTH || raw.includes(",")) return null;
-  if (!raw.startsWith("Bearer ")) return null;
-  const token = raw.slice("Bearer ".length);
-  if (token.includes(" ") || token.includes("\n") || token.includes("\r")) {
-    return null;
-  }
-  return parseApiKeyCredential(token);
-};
-
 const revealDisplayName = (
   connection: McpToolConnectionRecord,
 ): Effect.Effect<string, EncryptionError, EnvelopeEncryption> =>
@@ -493,27 +474,13 @@ const authenticate = (
   Response,
   ApiKeyHmacService | ApiKeyPersistenceService
 > =>
-  Effect.gen(function* () {
-    const parsed = parseBearerCredential(request);
-    if (parsed === null) {
-      return yield* Effect.fail(problemResponse("invalid_credentials", 401));
-    }
-    const hmac = yield* ApiKeyHmac;
-    const digest = yield* hmac
-      .digest(parsed.credential)
-      .pipe(Effect.mapError(() => problemResponse("unavailable", 503)));
-    const persistence = yield* ApiKeyPersistence;
-    const grant = yield* persistence
-      .authenticate({
-        digest,
-        publicId: parsed.publicId,
-      })
-      .pipe(Effect.mapError(() => problemResponse("unavailable", 503)));
-    if (grant === null) {
-      return yield* Effect.fail(problemResponse("invalid_credentials", 401));
-    }
-    return grant;
-  });
+  authenticateApiKeyRequest(request).pipe(
+    Effect.mapError((error) =>
+      error._tag === "InvalidApiKeyCredential"
+        ? problemResponse("invalid_credentials", 401)
+        : problemResponse("unavailable", 503),
+    ),
+  );
 
 const listConnections = (
   request: Request,
@@ -3431,6 +3398,7 @@ const createSendOperation = (
       const send = yield* SendTextMessage;
       const result = yield* send.send(
         {
+          channel: "api",
           connectionId,
           grant: apiSendGrant({
             grantId: grant.grantId,
@@ -3579,10 +3547,6 @@ export const createRestHandler =
       );
     }
     if (request.method !== "GET" || path !== CONNECTIONS_PATH) {
-      const parsed = parseBearerCredential(request);
-      if (parsed === null) {
-        return problemResponse("invalid_credentials", 401);
-      }
       const authenticated = await Effect.runPromise(
         authenticate(request).pipe(Effect.provide(layer), Effect.either),
       );

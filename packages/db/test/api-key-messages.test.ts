@@ -412,7 +412,6 @@ describe("API Key Stored Messages", () => {
         minuteLimit: 10,
         observedAt,
         operationName: "read_messages",
-        permissions: ["connections:read", "messages:read"],
         personalAccountId: accountId,
         requiredPermission: "messages:read",
       }),

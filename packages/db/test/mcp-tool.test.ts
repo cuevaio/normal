@@ -292,6 +292,7 @@ describe("MCP tool repository", () => {
     let encrypted = 0;
     const input = {
       auditLogId: "50000000-0000-4000-8000-000000000099",
+      channel: "mcp",
       connectionPublicId: connectionA,
       fingerprint: `sf1_${"B".repeat(43)}`,
       grant,
@@ -563,6 +564,7 @@ describe("MCP tool repository", () => {
     });
     const input = {
       auditLogId: "50000000-0000-4000-8000-000000000091",
+      channel: "mcp",
       connectionPublicId: connectionA,
       fingerprint: `sf1_${"C".repeat(43)}`,
       grant,

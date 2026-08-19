@@ -6,6 +6,7 @@ import {
   decodeApiKeyRevokeResponse,
   decodeCreateApiKeyRequest,
   decodeCreatedApiKey,
+  parseApiKeyCredential,
 } from "@whatsapp-mcp/contracts/api-key";
 import { makeApiKeyId } from "@whatsapp-mcp/contracts/handles";
 import type {
@@ -29,6 +30,7 @@ import {
 
 const MANAGEMENT_PATH = "/v1/api-keys";
 const API_KEY_HANDLE_PATTERN = /^apk_[A-Za-z0-9_-]{21}$/u;
+const MAX_AUTHORIZATION_LENGTH = 128;
 
 export class ApiKeyPersistenceError extends Data.TaggedError(
   "ApiKeyPersistenceError",
@@ -38,6 +40,10 @@ export class ApiKeyPersistenceError extends Data.TaggedError(
 }> {}
 
 export class ApiKeyHmacError extends Data.TaggedError("ApiKeyHmacError") {}
+
+export class InvalidApiKeyCredential extends Data.TaggedError(
+  "InvalidApiKeyCredential",
+) {}
 
 export interface ApiKeyPersistenceService {
   readonly authenticate: (input: {
@@ -135,6 +141,55 @@ export const makeApiKeyHmac = (secretHex: string): ApiKeyHmacService => {
       }),
   };
 };
+
+const parseApiKeyBearerCredential = (request: Request) => {
+  let authorizationCount = 0;
+  for (const [name] of request.headers) {
+    if (name.toLowerCase() === "authorization") authorizationCount += 1;
+  }
+  const raw = request.headers.get("authorization");
+  if (authorizationCount !== 1 || raw === null) return null;
+  if (raw.length > MAX_AUTHORIZATION_LENGTH || raw.includes(",")) return null;
+  if (raw.slice(0, "Bearer ".length).toLowerCase() !== "bearer ") return null;
+  const token = raw.slice("Bearer ".length);
+  if (token.includes(" ") || token.includes("\n") || token.includes("\r")) {
+    return null;
+  }
+  return parseApiKeyCredential(token);
+};
+
+export const hasApiKeyBearerCredential = (request: Request): boolean =>
+  request.headers
+    .get("authorization")
+    ?.slice(0, "Bearer ".length)
+    .toLowerCase() === "bearer " &&
+  request.headers
+    .get("authorization")
+    ?.slice("Bearer ".length)
+    .startsWith("normal_apk_") === true;
+
+export const authenticateApiKeyRequest = (
+  request: Request,
+): Effect.Effect<
+  AuthenticatedApiKey,
+  ApiKeyHmacError | ApiKeyPersistenceError | InvalidApiKeyCredential,
+  ApiKeyHmacService | ApiKeyPersistenceService
+> =>
+  Effect.gen(function* () {
+    const parsed = parseApiKeyBearerCredential(request);
+    if (parsed === null)
+      return yield* Effect.fail(new InvalidApiKeyCredential());
+    const hmac = yield* ApiKeyHmac;
+    const digest = yield* hmac.digest(parsed.credential);
+    const persistence = yield* ApiKeyPersistence;
+    const grant = yield* persistence.authenticate({
+      digest,
+      publicId: parsed.publicId,
+    });
+    return grant === null
+      ? yield* Effect.fail(new InvalidApiKeyCredential())
+      : grant;
+  });
 
 export const randomApiKeySecret = (): string => {
   const bytes = new Uint8Array(32);

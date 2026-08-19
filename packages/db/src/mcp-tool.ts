@@ -376,7 +376,7 @@ export type BeginProtectedOperationInput = {
       readonly operationName: McpToolName;
     }
   | {
-      readonly channel: "api";
+      readonly channel: "api" | "mcp";
       readonly apiKey: ApiKeyActivityPrincipal;
       readonly keyHourLimit: number;
       readonly keyMinuteLimit: number;
@@ -417,6 +417,13 @@ export interface McpToolRepository {
     input: McpAccessAuthorization & { readonly observedAt: Date },
   ) => Promise<{
     readonly scopes: ReadonlyArray<McpAuthorizationScope>;
+  } | null>;
+  readonly inspectApiKeyGrant: (input: {
+    readonly apiKeyGrantId: string;
+    readonly observedAt: Date;
+    readonly personalAccountId: string;
+  }) => Promise<{
+    readonly permissions: ReadonlyArray<McpAuthorizationScope>;
   } | null>;
   readonly listConnections: (
     input: McpAccessAuthorization & {
@@ -625,7 +632,7 @@ export interface McpToolRepository {
           readonly authorization: McpAccessAuthorization;
         }
       | {
-          readonly channel: "api";
+          readonly channel: "api" | "mcp";
           readonly apiKey: ApiKeyActivityPrincipal;
           readonly permissions?: ReadonlyArray<string>;
           readonly personalAccountId: string;
@@ -2012,8 +2019,42 @@ export const makeMcpToolRepository = (
         return scopes === null ? null : { scopes };
       }),
     ),
+  inspectApiKeyGrant: (input) =>
+    provider.withConnection((connection) =>
+      withTransaction(connection, async () => {
+        if (
+          (await enterAccountContext(connection, input.personalAccountId)) ===
+          null
+        ) {
+          return null;
+        }
+        const db = makeDatabase(connection);
+        const grants = await db
+          .select({
+            expiresAt: apiKeysInApp.expiresAt,
+            permissions: apiKeysInApp.permissions,
+            state: apiKeysInApp.state,
+          })
+          .from(apiKeysInApp)
+          .where(
+            and(
+              eq(apiKeysInApp.id, input.apiKeyGrantId),
+              eq(apiKeysInApp.personalAccountId, input.personalAccountId),
+            ),
+          );
+        const grant = grants[0];
+        const permissions = authorizationScopes(grant?.permissions);
+        return grant === undefined ||
+          grant.state !== "active" ||
+          (grant.expiresAt !== null &&
+            new Date(grant.expiresAt) <= input.observedAt) ||
+          permissions === null
+          ? null
+          : { permissions };
+      }),
+    ),
   beginProtectedOperation: (input) =>
-    input.channel === "mcp"
+    "authorization" in input
       ? beginMcpProtectedOperation(provider, {
           ...input.authorization,
           auditLogId: input.auditLogId,
@@ -2061,16 +2102,81 @@ export const makeMcpToolRepository = (
                 outcome: "authorization_denied" as const,
               };
             }
+            const db = makeDatabase(connection);
+            const grants = await db
+              .select({
+                expiresAt: apiKeysInApp.expiresAt,
+                permissions: apiKeysInApp.permissions,
+                state: apiKeysInApp.state,
+              })
+              .from(apiKeysInApp)
+              .where(
+                and(
+                  eq(apiKeysInApp.id, input.apiKey.grantId),
+                  eq(apiKeysInApp.personalAccountId, personalAccountId),
+                ),
+              );
+            const grant = grants[0];
+            const permissions = authorizationScopes(grant?.permissions);
+            let connectionGranted = true;
+            if (input.connectionPublicId !== undefined) {
+              const selected = await db
+                .select({ id: apiKeyConnectionsInApp.apiKeyId })
+                .from(apiKeyConnectionsInApp)
+                .innerJoin(
+                  whatsappConnectionsInApp,
+                  and(
+                    eq(
+                      whatsappConnectionsInApp.id,
+                      apiKeyConnectionsInApp.whatsappConnectionId,
+                    ),
+                    eq(
+                      whatsappConnectionsInApp.personalAccountId,
+                      apiKeyConnectionsInApp.personalAccountId,
+                    ),
+                  ),
+                )
+                .where(
+                  and(
+                    eq(apiKeyConnectionsInApp.apiKeyId, input.apiKey.grantId),
+                    eq(
+                      apiKeyConnectionsInApp.personalAccountId,
+                      personalAccountId,
+                    ),
+                    eq(
+                      whatsappConnectionsInApp.publicId,
+                      input.connectionPublicId,
+                    ),
+                  ),
+                )
+                .limit(1);
+              connectionGranted = selected.length === 1;
+            }
+            if (
+              grant === undefined ||
+              grant.state !== "active" ||
+              (grant.expiresAt !== null &&
+                new Date(grant.expiresAt) <= input.observedAt) ||
+              permissions === null ||
+              !connectionGranted
+            ) {
+              return {
+                auditLogId: input.auditLogId,
+                outcome: "authorization_denied" as const,
+              };
+            }
             if (
               input.requiredPermission !== undefined &&
-              !(input.permissions ?? []).includes(input.requiredPermission)
+              !permissions.some(
+                (permission) => permission === input.requiredPermission,
+              )
             ) {
               const apiKey = { ...input.apiKey, name: apiKeyName };
               await insertActivityLog(connection, {
                 apiKey,
                 auditLogId: input.auditLogId,
                 authorizationId: null,
-                channel: "api",
+                channel: input.channel,
                 completed: true,
                 connectionPublicId: input.connectionPublicId,
                 errorCode: "authorization_denied",
@@ -2128,7 +2234,7 @@ export const makeMcpToolRepository = (
                 apiKey,
                 auditLogId: input.auditLogId,
                 authorizationId: null,
-                channel: "api",
+                channel: input.channel,
                 completed: true,
                 connectionPublicId: input.connectionPublicId,
                 errorCode: "rate_limited",
@@ -2156,7 +2262,7 @@ export const makeMcpToolRepository = (
               apiKey,
               auditLogId: input.auditLogId,
               authorizationId: null,
-              channel: "api",
+              channel: input.channel,
               completed: false,
               connectionPublicId: input.connectionPublicId,
               errorCode: null,
@@ -4969,7 +5075,7 @@ export const makeMcpToolRepository = (
       }),
     ),
   rejectProtectedOperation: (input) =>
-    input.channel === "mcp"
+    "authorization" in input
       ? rejectMcpProtectedOperation(provider, {
           ...input.authorization,
           auditLogId: input.auditLogId,
@@ -5000,15 +5106,77 @@ export const makeMcpToolRepository = (
             ) {
               throw new Error("invalid API Activity Log principal");
             }
+            const db = makeDatabase(connection);
+            const grants = await db
+              .select({
+                expiresAt: apiKeysInApp.expiresAt,
+                permissions: apiKeysInApp.permissions,
+                state: apiKeysInApp.state,
+              })
+              .from(apiKeysInApp)
+              .where(
+                and(
+                  eq(apiKeysInApp.id, input.apiKey.grantId),
+                  eq(apiKeysInApp.personalAccountId, personalAccountId),
+                ),
+              );
+            const grant = grants[0];
+            const permissions = authorizationScopes(grant?.permissions);
+            let connectionGranted = true;
+            if (input.connectionPublicId !== undefined) {
+              const selected = await db
+                .select({ id: apiKeyConnectionsInApp.apiKeyId })
+                .from(apiKeyConnectionsInApp)
+                .innerJoin(
+                  whatsappConnectionsInApp,
+                  and(
+                    eq(
+                      whatsappConnectionsInApp.id,
+                      apiKeyConnectionsInApp.whatsappConnectionId,
+                    ),
+                    eq(
+                      whatsappConnectionsInApp.personalAccountId,
+                      apiKeyConnectionsInApp.personalAccountId,
+                    ),
+                  ),
+                )
+                .where(
+                  and(
+                    eq(apiKeyConnectionsInApp.apiKeyId, input.apiKey.grantId),
+                    eq(
+                      apiKeyConnectionsInApp.personalAccountId,
+                      personalAccountId,
+                    ),
+                    eq(
+                      whatsappConnectionsInApp.publicId,
+                      input.connectionPublicId,
+                    ),
+                  ),
+                )
+                .limit(1);
+              connectionGranted = selected.length === 1;
+            }
+            if (
+              grant === undefined ||
+              grant.state !== "active" ||
+              (grant.expiresAt !== null &&
+                new Date(grant.expiresAt) <= input.observedAt) ||
+              permissions === null ||
+              !connectionGranted
+            ) {
+              return "authorization_denied" as const;
+            }
             if (
               input.requiredPermission !== undefined &&
-              !(input.permissions ?? []).includes(input.requiredPermission)
+              !permissions.some(
+                (permission) => permission === input.requiredPermission,
+              )
             ) {
               await insertActivityLog(connection, {
                 apiKey: { ...input.apiKey, name: apiKeyName },
                 auditLogId: input.auditLogId,
                 authorizationId: null,
-                channel: "api",
+                channel: input.channel,
                 completed: true,
                 connectionPublicId: input.connectionPublicId,
                 errorCode: "authorization_denied",
@@ -5024,7 +5192,7 @@ export const makeMcpToolRepository = (
               apiKey: { ...input.apiKey, name: apiKeyName },
               auditLogId: input.auditLogId,
               authorizationId: null,
-              channel: "api",
+              channel: input.channel,
               completed: true,
               connectionPublicId: input.connectionPublicId,
               errorCode: input.errorCode,

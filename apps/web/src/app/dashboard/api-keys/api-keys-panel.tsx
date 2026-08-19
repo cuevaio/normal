@@ -134,6 +134,7 @@ export function ApiKeysPanel({
   readonly clerkJwtTemplate: string;
   readonly connectionsEndpoint: string;
 }) {
+  const mcpEndpoint = `${new URL(apiKeysEndpoint).origin}/mcp`;
   const { getToken, isLoaded } = useAuth();
   const [keys, setKeys] = useState<ReadonlyArray<ApiKeySummary>>([]);
   const [connections, setConnections] = useState<
@@ -309,9 +310,27 @@ export function ApiKeysPanel({
   return (
     <section aria-label="API Keys" className="flex flex-col gap-8">
       <p className="text-sm text-muted-foreground">
-        Server-side credentials for your Personal Account. The plaintext is
-        shown once.
+        Server-side credentials for REST and compatible MCP Clients. The
+        plaintext is shown once; revocation ends access through both adapters.
       </p>
+
+      <section className="flex flex-col gap-2 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
+        <p className="text-sm font-medium">Hermes MCP configuration</p>
+        <p className="text-sm text-muted-foreground">
+          Store the credential as <code>NORMAL_API_KEY</code> in Hermes&apos;
+          <code> ~/.hermes/.env</code>, then add this to
+          <code> ~/.hermes/config.yaml</code>. Keep the server untrusted so
+          every outbound tool call still requires confirmation.
+        </p>
+        <pre className="overflow-x-auto rounded-lg bg-muted p-4 text-xs">
+          <code>{`mcp_servers:
+  normal:
+    url: ${mcpEndpoint}
+    headers:
+      Authorization: "Bearer \${NORMAL_API_KEY}"
+    trust: untrusted`}</code>
+        </pre>
+      </section>
 
       {state === "loading" ? (
         <p aria-live="polite">Loading API Keys…</p>

@@ -56,6 +56,7 @@ const storedAuthority = JSON.stringify({
 });
 
 const input = {
+  channel: "mcp",
   connectionId: "con_123456789012345678947",
   grant: mcpSendGrant({
     authorizationId: "40000000-0000-4000-8000-000000000047",

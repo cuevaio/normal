@@ -71,7 +71,10 @@ import {
   ApiKeyIdentifiers,
   ApiKeyPersistence,
   ApiKeyPersistenceError,
+  authenticateApiKeyRequest,
   createApiKeyManagementHandler,
+  hasApiKeyBearerCredential,
+  InvalidApiKeyCredential,
   isApiKeyManagementRequest,
   makeApiKeyHmac,
   productionApiKeyIdentifiers,
@@ -160,6 +163,7 @@ import {
 } from "./group-directory";
 import {
   createMcpRequestHandler,
+  isMcpApiKeyGrant,
   McpCursorCodec,
   McpCursorSigning,
   McpToolClock,
@@ -1417,6 +1421,23 @@ const restPersistenceLayer = (environment: ApiEnvironment) =>
     }),
   );
 
+const mcpPermissionForOperation = (
+  operation: string,
+):
+  | "connections:read"
+  | "directory:read"
+  | "messages:read"
+  | "messages:send" => {
+  if (operation === "list_connections") return "connections:read";
+  if (operation === "list_contacts" || operation === "list_groups") {
+    return "directory:read";
+  }
+  if (operation === "send_text_message" || operation === "get_send_status") {
+    return "messages:send";
+  }
+  return "messages:read";
+};
+
 const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
   Layer.succeed(McpToolPersistence, {
     failStoredMediaRead: (input) =>
@@ -1437,9 +1458,68 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
           const connectionString = environment.HYPERDRIVE?.connectionString;
           if (typeof connectionString !== "string")
             throw new Error("database unavailable");
-          return makePgMcpToolRepository(
-            connectionString,
-          ).reserveStoredMediaRead(input);
+          const repository = makePgMcpToolRepository(connectionString);
+          if (!isMcpApiKeyGrant(input)) {
+            return repository.reserveStoredMediaRead(input);
+          }
+          return (async () => {
+            const started = await repository.beginProtectedOperation({
+              apiKey: {
+                grantId: input.apiKey.grantId,
+                name: input.apiKey.name,
+                publicId: input.apiKey.id,
+              },
+              auditLogId: input.auditLogId,
+              channel: "mcp",
+              connectionPublicId: input.connectionPublicId,
+              hourLimit: input.hourLimit,
+              keyHourLimit: input.hourLimit,
+              keyMinuteLimit: input.minuteLimit,
+              minuteLimit: input.minuteLimit,
+              observedAt: input.observedAt,
+              operationName: "read_stored_media",
+              personalAccountId: input.apiKey.personalAccountId,
+              requiredPermission: "messages:read",
+            });
+            if (started.outcome !== "started") return null;
+            const result = await repository
+              .reserveApiKeyStoredMediaRead({
+                apiKeyGrantId: input.apiKey.grantId,
+                auditLogId: input.auditLogId,
+                connectionPublicId: input.connectionPublicId,
+                dailyByteLimit: input.dailyByteLimit,
+                mediaPublicId: input.mediaPublicId,
+                messagePublicId: input.messagePublicId,
+                observedAt: input.observedAt,
+                permissions: input.apiKey.permissions,
+                personalAccountId: input.apiKey.personalAccountId,
+              })
+              .catch(async (error: unknown) => {
+                await repository.completeProtectedOperation({
+                  auditLogId: input.auditLogId,
+                  completedAt: new Date(),
+                  errorCode: "service_unavailable",
+                  outcome: "execution_error",
+                  resultCount: null,
+                });
+                throw error;
+              });
+            if (result.outcome === "ready") return result.material;
+            await repository.completeProtectedOperation({
+              auditLogId: input.auditLogId,
+              completedAt: new Date(),
+              errorCode:
+                result.outcome === "quota_exhausted"
+                  ? "rate_limited"
+                  : "not_found",
+              outcome:
+                result.outcome === "not_found"
+                  ? "authorization_denied"
+                  : "execution_error",
+              resultCount: null,
+            });
+            return null;
+          })();
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -1450,17 +1530,8 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
           if (typeof connectionString !== "string") {
             throw new Error("database unavailable");
           }
-          return makePgMcpToolRepository(
-            connectionString,
-          ).beginProtectedOperation({
-            channel: "mcp",
-            authorization: {
-              authorizationId: input.authorizationId,
-              oauthSubject: input.oauthSubject,
-              ...(input.clientId === undefined
-                ? {}
-                : { clientId: input.clientId }),
-            },
+          const repository = makePgMcpToolRepository(connectionString);
+          const common = {
             auditLogId: input.auditLogId,
             hourLimit: input.hourLimit,
             minuteLimit: input.minuteLimit,
@@ -1472,7 +1543,28 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
             ...(input.sendPublicId === undefined
               ? {}
               : { sendPublicId: input.sendPublicId }),
-          });
+          };
+          return isMcpApiKeyGrant(input)
+            ? repository.beginProtectedOperation({
+                ...common,
+                apiKey: {
+                  grantId: input.apiKey.grantId,
+                  name: input.apiKey.name,
+                  publicId: input.apiKey.id,
+                },
+                channel: "mcp",
+                keyHourLimit: input.hourLimit,
+                keyMinuteLimit: input.minuteLimit,
+                personalAccountId: input.apiKey.personalAccountId,
+                requiredPermission: mcpPermissionForOperation(
+                  input.operationName,
+                ),
+              })
+            : repository.beginProtectedOperation({
+                ...common,
+                authorization: input,
+                channel: "mcp",
+              });
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -1496,9 +1588,19 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
           if (typeof connectionString !== "string") {
             throw new Error("database unavailable");
           }
-          return makePgMcpToolRepository(connectionString).inspectAuthorization(
-            input,
-          );
+          const repository = makePgMcpToolRepository(connectionString);
+          if (!isMcpApiKeyGrant(input)) {
+            return repository.inspectAuthorization(input);
+          }
+          return repository
+            .inspectApiKeyGrant({
+              apiKeyGrantId: input.apiKey.grantId,
+              observedAt: input.observedAt,
+              personalAccountId: input.apiKey.personalAccountId,
+            })
+            .then((grant) =>
+              grant === null ? null : { scopes: grant.permissions },
+            );
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -1509,9 +1611,14 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
           if (typeof connectionString !== "string") {
             throw new Error("database unavailable");
           }
-          return makePgMcpToolRepository(connectionString).listConnections(
-            input,
-          );
+          const repository = makePgMcpToolRepository(connectionString);
+          return isMcpApiKeyGrant(input)
+            ? repository.listApiKeyConnections({
+                apiKeyGrantId: input.apiKey.grantId,
+                observedAt: input.observedAt,
+                personalAccountId: input.apiKey.personalAccountId,
+              })
+            : repository.listConnections(input);
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -1523,16 +1630,18 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
             throw new Error("database unavailable");
           return makePgMcpToolRepository(connectionString).getSendStatus({
             connectionPublicId: input.connectionPublicId,
-            grant: {
-              kind: "mcp",
-              authorization: {
-                authorizationId: input.authorizationId,
-                oauthSubject: input.oauthSubject,
-                ...(input.clientId === undefined
-                  ? {}
-                  : { clientId: input.clientId }),
-              },
-            },
+            grant: isMcpApiKeyGrant(input)
+              ? {
+                  apiKey: {
+                    grantId: input.apiKey.grantId,
+                    name: input.apiKey.name,
+                    permissions: input.apiKey.permissions,
+                    personalAccountId: input.apiKey.personalAccountId,
+                    publicId: input.apiKey.id,
+                  },
+                  kind: "api",
+                }
+              : { authorization: input, kind: "mcp" },
             observedAt: input.observedAt,
             sendPublicId: input.sendPublicId,
           });
@@ -1545,7 +1654,20 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
           const connectionString = environment.HYPERDRIVE?.connectionString;
           if (typeof connectionString !== "string")
             throw new Error("database unavailable");
-          return makePgMcpToolRepository(connectionString).listChats(input);
+          const repository = makePgMcpToolRepository(connectionString);
+          return isMcpApiKeyGrant(input)
+            ? repository.listApiKeyChats({
+                apiKeyGrantId: input.apiKey.grantId,
+                connectionPublicId: input.connectionPublicId,
+                cursorActivityAt: input.cursorActivityAt,
+                cursorPublicId: input.cursorPublicId,
+                kind: input.kind,
+                limit: input.limit,
+                observedAt: input.observedAt,
+                permissions: input.apiKey.permissions,
+                personalAccountId: input.apiKey.personalAccountId,
+              })
+            : repository.listChats(input);
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -1555,7 +1677,23 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
           const connectionString = environment.HYPERDRIVE?.connectionString;
           if (typeof connectionString !== "string")
             throw new Error("database unavailable");
-          return makePgMcpToolRepository(connectionString).readMessages(input);
+          const repository = makePgMcpToolRepository(connectionString);
+          if (!isMcpApiKeyGrant(input)) return repository.readMessages(input);
+          return repository
+            .readApiKeyMessages({
+              apiKeyGrantId: input.apiKey.grantId,
+              connectionPublicId: input.connectionPublicId,
+              conversationPublicId: input.conversationPublicId,
+              cursorPublicId: input.cursorPublicId,
+              cursorSentAt: input.cursorSentAt,
+              limit: input.limit,
+              observedAt: input.observedAt,
+              permissions: input.apiKey.permissions,
+              personalAccountId: input.apiKey.personalAccountId,
+            })
+            .then((page) =>
+              page === null ? null : { outcome: "success" as const, page },
+            );
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -1565,9 +1703,24 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
           const connectionString = environment.HYPERDRIVE?.connectionString;
           if (typeof connectionString !== "string")
             throw new Error("database unavailable");
-          return makePgMcpToolRepository(connectionString).searchMessages(
-            input,
-          );
+          const repository = makePgMcpToolRepository(connectionString);
+          return isMcpApiKeyGrant(input)
+            ? repository.searchApiKeyMessages({
+                after: input.after,
+                apiKeyGrantId: input.apiKey.grantId,
+                before: input.before,
+                connectionPublicId: input.connectionPublicId,
+                conversationPublicId: input.conversationPublicId,
+                cursorPublicId: input.cursorPublicId,
+                cursorSentAt: input.cursorSentAt,
+                direction: input.direction,
+                limit: input.limit,
+                observedAt: input.observedAt,
+                permissions: input.apiKey.permissions,
+                personalAccountId: input.apiKey.personalAccountId,
+                searchTokens: input.searchTokens,
+              })
+            : repository.searchMessages(input);
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -1577,9 +1730,17 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
           const connectionString = environment.HYPERDRIVE?.connectionString;
           if (typeof connectionString !== "string")
             throw new Error("database unavailable");
-          return makePgMcpToolRepository(
-            connectionString,
-          ).completeMessageRecordRead(input);
+          const repository = makePgMcpToolRepository(connectionString);
+          return isMcpApiKeyGrant(input)
+            ? repository.completeApiKeyMessageRecordRead({
+                apiKeyGrantId: input.apiKey.grantId,
+                auditLogId: input.auditLogId,
+                dailyRecordLimit: input.dailyRecordLimit,
+                observedAt: input.observedAt,
+                personalAccountId: input.apiKey.personalAccountId,
+                resultCount: input.resultCount,
+              })
+            : repository.completeMessageRecordRead(input);
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -1590,7 +1751,17 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
           if (typeof connectionString !== "string") {
             throw new Error("database unavailable");
           }
-          return makePgMcpToolRepository(connectionString).listGroups(input);
+          const repository = makePgMcpToolRepository(connectionString);
+          return isMcpApiKeyGrant(input)
+            ? repository.listApiKeyGroups({
+                apiKeyGrantId: input.apiKey.grantId,
+                connectionPublicId: input.connectionPublicId,
+                observedAt: input.observedAt,
+                permissions: input.apiKey.permissions,
+                personalAccountId: input.apiKey.personalAccountId,
+                searchIndex: input.searchIndex,
+              })
+            : repository.listGroups(input);
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -1601,9 +1772,16 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
           if (typeof connectionString !== "string") {
             throw new Error("database unavailable");
           }
-          return makePgMcpToolRepository(
-            connectionString,
-          ).loadGroupSearchMaterial(input);
+          const repository = makePgMcpToolRepository(connectionString);
+          return isMcpApiKeyGrant(input)
+            ? repository.loadApiKeyGroupSearchMaterial({
+                apiKeyGrantId: input.apiKey.grantId,
+                connectionPublicId: input.connectionPublicId,
+                observedAt: input.observedAt,
+                permissions: input.apiKey.permissions,
+                personalAccountId: input.apiKey.personalAccountId,
+              })
+            : repository.loadGroupSearchMaterial(input);
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -1614,9 +1792,16 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
           if (typeof connectionString !== "string") {
             throw new Error("database unavailable");
           }
-          return makePgMcpToolRepository(
-            connectionString,
-          ).loadContactReadMaterial(input);
+          const repository = makePgMcpToolRepository(connectionString);
+          return isMcpApiKeyGrant(input)
+            ? repository.loadApiKeyContactReadMaterial({
+                apiKeyGrantId: input.apiKey.grantId,
+                connectionPublicId: input.connectionPublicId,
+                observedAt: input.observedAt,
+                permissions: input.apiKey.permissions,
+                personalAccountId: input.apiKey.personalAccountId,
+              })
+            : repository.loadContactReadMaterial(input);
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -1627,9 +1812,21 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
           if (typeof connectionString !== "string") {
             throw new Error("database unavailable");
           }
-          return makePgMcpToolRepository(
-            connectionString,
-          ).listEncryptedContacts(input);
+          const repository = makePgMcpToolRepository(connectionString);
+          return isMcpApiKeyGrant(input)
+            ? repository.listApiKeyEncryptedContacts({
+                apiKeyGrantId: input.apiKey.grantId,
+                connectionPublicId: input.connectionPublicId,
+                cursorDisplayNameSort: input.cursorDisplayNameSort,
+                cursorPublicId: input.cursorPublicId,
+                limit: input.limit,
+                observedAt: input.observedAt,
+                permissions: input.apiKey.permissions,
+                personalAccountId: input.apiKey.personalAccountId,
+                searchIndex: input.searchIndex,
+                searchKind: input.searchKind,
+              })
+            : repository.listEncryptedContacts(input);
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -1640,17 +1837,8 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
           if (typeof connectionString !== "string") {
             throw new Error("database unavailable");
           }
-          return makePgMcpToolRepository(
-            connectionString,
-          ).rejectProtectedOperation({
-            channel: "mcp",
-            authorization: {
-              authorizationId: input.authorizationId,
-              oauthSubject: input.oauthSubject,
-              ...(input.clientId === undefined
-                ? {}
-                : { clientId: input.clientId }),
-            },
+          const repository = makePgMcpToolRepository(connectionString);
+          const common = {
             auditLogId: input.auditLogId,
             errorCode: input.errorCode,
             observedAt: input.observedAt,
@@ -1658,10 +1846,26 @@ const mcpToolPersistenceLayer = (environment: ApiEnvironment) =>
             ...(input.connectionPublicId === undefined
               ? {}
               : { connectionPublicId: input.connectionPublicId }),
-            ...(input.sendPublicId === undefined
-              ? {}
-              : { sendPublicId: input.sendPublicId }),
-          });
+          };
+          return isMcpApiKeyGrant(input)
+            ? repository.rejectProtectedOperation({
+                ...common,
+                apiKey: {
+                  grantId: input.apiKey.grantId,
+                  name: input.apiKey.name,
+                  publicId: input.apiKey.id,
+                },
+                channel: "mcp",
+                personalAccountId: input.apiKey.personalAccountId,
+                requiredPermission: mcpPermissionForOperation(
+                  input.operationName,
+                ),
+              })
+            : repository.rejectProtectedOperation({
+                ...common,
+                authorization: input,
+                channel: "mcp",
+              });
         },
         catch: () => new McpToolPersistenceError(),
       }),
@@ -2359,6 +2563,25 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
           Effect.runSync(safeTelemetry.emit(event));
         },
       });
+      const serveMcp = (
+        mcpRequest: Request,
+        mcpEnvironment: unknown,
+        mcpContext: ExecutionContext,
+        authorization: Parameters<
+          ReturnType<typeof createMcpRequestHandler>
+        >[3],
+      ) =>
+        withPgRequestConnectionScope(() =>
+          createMcpRequestHandler({
+            browserOrigin: environment.CLERK_AUTHORIZED_PARTY ?? "",
+            hourLimit: requestQuota.hourLimit,
+            layer,
+            minuteLimit: requestQuota.minuteLimit,
+            readMessageDailyRecordLimit: requestQuota.dailyRecordLimit,
+            storedMediaDailyByteLimit: requestQuota.dailyMediaByteLimit,
+            resourceUrl: configuration.resource,
+          })(mcpRequest, mcpEnvironment, mcpContext, authorization),
+        );
       const applicationHandler = async (
         nextRequest: Request,
         nextEnvironment: Parameters<
@@ -2381,21 +2604,11 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
               status: 401,
             });
           }
-          return withPgRequestConnectionScope(() =>
-            createMcpRequestHandler({
-              browserOrigin: environment.CLERK_AUTHORIZED_PARTY ?? "",
-              hourLimit: requestQuota.hourLimit,
-              layer,
-              minuteLimit: requestQuota.minuteLimit,
-              readMessageDailyRecordLimit: requestQuota.dailyRecordLimit,
-              storedMediaDailyByteLimit: requestQuota.dailyMediaByteLimit,
-              resourceUrl: configuration.resource,
-            })(
-              nextRequest,
-              nextEnvironment,
-              context ?? nextContext,
-              authorization,
-            ),
+          return serveMcp(
+            nextRequest,
+            nextEnvironment,
+            context ?? nextContext,
+            authorization,
           );
         }
         if (
@@ -2485,6 +2698,41 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
           Effect.runSync(safeTelemetry.emit(event));
         },
       });
+      if (
+        request.method === "POST" &&
+        path === "/mcp" &&
+        hasApiKeyBearerCredential(request)
+      ) {
+        const authenticated = await Effect.runPromise(
+          authenticateApiKeyRequest(request).pipe(
+            Effect.provide(layer),
+            Effect.either,
+          ),
+        );
+        if (authenticated._tag === "Left") {
+          if (!(authenticated.left instanceof InvalidApiKeyCredential)) {
+            return unavailable();
+          }
+          return new Response(JSON.stringify({ error: "invalid_token" }), {
+            headers: {
+              "cache-control": "no-store",
+              "content-type": "application/json; charset=utf-8",
+              "www-authenticate": 'Bearer error="invalid_token"',
+            },
+            status: 401,
+          });
+        }
+        return serveMcp(
+          request,
+          environment,
+          context ??
+            ({
+              passThroughOnException: () => undefined,
+              waitUntil: () => undefined,
+            } as unknown as ExecutionContext),
+          { apiKey: authenticated.right },
+        );
+      }
       return await oauthHandler(
         request,
         context ??

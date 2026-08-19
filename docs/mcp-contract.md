@@ -4,11 +4,13 @@ This document defines the public launch contract for the Normal MCP server. Prov
 
 ## Common Rules
 
+`POST /mcp` accepts `Authorization: Bearer` with either an OAuth access token or an existing Normal API Key matching `normal_apk_<handle>.<secret>`. OAuth remains the delegated flow for Claude and ChatGPT. API Key-shaped credentials are authenticated before OAuth middleware and never fall back to OAuth after failure. Invalid, expired, or revoked API Keys return `401 invalid_token`; authentication infrastructure failure returns `503`. Credentials are never accepted from URLs, query parameters, JSON-RPC `_meta`, or `x-mcp-header`.
+
 - Tool inputs and outputs are closed JSON Schema 2020-12 objects with `additionalProperties: false`.
 - Success returns validated `structuredContent` and the same compact JSON in one text content block. Protected media may additionally return `resource_link` content.
 - Actionable failures return `isError: true` and safe JSON with `error_code`, `message`, `retryable`, and optional `retry_after_seconds` and `resets_at` fields.
 - Public entity handles are a type prefix followed by a 21-character NanoID-default-alphabet suffix matching `[A-Za-z0-9_-]{21}`: `con_`, `ctc_`, `grp_`, `cvs_`, `msg_`, `med_`, or `snd_`.
-- Handles name records but grant no authority. Every call rechecks the current MCP Authorization, scope, selected connection, and object relationship.
+- Handles name records but grant no authority. Every call rechecks the current grant, permission or scope, selected connection, and object relationship.
 - Except for `list_connections`, every tool requires an explicit `connection_id`.
 - Timestamps are UTC RFC 3339 strings.
 - Unknown optional values are returned as `null`, not omitted.
@@ -38,11 +40,11 @@ Every tool is omitted from discovery when its scope is absent and rechecks the s
 | `stale` | boolean | Whether reconciliation is overdue or the source cannot currently be confirmed. |
 | `partial` | boolean | Whether initial sync, a known failure, retention, or an Ingestion Gap limits the projection. |
 
-A cursor binds the MCP Authorization, tool, `connection_id`, normalized filters or search, limit, sort version, last sort tuple, and expiry. Cursor traversal is not a frozen snapshot; concurrent changes can move entries, and callers may restart from the first page.
+A cursor binds the current grant, tool, `connection_id`, normalized filters or search, limit, sort version, last sort tuple, and expiry. MCP Authorization IDs bind directly; API Keys bind as `api:<grant-id>`. MCP and REST cursor signing documents remain separate. Cursor traversal is not a frozen snapshot; concurrent changes can move entries, and callers may restart from the first page.
 
 ## `list_connections`
 
-Requires `connections:read`. The input is an empty object. It returns only non-deleted WhatsApp Connections selected by the current MCP Authorization. A Personal Account has at most three, so this tool is not paginated.
+Requires `connections:read`. The input is an empty object. It returns only non-deleted WhatsApp Connections selected by the current grant. A Personal Account has at most three, so this tool is not paginated.
 
 ```json
 {
@@ -93,7 +95,7 @@ An exact phone search never causes the full number to be returned or logged.
 }
 ```
 
-`display_name`, `phone_last_four`, and `conversation_id` are nullable. `conversation_id` is present only when the MCP Authorization also has `messages:read` and the platform has retained Stored Message activity for that direct WhatsApp Conversation. A caller can pass it directly to `read_messages`; absence does not mean the contact is inactive. Results include only contacts marked active and non-deleted in the latest Directory projection, sort by normalized display name and then `contact_id`, and remain qualified by the page's `stale` and `partial` fields because the provider is authoritative.
+`display_name`, `phone_last_four`, and `conversation_id` are nullable. `conversation_id` is present only when the current grant also has `messages:read` and the platform has retained Stored Message activity for that direct WhatsApp Conversation. A caller can pass it directly to `read_messages`; absence does not mean the contact is inactive. Results include only contacts marked active and non-deleted in the latest Directory projection, sort by normalized display name and then `contact_id`, and remain qualified by the page's `stale` and `partial` fields because the provider is authoritative.
 
 ## `list_groups`
 
@@ -180,7 +182,7 @@ Input fields:
 | `limit` | integer 1-50 | no | Record count; defaults to 20. |
 | `older_cursor` | string | no | Cursor returned by the immediately compatible older traversal. |
 
-Without `older_cursor`, the tool selects the newest page. Records inside every page are ordered chronologically from oldest to newest. The cursor is short-lived, tamper-resistant, and bound to the MCP Authorization, tool, connection, conversation, limit, sort version, boundary tuple, and expiry. Tombstones count toward the daily returned-record quota.
+Without `older_cursor`, the tool selects the newest page. Records inside every page are ordered chronologically from oldest to newest. The cursor is short-lived, tamper-resistant, and bound to the current grant, tool, connection, conversation, limit, sort version, boundary tuple, and expiry. Tombstones count toward the daily returned-record quota.
 
 ```json
 {
@@ -275,7 +277,7 @@ Input fields:
 
 The decoded query must contain only Unicode scalar values and no more than 256 of them. Version `v1` applies NFKC, locale-independent Unicode lowercase mapping, and NFKC again, then treats maximal Letter-or-Number words continued by Letters, Marks, or Numbers as terms. Punctuation, symbols, separators, and controls are boundaries. A query that produces no terms or more than eight unique terms is invalid. Duplicate terms are removed. Every unique term must occur, but order and adjacency do not matter. Matching does not perform substring, prefix, phrase, stemming, morphology, synonym, fuzzy, or relevance search. If both time bounds are supplied, `after` must be earlier than `before`.
 
-Results sort newest first by `sent_at DESC, message_id DESC`. The cursor is short-lived and binds the MCP Authorization, tool, selected connection, optional conversation, direction, time bounds, limit, sort version, boundary tuple, index version, and a domain-separated keyed digest of the normalized query terms. Neither query text nor search-index tokens appear in the cursor.
+Results sort newest first by `sent_at DESC, message_id DESC`. The cursor is short-lived and binds the current grant, tool, selected connection, optional conversation, direction, time bounds, limit, sort version, boundary tuple, index version, and a domain-separated keyed digest of the normalized query terms. Neither query text nor search-index tokens appear in the cursor.
 
 ```json
 {
@@ -357,7 +359,7 @@ Text validation occurs before quota reservation or Send Operation creation. The 
 Validation and execution precedence is fixed:
 
 1. Validate the closed input schema and Unicode rules.
-2. Check the current MCP Authorization, `messages:send` scope, and requested connection grant.
+2. Check the current grant, `messages:send` permission or scope, and requested connection grant.
 3. Resolve the same-authorization idempotency binding. Return an exact replay or `idempotency_conflict` before current health, Directory, or quota checks.
 4. Only for an unbound key, require `connected` state, projected recipient eligibility, and available quota, then atomically create the attempt.
 
@@ -411,11 +413,11 @@ After a Send Operation crosses the atomic durable provider-attempt boundary, eve
 }
 ```
 
-`idempotent_replay` is `true` when the same MCP Authorization repeats the same `idempotency_key`, `connection_id`, `recipient_id`, and exact text and receives the existing Send Operation. A replay never consumes send quota or invokes the provider again. The receipt does not echo text, recipient or connection handles, the idempotency key, provider identifiers, or a Stored Message handle.
+`idempotent_replay` is `true` when the same grant repeats the same `idempotency_key`, `connection_id`, `recipient_id`, and exact text and receives the existing Send Operation. For an API Key, the grant identity is the same across REST and MCP. A replay never consumes send quota or invokes the provider again. The receipt does not echo text, recipient or connection handles, the idempotency key, provider identifiers, or a Stored Message handle.
 
-After schema validation and current MCP Authorization, scope, and connection-grant checks, the server resolves a retained idempotency binding before checking health, projected recipient eligibility, or quota for a new send. An exact replay therefore returns its current receipt even if the connection later disconnected or the recipient projection changed. For schema-valid input on a currently granted connection, reusing a bound key with different `connection_id`, `recipient_id`, or exact text returns `isError: true`, `error_code: "idempotency_conflict"`, and `retryable: false`, without resolving the replacement recipient. Malformed input fails schema first, and an ungranted requested connection fails authorization before binding lookup. Only an unbound key proceeds through current new-send preflight and quota reservation.
+After schema validation and current grant, permission or scope, and connection-grant checks, the server resolves a retained idempotency binding before checking health, projected recipient eligibility, or quota for a new send. An exact replay therefore returns its current receipt even if the connection later disconnected or the recipient projection changed. For schema-valid input on a currently granted connection, reusing a bound key with different `connection_id`, `recipient_id`, or exact text returns `isError: true`, `error_code: "idempotency_conflict"`, and `retryable: false`, without resolving the replacement recipient. Malformed input fails schema first, and an ungranted requested connection fails authorization before binding lookup. Only an unbound key proceeds through current new-send preflight and quota reservation.
 
-The Send Operation and its idempotency binding have a storage and replay-protection maximum of 90 days after `created_at`, independently of Message Retention Policy. Status and replay additionally require the originating MCP Authorization to remain active; revocation or its 90-day absolute session expiry ends access immediately, and later reauthorization does not inherit earlier operations. Connection or Personal Account Deletion removes them sooner. After ordinary operation expiry, `send_id` is not found and the old key is unbound; submitting that key again creates a new Send Operation. Clients must generate one fresh key per send intent and use replay only while both the binding and originating authorization remain active. Every invocation still receives a separate Client Confirmation.
+The Send Operation and its idempotency binding have a storage and replay-protection maximum of 90 days after `created_at`, independently of Message Retention Policy. Status and replay additionally require the originating grant to remain active; MCP Authorization revocation or absolute session expiry and API Key revocation or expiry end access immediately. A later authorization or replacement API Key does not inherit earlier operations. Connection or Personal Account Deletion removes them sooner. After ordinary operation expiry, `send_id` is not found and the old key is unbound; submitting that key again creates a new Send Operation. Clients must generate one fresh key per send intent and use replay only while both the binding and originating grant remain active. Every MCP invocation still receives a separate Client Confirmation.
 
 Exact outbound text is retained in active application state as encrypted Pending Send Content only until the earliest of Stored Message creation, definitive pre-send failure, seven days after `created_at`, the Message Retention Policy deadline, or Connection or Personal Account Deletion. For a finite policy duration `D`, `pending_expires_at = min(created_at + 7 days, created_at + D)`; retain-until-deletion contributes no earlier policy deadline, so the seven-day cap still applies. Stored Message creation consumes the pending content, and pre-send failure removes it immediately. After content expires, the 90-day binding retains only a keyed, non-reversible fingerprint of the authorization, connection, recipient, and exact UTF-8 text for idempotency comparison; `accepted` and `unknown` statuses may outlive readable content. Encrypted remnants may remain only inside Neon's managed seven-day PITR history, and restore expiry gates prevent them from becoming application-readable again.
 
@@ -425,14 +427,14 @@ An authenticated outbound upsert creates or updates a Stored Message only when i
 
 ## `get_send_status`
 
-Requires `messages:send`. It reads the latest locally converged state of a Send Operation created by the same still-active MCP Authorization and does not call the provider.
+Requires `messages:send`. It reads the latest locally converged state of a Send Operation created by the same still-active grant and does not call the provider.
 
 Input fields:
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `connection_id` | `con_` handle | yes | Explicit selected WhatsApp Connection. |
-| `send_id` | `snd_` handle | yes | Send Operation created by this MCP Authorization for that connection. |
+| `send_id` | `snd_` handle | yes | Send Operation created by this grant for that connection. |
 
 It returns:
 
