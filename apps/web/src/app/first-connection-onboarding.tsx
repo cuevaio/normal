@@ -606,7 +606,7 @@ function SelectField({
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <Select
         items={options}
-        onValueChange={(next) => {
+        onValueChange={(next: string | null) => {
           if (next !== null) onChange(next as ProfileSelectValue);
         }}
         value={value}
