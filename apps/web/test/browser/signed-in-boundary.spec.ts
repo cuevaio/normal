@@ -631,7 +631,14 @@ test("starts irreversible Connection Deletion and keeps the deleted connection g
   });
   await installClerkBrowser(page, { signedIn: true });
   await page.goto("/");
+  await expect(
+    page.getByRole("link", { name: "Log in" }),
+  ).toHaveAttribute("href", "/dashboard");
+  await page.getByRole("link", { name: "Log in" }).click();
   await page.goto("/dashboard");
+  await expect(
+    page.getByRole("heading", { name: "Overview", exact: true }),
+  ).toBeVisible();
   await page.getByRole("link", { name: "WhatsApp Connections" }).click();
 
   const onboarding = page.getByTestId("first-connection-onboarding");
