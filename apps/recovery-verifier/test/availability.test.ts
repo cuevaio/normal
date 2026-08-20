@@ -5,7 +5,7 @@ import type { RecoveryVerifierEnvironment } from "../src/environment";
 const asOf = "2026-08-18T12:00:00.000Z";
 const input = {
   version: 1,
-  drill: "monthly_restore",
+  drill: "weekly_restore",
   environment: "production",
   serving: false,
   operation: `recovery_operation_${"a".repeat(32)}`,
@@ -35,13 +35,13 @@ const env = {
 } as RecoveryVerifierEnvironment;
 
 describe("recovery availability evidence", () => {
-  test("accepts only the exact rolling 30-day aggregate", async () => {
+  test("accepts only the exact rolling seven-day aggregate", async () => {
     const fetcher = vi.fn(async () =>
       Response.json({
         version: 1,
-        window: "30d",
+        window: "7d",
         as_of: asOf,
-        window_started_at: "2026-07-19T12:00:00.000Z",
+        window_started_at: "2026-08-11T12:00:00.000Z",
         window_completed_at: asOf,
         first_party_percent: 99.7,
         wasender_percent: 98.1,
@@ -67,9 +67,9 @@ describe("recovery availability evidence", () => {
     const fetcher = vi.fn(async () =>
       Response.json({
         version: 1,
-        window: "30d",
+        window: "7d",
         as_of: "2026-08-17T12:00:00.000Z",
-        window_started_at: "2026-07-18T12:00:00.000Z",
+        window_started_at: "2026-08-10T12:00:00.000Z",
         window_completed_at: "2026-08-17T12:00:00.000Z",
         first_party_percent: 100,
         wasender_percent: 100,

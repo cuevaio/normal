@@ -20,8 +20,8 @@ export const runLaunchGate = async (
   const readEvidence =
     options.readEvidence ??
     (async (path: string) => JSON.parse(await Bun.file(path).text()));
-  const [monthly, quarterly] = await Promise.all([
-    readEvidence(required("MONTHLY_RECOVERY_EVIDENCE")),
+  const [weekly, quarterly] = await Promise.all([
+    readEvidence(required("WEEKLY_RECOVERY_EVIDENCE")),
     readEvidence(required("QUARTERLY_GAME_DAY_EVIDENCE")),
   ]);
   let smokePassed = false;
@@ -40,7 +40,7 @@ export const runLaunchGate = async (
   }
   const result = evaluateLaunchGate({
     now: options.now ?? new Date(),
-    monthly,
+    weekly,
     quarterly,
     smokePassed,
     numericQuotasApproved: approved("NUMERIC_QUOTAS_APPROVAL"),

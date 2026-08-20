@@ -1,7 +1,7 @@
 import type { OperationsFetch } from "./cloudflare";
 
 const statusUrl = "https://wasenderapi.com/status";
-const windowMilliseconds = 30 * 86_400_000;
+const windowMilliseconds = 7 * 86_400_000;
 const timestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/u;
 
 const externalTimestamp = (value: unknown): value is string =>
@@ -53,11 +53,11 @@ export const queryDependencyAvailability = async (
         readonly status?: unknown;
       };
       readonly scheduledOutages?: unknown;
-      readonly uptime?: { readonly "30d"?: unknown };
+      readonly uptime?: { readonly "7d"?: unknown };
     };
   };
   const current = page.props?.currentStatus;
-  const wasenderPercent = page.props?.uptime?.["30d"];
+  const wasenderPercent = page.props?.uptime?.["7d"];
   const checkedAt =
     current && externalTimestamp(current.last_checked)
       ? Date.parse(current.last_checked)

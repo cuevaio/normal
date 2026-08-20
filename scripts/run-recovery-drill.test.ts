@@ -28,7 +28,7 @@ const completeAutomation = (
   };
 };
 
-test("monthly automation requests a random prior-history point and non-serving branch", async () => {
+test("weekly automation requests a random prior-history point and non-serving branch", async () => {
   process.env.RECOVERY_AUTOMATION_URL = "https://recovery.internal.test/drills";
   process.env.RECOVERY_AUTOMATION_TOKEN = "secret-token";
   let requestBody: Record<string, unknown> | undefined;
@@ -37,7 +37,7 @@ test("monthly automation requests a random prior-history point and non-serving b
   let credentialRefreshCompleted = false;
   const evidence: DrillEvidence = {
     version: 1,
-    drill: "monthly_restore",
+    drill: "weekly_restore",
     environment: "production",
     started_at: "2026-08-02T23:50:00.000Z",
     completed_at: "2026-08-03T00:00:00.000Z",
@@ -88,7 +88,7 @@ test("monthly automation requests a random prior-history point and non-serving b
       predecessor_hmac_rejected: true,
     },
   };
-  await runRecoveryDrill("monthly_restore", {
+  await runRecoveryDrill("weekly_restore", {
     now,
     sourcePoint: new Date(source),
     beforeStart: async () => {
@@ -102,7 +102,7 @@ test("monthly automation requests a random prior-history point and non-serving b
     }),
   });
   expect(requestBody).toEqual({
-    drill: "monthly_restore",
+    drill: "weekly_restore",
     requested_source_point_at: source,
     serving: false,
   });
@@ -113,14 +113,14 @@ test("random restore selection spans the configured seven-day history", async ()
   process.env.RECOVERY_AUTOMATION_TOKEN = "secret-token";
   const now = new Date("2026-08-03T00:00:00.000Z");
   let requestedSource = "";
-  await runRecoveryDrill("monthly_restore", {
+  await runRecoveryDrill("weekly_restore", {
     now,
     random: () => 0.75,
     sleep: async () => {},
     fetch: completeAutomation(
       () => ({
         version: 1,
-        drill: "monthly_restore",
+        drill: "weekly_restore",
         environment: "production",
         started_at: now.toISOString(),
         completed_at: now.toISOString(),
@@ -195,7 +195,7 @@ test("rejects evidence for a different drill kind", async () => {
       sleep: async () => {},
       fetch: completeAutomation({
         version: 1,
-        drill: "monthly_restore",
+        drill: "weekly_restore",
         environment: "production",
         started_at: now.toISOString(),
         completed_at: now.toISOString(),
@@ -254,7 +254,7 @@ test("rejects insecure recovery automation URLs before sending credentials", asy
   process.env.RECOVERY_AUTOMATION_URL = "http://recovery.internal.test/drills";
   process.env.RECOVERY_AUTOMATION_TOKEN = "secret-token";
   await expect(
-    runRecoveryDrill("monthly_restore", {
+    runRecoveryDrill("weekly_restore", {
       fetch: async () => {
         throw new Error("fetch must not run");
       },
@@ -268,7 +268,7 @@ test("stops polling at the configured deadline", async () => {
   let clock = 0;
   let requests = 0;
   await expect(
-    runRecoveryDrill("monthly_restore", {
+    runRecoveryDrill("weekly_restore", {
       now: new Date("2026-08-03T00:00:00.000Z"),
       sourcePoint: new Date("2026-07-29T12:00:00.000Z"),
       timeoutMs: 100,
@@ -286,6 +286,6 @@ test("stops polling at the configured deadline", async () => {
         );
       },
     }),
-  ).rejects.toThrow("monthly_restore automation timed out");
+  ).rejects.toThrow("weekly_restore automation timed out");
   expect(requests).toBe(1);
 });

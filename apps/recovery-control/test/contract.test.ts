@@ -23,7 +23,7 @@ const monthlyChecks = {
 
 const response = {
   version: 1,
-  drill: "monthly_restore",
+  drill: "weekly_restore",
   operation: `recovery_operation_${"a".repeat(32)}`,
   recovery_branch_id: "br-recovery-123",
   source_point_at: "2026-08-17T12:00:00.000Z",

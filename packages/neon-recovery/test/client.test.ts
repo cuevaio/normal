@@ -9,7 +9,7 @@ const projectId = "quiet-river-123456";
 const parentId = "br-parent-123456";
 const branchId = "br-recovery-123456";
 const timestamp = "2026-08-17T12:00:00.000Z";
-const branchName = "recovery/monthly-2026-08";
+const branchName = "recovery/weekly-2026-08";
 const time = "2026-08-18T12:00:00Z";
 const recoveryAnnotation = `true:${parentId}:${timestamp}`;
 

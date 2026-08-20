@@ -14,7 +14,7 @@ describe("production observability configuration", () => {
       "wasender-availability",
       "whatsapp-availability",
     ]);
-    expect(config.slos[0]).toMatchObject({ objective: 99.5, window: "30d" });
+    expect(config.slos[0]).toMatchObject({ objective: 99.5, window: "7d" });
   });
 
   test("rejects sensitive dimensions and incomplete alert delivery", async () => {

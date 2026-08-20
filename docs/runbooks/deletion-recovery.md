@@ -234,7 +234,7 @@ Any malformed marker, authority failure, branch mismatch, incomplete batch, or
 missing API Key invalidation evidence keeps the gate closed; there is no bypass
 or sampled success mode.
 The public API release gate additionally requires those restore checks on the
-current monthly drill evidence before the public REST surface may be released.
+current weekly drill evidence before the public REST surface may be released.
 
 ## Rollback and authority recovery
 

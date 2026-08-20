@@ -45,8 +45,8 @@ jobs:
       - uses: dawidd6/action-download-artifact@v11
         with:
           workflow: recovery-drills.yml
-          name: monthly-restore-evidence
-          path: evidence/monthly
+          name: weekly-restore-evidence
+          path: evidence/weekly
           workflow_conclusion: success
       - uses: dawidd6/action-download-artifact@v11
         with:
@@ -70,7 +70,7 @@ jobs:
           SMOKE_WEB_ORIGIN: ${{ vars.WEB_ORIGIN }}
       - run: bun run release:public-api
         env:
-          MONTHLY_RECOVERY_EVIDENCE: evidence/monthly/monthly_restore.json
+          WEEKLY_RECOVERY_EVIDENCE: evidence/weekly/weekly_restore.json
           QUARTERLY_GAME_DAY_EVIDENCE: evidence/quarterly/quarterly_game_day.json
           PUBLIC_API_FORMAT_CHECK: passed
           PUBLIC_API_LINT: passed

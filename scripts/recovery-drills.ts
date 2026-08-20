@@ -1,4 +1,4 @@
-export type DrillKind = "monthly_restore" | "quarterly_game_day";
+export type DrillKind = "weekly_restore" | "quarterly_game_day";
 
 export interface DrillEvidence {
   readonly version: 1;
@@ -39,7 +39,7 @@ export interface DrillEvidence {
   readonly checks: Readonly<Record<string, boolean>>;
 }
 
-const monthlyChecks = [
+const weeklyChecks = [
   "schema_compatible",
   "rls_isolated",
   "sampled_keys_usable",
@@ -227,10 +227,10 @@ export const validateDrillEvidence = (
     failures.push("restore replay recorded aggregate failures");
 
   const required =
-    evidence.drill === "monthly_restore"
-      ? monthlyChecks
+    evidence.drill === "weekly_restore"
+      ? weeklyChecks
       : evidence.drill === "quarterly_game_day"
-        ? [...monthlyChecks, ...quarterlyChecks]
+        ? [...weeklyChecks, ...quarterlyChecks]
         : [];
   if (required.length === 0) failures.push("unknown drill kind");
   failures.push(...exactKeys(evidence.checks, required, "checks"));
@@ -242,7 +242,7 @@ export const validateDrillEvidence = (
 
 export const evaluateLaunchGate = (input: {
   readonly now: Date;
-  readonly monthly: unknown;
+  readonly weekly: unknown;
   readonly quarterly: unknown;
   readonly smokePassed: boolean;
   readonly numericQuotasApproved: boolean;
@@ -251,7 +251,7 @@ export const evaluateLaunchGate = (input: {
   readonly productionBundleHasNoFake: boolean;
 }) => {
   const blockers = [
-    ...validateDrillEvidence(input.monthly, input.now),
+    ...validateDrillEvidence(input.weekly, input.now),
     ...validateDrillEvidence(input.quarterly, input.now),
   ];
   const evidenceRecord = (evidence: unknown): Partial<DrillEvidence> =>
@@ -260,14 +260,14 @@ export const evaluateLaunchGate = (input: {
     !Array.isArray(evidence)
       ? (evidence as Partial<DrillEvidence>)
       : {};
-  const monthly = evidenceRecord(input.monthly);
+  const weekly = evidenceRecord(input.weekly);
   const quarterly = evidenceRecord(input.quarterly);
   const age = (evidence: Partial<DrillEvidence>) =>
     input.now.getTime() - Date.parse(evidence.completed_at ?? "");
-  if (monthly.drill !== "monthly_restore")
-    blockers.push("monthly evidence has the wrong drill kind");
-  if (age(monthly) > 35 * 86_400_000)
-    blockers.push("monthly recovery evidence is stale");
+  if (weekly.drill !== "weekly_restore")
+    blockers.push("weekly evidence has the wrong drill kind");
+  if (age(weekly) > 8 * 86_400_000)
+    blockers.push("weekly recovery evidence is stale");
   if (quarterly.drill !== "quarterly_game_day")
     blockers.push("quarterly evidence has the wrong drill kind");
   if (age(quarterly) > 100 * 86_400_000)

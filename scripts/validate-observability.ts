@@ -39,7 +39,7 @@ const configSchema = z.object({
     z.object({
       id: z.string(),
       objective: z.number().nullable(),
-      window: z.literal("30d"),
+      window: z.literal("7d"),
       source: sourceName,
       indicator: z.string(),
       filter: z.record(z.string(), z.string()),
@@ -173,7 +173,7 @@ const expectedSlos = [
     indicator: "availability",
     objective: 99.5,
     source: "cloudflarePlatform",
-    window: "30d",
+    window: "7d",
   },
   {
     filter: { dependency: "wasender" },
@@ -181,7 +181,7 @@ const expectedSlos = [
     indicator: "availability",
     objective: null,
     source: "cloudflarePlatform",
-    window: "30d",
+    window: "7d",
   },
   {
     filter: { dependency: "whatsapp" },
@@ -189,7 +189,7 @@ const expectedSlos = [
     indicator: "availability",
     objective: null,
     source: "cloudflarePlatform",
-    window: "30d",
+    window: "7d",
   },
 ] as const;
 

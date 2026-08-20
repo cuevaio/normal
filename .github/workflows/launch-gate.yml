@@ -27,8 +27,8 @@ jobs:
       - uses: dawidd6/action-download-artifact@v11
         with:
           workflow: recovery-drills.yml
-          name: monthly-restore-evidence
-          path: evidence/monthly
+          name: weekly-restore-evidence
+          path: evidence/weekly
           workflow_conclusion: success
       - uses: dawidd6/action-download-artifact@v11
         with:
@@ -51,7 +51,7 @@ jobs:
           MCP_SMOKE_CLIENT_ID: ${{ vars.MCP_SMOKE_CLIENT_ID }}
           MCP_SMOKE_REFRESH_SECRET_ID: ${{ vars.MCP_SMOKE_REFRESH_SECRET_ID }}
           SMOKE_CHECK_SECRET: ${{ secrets.SMOKE_CHECK_SECRET }}
-          MONTHLY_RECOVERY_EVIDENCE: evidence/monthly/monthly_restore.json
+          WEEKLY_RECOVERY_EVIDENCE: evidence/weekly/weekly_restore.json
           QUARTERLY_GAME_DAY_EVIDENCE: evidence/quarterly/quarterly_game_day.json
           NUMERIC_QUOTAS_APPROVAL: ${{ vars.NUMERIC_QUOTAS_APPROVAL }}
           PROVIDER_CAPACITY_APPROVAL: ${{ vars.PROVIDER_CAPACITY_APPROVAL }}

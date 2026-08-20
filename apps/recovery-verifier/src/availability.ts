@@ -49,7 +49,7 @@ export const queryAvailability = async (
       },
       body: JSON.stringify({
         version: 1,
-        window: "30d",
+        window: "7d",
         as_of: input.started_at,
         operation: input.operation,
         recovery_branch_id: input.recovery_branch_id,
@@ -79,7 +79,7 @@ export const queryAvailability = async (
     Array.isArray(candidate) ||
     Object.keys(candidate).length !== 14 ||
     candidate.version !== 1 ||
-    candidate.window !== "30d" ||
+    candidate.window !== "7d" ||
     candidate.as_of !== input.started_at ||
     candidate.operation !== input.operation ||
     candidate.recovery_branch_id !== input.recovery_branch_id ||
@@ -97,7 +97,7 @@ export const queryAvailability = async (
     !Number.isFinite(started) ||
     !Number.isFinite(completed) ||
     completed !== Date.parse(input.started_at) ||
-    completed - started !== 30 * 86_400_000
+    completed - started !== 7 * 86_400_000
   )
     throw new Error("Observability query returned the wrong window");
   if (candidate.sampled_keys_usable !== true)

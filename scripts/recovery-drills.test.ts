@@ -5,9 +5,9 @@ import {
   validateDrillEvidence,
 } from "./recovery-drills";
 
-const monthly: DrillEvidence = {
+const weekly: DrillEvidence = {
   version: 1,
-  drill: "monthly_restore",
+  drill: "weekly_restore",
   environment: "production",
   started_at: "2026-08-01T00:00:00.000Z",
   completed_at: "2026-08-01T00:12:00.000Z",
@@ -60,10 +60,10 @@ const monthly: DrillEvidence = {
 };
 
 const quarterly: DrillEvidence = {
-  ...monthly,
+  ...weekly,
   drill: "quarterly_game_day",
   checks: {
-    ...monthly.checks,
+    ...weekly.checks,
     endpoint_rotation: true,
     oauth_kv_reconstructed: true,
     immutable_queue_replay: true,
@@ -83,7 +83,7 @@ describe("recovery drill evidence", () => {
     expect(
       evaluateLaunchGate({
         now: new Date("2026-08-02"),
-        monthly: null,
+        weekly: null,
         quarterly: null,
         smokePassed: true,
         numericQuotasApproved: true,
@@ -95,14 +95,14 @@ describe("recovery drill evidence", () => {
   });
 
   test("accepts separate first-party objectives and dependency measurements", () => {
-    expect(validateDrillEvidence(monthly, new Date("2026-08-02"))).toEqual([]);
+    expect(validateDrillEvidence(weekly, new Date("2026-08-02"))).toEqual([]);
   });
 
   test("rejects first-party availability below its SLO independently of dependencies", () => {
     expect(
       validateDrillEvidence(
         {
-          ...monthly,
+          ...weekly,
           achieved_first_party_availability_percent: 99.4,
           dependencies: { wasender_percent: 100, whatsapp_percent: 100 },
         },
@@ -115,9 +115,9 @@ describe("recovery drill evidence", () => {
     expect(
       validateDrillEvidence(
         {
-          ...monthly,
+          ...weekly,
           checks: {
-            ...monthly.checks,
+            ...weekly.checks,
             api_keys_revoked: false,
             predecessor_hmac_rejected: undefined,
           },
@@ -125,8 +125,8 @@ describe("recovery drill evidence", () => {
         new Date("2026-08-02"),
       ),
     ).toEqual([
-      "monthly_restore check api_keys_revoked did not pass",
-      "monthly_restore check predecessor_hmac_rejected did not pass",
+      "weekly_restore check api_keys_revoked did not pass",
+      "weekly_restore check predecessor_hmac_rejected did not pass",
     ]);
   });
 
@@ -134,29 +134,29 @@ describe("recovery drill evidence", () => {
     expect(
       validateDrillEvidence(
         {
-          ...monthly,
+          ...weekly,
           serving: true,
-          checks: { ...monthly.checks, rls_isolated: false },
+          checks: { ...weekly.checks, rls_isolated: false },
         },
         new Date("2026-08-02"),
       ),
     ).toEqual([
       "restore branch must be explicitly non-serving",
-      "monthly_restore check rls_isolated did not pass",
+      "weekly_restore check rls_isolated did not pass",
     ]);
   });
 
   test("requires an exact metadata-only evidence shape", () => {
     const failures = validateDrillEvidence(
       {
-        ...monthly,
+        ...weekly,
         serving: undefined,
         tenant_id: "must-not-be-retained",
         objectives: {
-          ...monthly.objectives,
+          ...weekly.objectives,
           branch_id: "must-not-be-retained",
         },
-        checks: { ...monthly.checks, invented_check: true },
+        checks: { ...weekly.checks, invented_check: true },
       },
       new Date("2026-08-02"),
     );
@@ -183,10 +183,10 @@ describe("recovery drill evidence", () => {
   test("requires branch-bound aggregate replay evidence and measured RTO", () => {
     const failures = validateDrillEvidence(
       {
-        ...monthly,
+        ...weekly,
         recovery_branch_id: "not-a-branch",
         achieved_rto_seconds: 1,
-        replay: { ...monthly.replay, deletion_marker_failures: 1 },
+        replay: { ...weekly.replay, deletion_marker_failures: 1 },
       },
       new Date("2026-08-02"),
     );
@@ -202,7 +202,7 @@ describe("recovery drill evidence", () => {
   test("launch gate fails closed on stale evidence or incomplete governance", () => {
     const result = evaluateLaunchGate({
       now: new Date("2026-08-03T00:00:00.000Z"),
-      monthly,
+      weekly,
       quarterly: { ...quarterly, completed_at: "2026-03-01T00:00:00.000Z" },
       smokePassed: true,
       numericQuotasApproved: true,
@@ -221,7 +221,7 @@ describe("recovery drill evidence", () => {
     expect(
       evaluateLaunchGate({
         now: new Date("2026-08-03T00:00:00.000Z"),
-        monthly,
+        weekly,
         quarterly,
         smokePassed: true,
         numericQuotasApproved: true,

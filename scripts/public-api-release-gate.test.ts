@@ -12,9 +12,9 @@ import {
 } from "./public-api-release-gate";
 import type { DrillEvidence } from "./recovery-drills";
 
-const monthly: DrillEvidence = {
+const weekly: DrillEvidence = {
   version: 1,
-  drill: "monthly_restore",
+  drill: "weekly_restore",
   environment: "production",
   started_at: "2026-08-01T00:00:00.000Z",
   completed_at: "2026-08-01T00:12:00.000Z",
@@ -67,10 +67,10 @@ const monthly: DrillEvidence = {
 };
 
 const quarterly: DrillEvidence = {
-  ...monthly,
+  ...weekly,
   drill: "quarterly_game_day",
   checks: {
-    ...monthly.checks,
+    ...weekly.checks,
     endpoint_rotation: true,
     oauth_kv_reconstructed: true,
     immutable_queue_replay: true,
@@ -106,7 +106,7 @@ const completeOpenApiDocument = {
 const passingInput = {
   now: new Date("2026-08-03T00:00:00.000Z"),
   openApiDocument: completeOpenApiDocument,
-  monthly,
+  weekly,
   quarterly,
   repositoryFormatPassed: true,
   repositoryLintPassed: true,
@@ -216,12 +216,12 @@ describe("public API release gate", () => {
   });
 
   test("fails closed when restore invalidation or HMAC rotation evidence is missing", () => {
-    expect(inspectPublicApiRestoreEvidence(monthly)).toEqual([]);
+    expect(inspectPublicApiRestoreEvidence(weekly)).toEqual([]);
     expect(
       inspectPublicApiRestoreEvidence({
-        ...monthly,
+        ...weekly,
         checks: {
-          ...monthly.checks,
+          ...weekly.checks,
           api_keys_revoked: false,
           api_key_hmac_rotated: undefined,
         },
@@ -255,7 +255,7 @@ describe("public API release gate", () => {
   test("CLI fails closed when an attestation is unavailable", async () => {
     const previous = { ...process.env };
     for (const key of Object.keys(process.env)) delete process.env[key];
-    process.env.MONTHLY_RECOVERY_EVIDENCE = "monthly.json";
+    process.env.WEEKLY_RECOVERY_EVIDENCE = "weekly.json";
     process.env.QUARTERLY_GAME_DAY_EVIDENCE = "quarterly.json";
     process.env.PUBLIC_API_FORMAT_CHECK = "passed";
     await expect(
@@ -263,7 +263,7 @@ describe("public API release gate", () => {
         now: passingInput.now,
         openApiDocument: completeOpenApiDocument,
         readEvidence: async (path) =>
-          path === "monthly.json" ? monthly : quarterly,
+          path === "weekly.json" ? weekly : quarterly,
       }),
     ).rejects.toThrow("PUBLIC_API_LINT is unavailable");
     for (const key of Object.keys(process.env)) delete process.env[key];

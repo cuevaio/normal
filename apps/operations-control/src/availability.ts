@@ -57,7 +57,7 @@ export const handleAvailability = async (
   if (
     !exactKeys(candidate, keys) ||
     candidate.version !== 1 ||
-    candidate.window !== "30d" ||
+    candidate.window !== "7d" ||
     !canonicalTimestamp(candidate.as_of) ||
     !canonicalTimestamp(candidate.source_point_at) ||
     typeof candidate.operation !== "string" ||
@@ -72,7 +72,7 @@ export const handleAvailability = async (
     throw new Error("Availability request is invalid");
   const completedAt = candidate.as_of;
   const startedAt = new Date(
-    Date.parse(completedAt) - 30 * 86_400_000,
+    Date.parse(completedAt) - 7 * 86_400_000,
   ).toISOString();
   const fetcher = dependencies.fetch ?? fetch;
   const [firstPartyPercent, dependenciesResult, sampledKeysUsable] =
@@ -92,7 +92,7 @@ export const handleAvailability = async (
     ]);
   return safeJson({
     version: 1,
-    window: "30d",
+    window: "7d",
     as_of: completedAt,
     window_started_at: startedAt,
     window_completed_at: completedAt,

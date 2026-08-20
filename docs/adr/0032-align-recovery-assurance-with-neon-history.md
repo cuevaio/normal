@@ -1,0 +1,5 @@
+# Align recovery assurance with Neon history
+
+Supersede the monthly availability window and monthly restore cadence in ADR 0021. Measure the private beta first party availability SLO over a rolling seven day window, matching the configured seven day Neon history window. Run the non serving restore drill every week against a randomly selected point in that history. Recovery and release gates accept only validated weekly restore evidence completed within the prior eight days. Keep the 99.5 percent first party objective, four hour recovery time objective, five minute Neon recovery point objective, zero deletion marker loss objective, and separate Wasender and WhatsApp dependency measurements.
+
+Cloudflare Analytics permits only one day per hostname filtered request on the production plan. Query seven adjacent one day partitions and aggregate failed and total requests across all partitions before calculating the seven day result. Any missing, malformed, failed, or empty partition keeps the recovery gate closed. Use the Wasender seven day uptime measurement for the same interval. Keep the quarterly game day and its 100 day evidence freshness requirement unchanged.

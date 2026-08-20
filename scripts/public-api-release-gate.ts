@@ -85,7 +85,7 @@ export type PublicApiReleaseAttestation = (typeof attestationNames)[number];
 export interface PublicApiReleaseGateInput {
   readonly now: Date;
   readonly openApiDocument: unknown;
-  readonly monthly: unknown;
+  readonly weekly: unknown;
   readonly quarterly: unknown;
   readonly repositoryFormatPassed: boolean;
   readonly repositoryLintPassed: boolean;
@@ -199,18 +199,18 @@ const evidenceAgeMs = (evidence: Partial<DrillEvidence>, now: Date) =>
 export const evaluatePublicApiReleaseGate = (
   input: PublicApiReleaseGateInput,
 ) => {
-  const monthly = evidenceRecord(input.monthly);
+  const weekly = evidenceRecord(input.weekly);
   const quarterly = evidenceRecord(input.quarterly);
   const blockers = [
     ...inspectPublicApiOpenApiDocument(input.openApiDocument),
-    ...validateDrillEvidence(input.monthly, input.now),
+    ...validateDrillEvidence(input.weekly, input.now),
     ...validateDrillEvidence(input.quarterly, input.now),
-    ...inspectPublicApiRestoreEvidence(input.monthly),
+    ...inspectPublicApiRestoreEvidence(input.weekly),
   ];
-  if (monthly.drill !== "monthly_restore")
-    blockers.push("monthly evidence has the wrong drill kind");
-  if (evidenceAgeMs(monthly, input.now) > 35 * 86_400_000)
-    blockers.push("monthly recovery evidence is stale");
+  if (weekly.drill !== "weekly_restore")
+    blockers.push("weekly evidence has the wrong drill kind");
+  if (evidenceAgeMs(weekly, input.now) > 8 * 86_400_000)
+    blockers.push("weekly recovery evidence is stale");
   if (quarterly.drill !== "quarterly_game_day")
     blockers.push("quarterly evidence has the wrong drill kind");
   if (evidenceAgeMs(quarterly, input.now) > 100 * 86_400_000)
@@ -240,14 +240,14 @@ export const runPublicApiReleaseGate = async (
   const readEvidence =
     options.readEvidence ??
     (async (path: string) => JSON.parse(await Bun.file(path).text()));
-  const [monthly, quarterly] = await Promise.all([
-    readEvidence(required("MONTHLY_RECOVERY_EVIDENCE")),
+  const [weekly, quarterly] = await Promise.all([
+    readEvidence(required("WEEKLY_RECOVERY_EVIDENCE")),
     readEvidence(required("QUARTERLY_GAME_DAY_EVIDENCE")),
   ]);
   const result = evaluatePublicApiReleaseGate({
     now: options.now ?? new Date(),
     openApiDocument: options.openApiDocument ?? generateOpenApiDocument(),
-    monthly,
+    weekly,
     quarterly,
     repositoryFormatPassed: passed("PUBLIC_API_FORMAT_CHECK"),
     repositoryLintPassed: passed("PUBLIC_API_LINT"),

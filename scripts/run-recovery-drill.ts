@@ -162,8 +162,8 @@ export const runRecoveryDrill = async (
 
 if (import.meta.main) {
   const drill = process.argv[2] as DrillKind;
-  if (!(["monthly_restore", "quarterly_game_day"] as const).includes(drill))
-    throw new Error("expected monthly_restore or quarterly_game_day");
+  if (!(["weekly_restore", "quarterly_game_day"] as const).includes(drill))
+    throw new Error("expected weekly_restore or quarterly_game_day");
   const beforePoll =
     drill === "quarterly_game_day"
       ? (

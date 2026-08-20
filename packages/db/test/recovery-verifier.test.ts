@@ -3,7 +3,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { makeMcpToolRepository } from "../src/mcp-tool";
 import { runMigrations } from "../src/migrations";
 
-const branchId = "br-monthly-recovery";
+const branchId = "br-weekly-recovery";
 const observedAt = "2026-08-18T12:00:00.000Z";
 
 describe("recovery verifier database boundary", () => {

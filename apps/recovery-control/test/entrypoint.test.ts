@@ -59,7 +59,7 @@ describe("recovery control public boundary", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          drill: "monthly_restore",
+          drill: "weekly_restore",
           requested_source_point_at: source,
           serving: false,
         }),
@@ -71,7 +71,7 @@ describe("recovery control public boundary", () => {
     expect(gateFetch).toHaveBeenCalledOnce();
     const forwarded = gateFetch.mock.calls[0]?.[1];
     expect(JSON.parse(String(forwarded?.body))).toEqual({
-      drill: "monthly_restore",
+      drill: "weekly_restore",
       requested_source_point_at: source,
       serving: false,
     });
@@ -86,7 +86,7 @@ describe("recovery control public boundary", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          drill: "monthly_restore",
+          drill: "weekly_restore",
           requested_source_point_at: new Date(
             Date.now() - 3_600_000,
           ).toISOString(),
@@ -105,7 +105,7 @@ describe("recovery control public boundary", () => {
         method: "POST",
         headers: { authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          drill: "monthly_restore",
+          drill: "weekly_restore",
           requested_source_point_at: new Date(
             Date.now() - 3_600_000,
           ).toISOString(),

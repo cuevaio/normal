@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-export const monthlyRecoveryChecks = [
+export const weeklyRecoveryChecks = [
   "schema_compatible",
   "rls_isolated",
   "sampled_keys_usable",
@@ -80,13 +80,13 @@ export const ReplayEvidenceSchema = Schema.Struct({
   object_deletion_failures: Schema.Literal(0),
 });
 
-const MonthlyChecksSchema = Schema.Struct(
+const WeeklyChecksSchema = Schema.Struct(
   Object.fromEntries(
-    monthlyRecoveryChecks.map((check) => [check, Schema.Literal(true)]),
-  ) as Record<(typeof monthlyRecoveryChecks)[number], Schema.Literal<[true]>>,
+    weeklyRecoveryChecks.map((check) => [check, Schema.Literal(true)]),
+  ) as Record<(typeof weeklyRecoveryChecks)[number], Schema.Literal<[true]>>,
 );
 const QuarterlyChecksSchema = Schema.Struct({
-  ...MonthlyChecksSchema.fields,
+  ...WeeklyChecksSchema.fields,
   ...Object.fromEntries(
     quarterlyRecoveryChecks.map((check) => [check, Schema.Literal(true)]),
   ),
@@ -112,7 +112,7 @@ const VerificationRequestBase = {
 export const RecoveryVerificationRequestSchema = Schema.Union(
   Schema.Struct({
     ...VerificationRequestBase,
-    drill: Schema.Literal("monthly_restore"),
+    drill: Schema.Literal("weekly_restore"),
   }),
   Schema.Struct({
     ...VerificationRequestBase,
@@ -137,8 +137,8 @@ const VerificationResponseBase = {
 export const RecoveryVerificationResponseSchema = Schema.Union(
   Schema.Struct({
     ...VerificationResponseBase,
-    drill: Schema.Literal("monthly_restore"),
-    checks: MonthlyChecksSchema,
+    drill: Schema.Literal("weekly_restore"),
+    checks: WeeklyChecksSchema,
   }),
   Schema.Struct({
     ...VerificationResponseBase,

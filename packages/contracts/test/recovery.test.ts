@@ -50,23 +50,23 @@ const monthlyChecks = {
 } as const;
 
 describe("recovery verification contract", () => {
-  test("decodes an exact metadata-only monthly request", () => {
+  test("decodes an exact metadata-only weekly request", () => {
     expect(
       decodeRecoveryVerificationRequest({
         ...identity,
-        drill: "monthly_restore",
+        drill: "weekly_restore",
         environment: "production",
         serving: false,
         replay,
       }),
-    ).toMatchObject({ drill: "monthly_restore", serving: false });
+    ).toMatchObject({ drill: "weekly_restore", serving: false });
   });
 
   test("rejects request and response extensions", () => {
     expect(() =>
       decodeRecoveryVerificationRequest({
         ...identity,
-        drill: "monthly_restore",
+        drill: "weekly_restore",
         environment: "production",
         serving: false,
         replay,
@@ -76,7 +76,7 @@ describe("recovery verification contract", () => {
     expect(() =>
       decodeRecoveryVerificationResponse({
         ...identity,
-        drill: "monthly_restore",
+        drill: "weekly_restore",
         achieved_rpo_seconds: 1,
         achieved_first_party_availability_percent: 99.9,
         dependencies: { wasender_percent: 99, whatsapp_percent: 98 },

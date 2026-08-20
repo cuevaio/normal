@@ -87,4 +87,4 @@ time remains reported separately and has no invented objective.
 - A five-minute Wasender or WhatsApp outage pages as a dependency incident and remains distinct from first-party SLO reporting.
 - A `health_check_failure` Ingestion Gap creates a first-party scheduled-execution incident. Confirm two on-time observations after recovery and keep this distinct from message inactivity.
 
-Retain monthly first-party SLO reports and dependency reports as separate aggregate artifacts. Record objective, achieved availability, error-budget consumption, incident counts, and reporting window only; do not attach raw logs or tenant-level samples.
+Retain weekly first-party SLO reports and dependency reports as separate aggregate artifacts. The first-party report aggregates seven adjacent one-day hostname-filtered Cloudflare Analytics partitions. Record objective, achieved availability, error-budget consumption, incident counts, and reporting window only; do not attach raw logs or tenant-level samples.

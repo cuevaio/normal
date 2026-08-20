@@ -2,7 +2,7 @@ name: Production recovery drills
 
 on:
   schedule:
-    - cron: "17 3 1 * *"
+    - cron: "17 3 * * 0"
     - cron: "43 4 1 1,4,7,10 *"
   workflow_dispatch:
     inputs:
@@ -10,7 +10,7 @@ on:
         description: Drill to execute
         required: true
         type: choice
-        options: [monthly_restore, quarterly_game_day]
+        options: [weekly_restore, quarterly_game_day]
 
 permissions:
   contents: read
@@ -20,11 +20,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  monthly-restore:
+  weekly-restore:
     if: >-
       github.ref == 'refs/heads/main' &&
-      ((github.event_name == 'schedule' && github.event.schedule == '17 3 1 * *') ||
-      inputs.drill == 'monthly_restore')
+      ((github.event_name == 'schedule' && github.event.schedule == '17 3 * * 0') ||
+      inputs.drill == 'weekly_restore')
     runs-on: ubuntu-latest
     timeout-minutes: 250
     environment: production-recovery
@@ -34,15 +34,15 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
-      - run: bun scripts/run-recovery-drill.ts monthly_restore
+      - run: bun scripts/run-recovery-drill.ts weekly_restore
         env:
           RECOVERY_AUTOMATION_URL: ${{ secrets.RECOVERY_AUTOMATION_URL }}
           RECOVERY_AUTOMATION_TOKEN: ${{ secrets.RECOVERY_AUTOMATION_TOKEN }}
-          RECOVERY_EVIDENCE_PATH: monthly_restore.json
+          RECOVERY_EVIDENCE_PATH: weekly_restore.json
       - uses: actions/upload-artifact@v4
         with:
-          name: monthly-restore-evidence
-          path: monthly_restore.json
+          name: weekly-restore-evidence
+          path: weekly_restore.json
           retention-days: 400
 
   quarterly-game-day:

@@ -78,7 +78,7 @@
     {
       "id": "first-party-availability",
       "objective": 99.5,
-      "window": "30d",
+      "window": "7d",
       "source": "cloudflarePlatform",
       "indicator": "availability",
       "filter": { "dependency": "first-party" }
@@ -86,7 +86,7 @@
     {
       "id": "wasender-availability",
       "objective": null,
-      "window": "30d",
+      "window": "7d",
       "source": "cloudflarePlatform",
       "indicator": "availability",
       "filter": { "dependency": "wasender" }
@@ -94,7 +94,7 @@
     {
       "id": "whatsapp-availability",
       "objective": null,
-      "window": "30d",
+      "window": "7d",
       "source": "cloudflarePlatform",
       "indicator": "availability",
       "filter": { "dependency": "whatsapp" }
@@ -218,7 +218,7 @@
       "id": "availability-slos",
       "panels": [
         {
-          "title": "First-party monthly availability",
+          "title": "First-party seven-day availability",
           "source": "cloudflarePlatform",
           "metric": "availability",
           "filter": { "dependency": "first-party" },

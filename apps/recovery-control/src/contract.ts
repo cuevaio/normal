@@ -6,10 +6,7 @@ export {
   type ReplayEvidence,
 } from "@whatsapp-mcp/contracts/recovery";
 
-export const drillKindSchema = z.enum([
-  "monthly_restore",
-  "quarterly_game_day",
-]);
+export const drillKindSchema = z.enum(["weekly_restore", "quarterly_game_day"]);
 
 export const startRequestSchema = z
   .object({

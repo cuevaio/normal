@@ -113,43 +113,64 @@ export const queryFirstPartyAvailability = async (
   fetcher: OperationsFetch = fetch,
 ) => {
   const api = new URL(env.API_ORIGIN);
-  const result = zone(
-    await query(
-      env,
-      {
-        query: firstPartyQuery,
-        variables: {
-          filter: {
-            clientRequestHTTPHost: api.hostname,
-            datetime_geq: input.startedAt,
-            datetime_leq: input.completedAt,
-          },
-          zoneTag: required(env.CLOUDFLARE_ZONE_ID, "Cloudflare zone"),
-        },
-      },
-      fetcher,
-    ),
-  );
-  const groups = result.httpRequestsAdaptiveGroups;
-  if (!Array.isArray(groups) || groups.length !== 1)
-    throw new CloudflareAnalyticsError("response");
-  const candidate = groups[0] as {
-    readonly count?: unknown;
-    readonly ratio?: { readonly status5xx?: unknown };
-  };
-  const requests = candidate.count;
-  const ratio = candidate.ratio?.status5xx;
+  const started = Date.parse(input.startedAt);
+  const completed = Date.parse(input.completedAt);
+  const day = 86_400_000;
   if (
-    typeof requests !== "number" ||
-    !Number.isFinite(requests) ||
-    requests <= 0 ||
-    typeof ratio !== "number" ||
-    !Number.isFinite(ratio) ||
-    ratio < 0 ||
-    ratio > 1
+    !Number.isFinite(started) ||
+    !Number.isFinite(completed) ||
+    completed - started !== 7 * day
   )
     throw new CloudflareAnalyticsError("response");
-  return Math.round((100 - ratio * 100) * 1_000_000) / 1_000_000;
+  const zoneTag = required(env.CLOUDFLARE_ZONE_ID, "Cloudflare zone");
+  const partitions = await Promise.all(
+    Array.from({ length: 7 }, async (_, index) => {
+      const result = zone(
+        await query(
+          env,
+          {
+            query: firstPartyQuery,
+            variables: {
+              filter: {
+                clientRequestHTTPHost: api.hostname,
+                datetime_geq: new Date(started + index * day).toISOString(),
+                datetime_lt: new Date(
+                  started + (index + 1) * day,
+                ).toISOString(),
+              },
+              zoneTag,
+            },
+          },
+          fetcher,
+        ),
+      );
+      const groups = result.httpRequestsAdaptiveGroups;
+      if (!Array.isArray(groups) || groups.length !== 1)
+        throw new CloudflareAnalyticsError("response");
+      const candidate = groups[0] as {
+        readonly count?: unknown;
+        readonly ratio?: { readonly status5xx?: unknown };
+      };
+      const requests = candidate.count;
+      const ratio = candidate.ratio?.status5xx;
+      if (
+        typeof requests !== "number" ||
+        !Number.isFinite(requests) ||
+        requests <= 0 ||
+        typeof ratio !== "number" ||
+        !Number.isFinite(ratio) ||
+        ratio < 0 ||
+        ratio > 1
+      )
+        throw new CloudflareAnalyticsError("response");
+      return { failed: requests * ratio, requests };
+    }),
+  );
+  const requests = partitions.reduce((total, part) => total + part.requests, 0);
+  const failed = partitions.reduce((total, part) => total + part.failed, 0);
+  if (!Number.isFinite(requests) || requests <= 0 || !Number.isFinite(failed))
+    throw new CloudflareAnalyticsError("response");
+  return Math.round((100 - (failed / requests) * 100) * 1_000_000) / 1_000_000;
 };
 
 export type PagerDelivery = "delivered" | "failed" | "pending";

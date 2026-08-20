@@ -1349,9 +1349,9 @@ second onboarding gate: a User who can authenticate is already approved and
 can bootstrap a Personal Account. Provider availability is managed internally
 and evaluated only when a Connection Setup provisions a WhatsApp Connection.
 
-The monthly and quarterly schedules in
+The weekly and quarterly schedules in
 `.github/workflows/recovery-drills.yml` call the production recovery automation
-boundary and retain its validated, metadata-only evidence. The monthly restore
+boundary and retain its validated, metadata-only evidence. The weekly restore
 must use a random point from the preceding seven days and a non-serving branch.
 The quarterly game day covers endpoint rotation, OAuth KV reconstruction,
 create-only receipt-bound Queue fixture replay, KMS/R2 access, production Stored
@@ -1365,7 +1365,7 @@ Run the `External onboarding launch gate` workflow after successful drill
 artifacts exist. It reruns the real deployed smoke and production bundle
 inspection and requires the exact environment attestations `approved` for
 numeric quotas, provider capacity, and Wasender governance terms. Evidence
-older than 35 days for the monthly drill or 100 days for the quarterly drill is
+older than 8 days for the weekly drill or 100 days for the quarterly drill is
 rejected. The successful result is release evidence; it does not mutate
 application admission state. Any missing artifact, secret, external approval,
 malformed report, failed check, missed four-hour RTO, missed five-minute Neon
@@ -1395,13 +1395,13 @@ reviewed commit:
    configuration.
 
 The evaluator also requires every v1 REST and API Key management path, the
-guide topics rendered by Scalar, current monthly and quarterly drill evidence,
+guide topics rendered by Scalar, current weekly and quarterly drill evidence,
 and restore checks `api_keys_revoked`, `api_key_digests_cleared`,
 `api_key_hmac_rotated`, and `predecessor_hmac_rejected`. Any failed or missing
 gate blocks release. Do not add an exception, skip, `continue-on-error`, or
 reduced check.
 
-Evidence records achieved first-party monthly availability against the 99.5
+Evidence records achieved first-party seven-day availability against the 99.5
 percent SLO separately from achieved Wasender and WhatsApp availability.
 Reports contain timings, aggregate counts, and normalized checks only; never
 include a User, Personal Account, WhatsApp Connection, provider identifier,
