@@ -38,7 +38,7 @@ export const queryAvailability = async (
     {
       method: "POST",
       redirect: "manual",
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(210_000),
       headers: {
         accept: "application/json",
         authorization: `Bearer ${required(

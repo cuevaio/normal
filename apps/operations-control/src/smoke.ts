@@ -31,7 +31,11 @@ export const verifySampledKeys = async (
   )
     throw new Error("Production key canary was rejected");
 
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  // Workers KV may continue serving the pending value from an edge cache for
+  // up to a minute after the queue consumer records completion. Keep this
+  // aligned with the production deployment smoke window so a healthy canary
+  // is not rejected while that update propagates.
+  for (let attempt = 0; attempt < 180; attempt += 1) {
     const response = await fetcher(
       `${origin}/_internal/deployment-smoke?id=${startedBody.canary_id}`,
       {
