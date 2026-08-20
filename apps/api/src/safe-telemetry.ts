@@ -36,7 +36,7 @@ export const safeTelemetryFieldsByEvent = {
   ],
   "connection_setup.provision.claimed": [...common, "queueDelayMs"],
   "connection_setup.provision.recovery_enqueued": [...common, "candidateCount"],
-  "connection_setup.qr.completed": [...common, "outcome"],
+  "connection_setup.qr.completed": [...common, "durationMs", "outcome"],
   "connection_setup.start.completed": [...common, "outcome"],
   "directory.contacts.reconciliation.completed": [
     ...common,
@@ -171,7 +171,11 @@ export const safeTelemetryFieldsByEvent = {
     "operation",
     "outcome",
   ],
-  "whatsapp_connection.list.completed": [...common, "connectionCount"],
+  "whatsapp_connection.list.completed": [
+    ...common,
+    "connectionCount",
+    "durationMs",
+  ],
   "whatsapp_connection.rename.completed": common,
 } as const satisfies Record<SafeTelemetryEvent["event"], ReadonlyArray<string>>;
 

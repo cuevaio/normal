@@ -29,6 +29,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { captureProductAnalyticsEvent } from "../effect/product-analytics";
+import { connectionSetupStatusText } from "./connection-setup-observation";
 import { McpConnectionGuides } from "./mcp-connection-guides";
 
 export type ConnectionSetupState =
@@ -325,62 +326,6 @@ function isCompleteDraft(draft: ProfileDraft): draft is {
     draft.intendedMcpClient !== "" &&
     draft.researchCallInterest !== ""
   );
-}
-
-function connectionSetupStatusText(
-  setupState: ConnectionSetupState,
-  cleanupState: ConnectionSetupCleanupState | null,
-): string {
-  if (setupState === "loading") return "Starting Connection Setup.";
-  if (setupState === "unavailable") {
-    return "Connection Setup is temporarily unavailable.";
-  }
-  if (setupState === "pending") {
-    return "Connection Setup started. Preparing your QR code.";
-  }
-  if (setupState === "replayed") {
-    return "Connection Setup already started. Preparing your QR code.";
-  }
-  if (setupState === "qr_available") return "Scan this QR code with WhatsApp.";
-  if (setupState === "connecting") {
-    return "Waiting for WhatsApp to finish connecting.";
-  }
-  if (setupState === "connected") return "WhatsApp Connection active.";
-  if (setupState === "provisioned") return "Connection Setup is ready.";
-  if (setupState === "provider_capacity_unavailable") {
-    return "WhatsApp Connection capacity is temporarily unavailable. Please try again later.";
-  }
-  if (setupState === "provisioning_failed") {
-    return "Connection Setup could not be prepared.";
-  }
-  if (setupState === "provisioning_quarantined") {
-    return "Connection Setup needs support review.";
-  }
-  if (setupState === "cancelling") return "Cancelling Connection Setup.";
-  if (setupState === "cancelled") {
-    return cleanupState === "complete"
-      ? "Connection Setup cancelled. Provider cleanup is complete."
-      : cleanupState === "retrying"
-        ? "Connection Setup cancelled. Provider cleanup is retrying."
-        : "Connection Setup cancelled. Provider cleanup is in progress.";
-  }
-  if (setupState === "expired") {
-    return cleanupState === "complete"
-      ? "Connection Setup expired. Provider cleanup is complete."
-      : cleanupState === "retrying"
-        ? "Connection Setup expired. Provider cleanup is retrying."
-        : "Connection Setup expired. Provider cleanup is in progress.";
-  }
-  if (setupState === "number_unavailable") {
-    return "That WhatsApp Number is already in use.";
-  }
-  if (setupState === "connection_limit_reached") {
-    return "Your Personal Account already has three active setup or Connection slots.";
-  }
-  if (setupState === "invalid") {
-    return "Enter a valid international WhatsApp Number.";
-  }
-  return "";
 }
 
 function canCancelSetup(

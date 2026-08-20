@@ -304,9 +304,11 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   await expect(startConnectionSetup).toBeDisabled();
   releaseFirstSetup?.();
   await expect(page.getByTestId("connection-setup-status")).toHaveText(
-    "Connection Setup started. Preparing your QR code.",
+    "Connection Setup started. Normal is preparing your code to link WhatsApp.",
   );
-  await expect(onboarding).toContainText("Preparing your QR code");
+  await expect(onboarding).toContainText(
+    "Normal is preparing your code to link WhatsApp",
+  );
   await expect(
     page.getByRole("img", { name: "Scan this WhatsApp QR code" }),
   ).toHaveCount(0);
@@ -323,7 +325,7 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
     page.getByRole("img", { name: "Scan this WhatsApp QR code" }),
   ).toBeVisible();
   await expect(page.getByTestId("connection-setup-status")).toHaveText(
-    "Scan this QR code with WhatsApp.",
+    "Scan this code with WhatsApp. Normal will confirm as soon as WhatsApp finishes linking.",
   );
   await expect(
     page.getByRole("heading", { name: "WhatsApp Connection active" }),

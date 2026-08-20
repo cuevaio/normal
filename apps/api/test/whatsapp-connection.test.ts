@@ -493,6 +493,12 @@ describe("WhatsApp Connection HTTP boundary", () => {
       "connectSession",
       "getQrCode",
     ]);
+    expect(harness.events).toContainEqual({
+      durationMs: expect.any(Number),
+      event: "connection_setup.qr.completed",
+      outcome: "qr_available",
+      service: "api",
+    });
     expect(JSON.stringify(harness.events)).not.toContain("<svg");
     expect(JSON.stringify(harness.events)).not.toContain("cst_");
     expect(harness.connections).toEqual([]);
@@ -529,6 +535,12 @@ describe("WhatsApp Connection HTTP boundary", () => {
           state_changed_at: "2026-07-31T12:04:00.000Z",
         },
       ],
+    });
+    expect(harness.events).toContainEqual({
+      connectionCount: 1,
+      durationMs: expect.any(Number),
+      event: "whatsapp_connection.list.completed",
+      service: "api",
     });
     expect(listedText).not.toContain("session-authority");
   });

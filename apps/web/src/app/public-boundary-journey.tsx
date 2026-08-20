@@ -531,19 +531,20 @@ export function PublicBoundaryJourney({
   const lifecycleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const observationGeneration = useRef(0);
   const observationAttempt = useRef(0);
+  const lifecyclePollAttempt = useRef(0);
+  const lifecyclePollState = useRef<ConnectionSetupState>("idle");
   const setupObservationMetrics = useRef<{
-    readonly qrObservedAtMs: number | null;
+    readonly connectingStartedAtMs: number | null;
     readonly setupStartedAtMs: number | null;
-    readonly startToQrCaptured: boolean;
-    readonly qrToActiveCaptured: boolean;
+    readonly setupToCodeCaptured: boolean;
   }>({
-    qrObservedAtMs: null,
+    connectingStartedAtMs: null,
     setupStartedAtMs: null,
-    startToQrCaptured: false,
-    qrToActiveCaptured: false,
+    setupToCodeCaptured: false,
   });
   const observationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const automaticallyInitialized = useRef(false);
+  const previousView = useRef(view);
 
   const normalizedActivityLogSearch = activityLogSearch.trim().toLowerCase();
   const filteredActivityLogs = activityLogs.filter((log) => {
@@ -632,6 +633,27 @@ export function PublicBoundaryJourney({
   );
 
   const getToken = () => getClerkToken({ template: clerkJwtTemplate });
+
+  const currentObservationTimeMs = () =>
+    typeof performance !== "undefined" && Number.isFinite(performance.now())
+      ? performance.now()
+      : Date.now();
+
+  const recordConnectionSetupTiming = (
+    phase: "linking_to_active" | "setup_to_code",
+    startedAtMs: number | null,
+  ) => {
+    const durationMs = observationMetricDurationMs(
+      startedAtMs,
+      currentObservationTimeMs(),
+    );
+    if (durationMs === null) return;
+    captureProductAnalyticsEvent({
+      durationMs,
+      event: "connection_setup_timing_recorded",
+      phase,
+    });
+  };
 
   const openSignIn = async () => {
     try {
@@ -816,9 +838,21 @@ export function PublicBoundaryJourney({
     setReconnectQr(next);
   };
 
+  const stopLifecyclePolling = () => {
+    lifecycleGeneration.current += 1;
+    lifecyclePollAttempt.current = 0;
+    lifecyclePollState.current = "idle";
+    if (lifecycleTimer.current !== null) {
+      clearTimeout(lifecycleTimer.current);
+      lifecycleTimer.current = null;
+    }
+    replaceReconnectQr(null);
+  };
+
   const stopObserving = () => {
     observationGeneration.current += 1;
     observationAttempt.current = 0;
+    setupStateRef.current = "idle";
     if (observationTimer.current !== null) {
       clearTimeout(observationTimer.current);
       observationTimer.current = null;
@@ -832,14 +866,40 @@ export function PublicBoundaryJourney({
     stopObservingOnIdentityChange();
   }, [identityState, stopObservingOnIdentityChange]);
 
+  useEffect(() => {
+    if (identityState === "signed_in") return;
+    stopLifecyclePolling();
+    setConnectionLifecycleAction(null);
+  }, [identityState]);
+
+  useEffect(() => {
+    if (previousView.current === view) return;
+    previousView.current = view;
+    if (view !== "connections") {
+      stopObserving();
+      stopLifecyclePolling();
+      setConnectionLifecycleAction(null);
+      return;
+    }
+    if (
+      setupId !== null &&
+      (setupState === "pending" ||
+        setupState === "provisioned" ||
+        setupState === "qr_available" ||
+        setupState === "connecting" ||
+        setupState === "replayed")
+    ) {
+      startObserving(setupId);
+    }
+  }, [setupId, setupState, view]);
+
   const resetSetupForDraftChange = () => {
     stopObserving();
     setupIntent.current = null;
     setupObservationMetrics.current = {
-      qrObservedAtMs: null,
+      connectingStartedAtMs: null,
       setupStartedAtMs: null,
-      startToQrCaptured: false,
-      qrToActiveCaptured: false,
+      setupToCodeCaptured: false,
     };
     setSetupCleanupState(null);
     setSetupId(null);
@@ -861,10 +921,9 @@ export function PublicBoundaryJourney({
     stopObserving();
     setupIntent.current = null;
     setupObservationMetrics.current = {
-      qrObservedAtMs: null,
+      connectingStartedAtMs: null,
       setupStartedAtMs: null,
-      startToQrCaptured: false,
-      qrToActiveCaptured: false,
+      setupToCodeCaptured: false,
     };
     setConnectionName("");
     setSetupCleanupState(null);
@@ -1109,11 +1168,19 @@ export function PublicBoundaryJourney({
     generation: number,
   ): Promise<void> => {
     const isCurrent = () => lifecycleGeneration.current === generation;
-    const observeAgain = () => {
-      lifecycleTimer.current = setTimeout(() => {
-        lifecycleTimer.current = null;
-        void reconcileConnectionLifecycle(connectionId, action, generation);
-      }, 750);
+    const observeAgain = (state: ConnectionSetupState) => {
+      lifecyclePollAttempt.current =
+        lifecyclePollState.current === state
+          ? lifecyclePollAttempt.current + 1
+          : 0;
+      lifecyclePollState.current = state;
+      lifecycleTimer.current = setTimeout(
+        () => {
+          lifecycleTimer.current = null;
+          void reconcileConnectionLifecycle(connectionId, action, generation);
+        },
+        nextConnectionSetupPollDelayMs(state, lifecyclePollAttempt.current),
+      );
     };
 
     try {
@@ -1149,7 +1216,7 @@ export function PublicBoundaryJourney({
           ...current,
           [connectionId]: "Scan the QR code to reconnect.",
         }));
-        observeAgain();
+        observeAgain("qr_available");
         return;
       }
 
@@ -1192,11 +1259,11 @@ export function PublicBoundaryJourney({
               ? "Disconnecting WhatsApp Connection."
               : "Reconnecting WhatsApp Connection.",
         }));
-        observeAgain();
+        observeAgain("connecting");
         return;
       }
 
-      replaceReconnectQr(null);
+      stopLifecyclePolling();
       setConnectionLifecycleAction(null);
       setConnectionLifecycleStatus((current) => ({
         ...current,
@@ -1209,7 +1276,7 @@ export function PublicBoundaryJourney({
       }));
     } catch {
       if (isCurrent()) {
-        replaceReconnectQr(null);
+        stopLifecyclePolling();
         setConnectionLifecycleAction(null);
         setConnectionLifecycleStatus((current) => ({
           ...current,
@@ -1223,12 +1290,7 @@ export function PublicBoundaryJourney({
     connection: SafeWhatsAppConnection,
     action: "disconnect" | "reconnect",
   ) => {
-    lifecycleGeneration.current += 1;
-    if (lifecycleTimer.current !== null) {
-      clearTimeout(lifecycleTimer.current);
-      lifecycleTimer.current = null;
-    }
-    replaceReconnectQr(null);
+    stopLifecyclePolling();
     const generation = lifecycleGeneration.current;
     setConnectionLifecycleAction(`${connection.id}:${action}`);
     setConnectionLifecycleStatus((current) => ({
@@ -1246,65 +1308,41 @@ export function PublicBoundaryJourney({
     generation: number,
   ): Promise<void> => {
     const isCurrent = () => observationGeneration.current === generation;
-    const observeAgain = () => {
-      const delayMs = nextConnectionSetupPollDelayMs(
-        setupStateRef.current,
-        observationAttempt.current,
+    const observeAgain = (state: SetupState) => {
+      observationAttempt.current =
+        setupStateRef.current === state ? observationAttempt.current + 1 : 0;
+      setupStateRef.current = state;
+      observationTimer.current = setTimeout(
+        () => {
+          observationTimer.current = null;
+          void observeSetup(setupId, generation);
+        },
+        nextConnectionSetupPollDelayMs(state, observationAttempt.current),
       );
-      observationAttempt.current += 1;
-      observationTimer.current = setTimeout(() => {
-        observationTimer.current = null;
-        void observeSetup(setupId, generation);
-      }, delayMs);
     };
     const markState = (nextState: SetupState) => {
-      const previousState = setupStateRef.current;
-      if (previousState !== nextState) {
-        observationAttempt.current = 0;
-      }
-      setupStateRef.current = nextState;
       setSetupState(nextState);
       if (
         nextState === "qr_available" &&
-        !setupObservationMetrics.current.startToQrCaptured
+        !setupObservationMetrics.current.setupToCodeCaptured
       ) {
-        const observedAtMs = performance.now();
-        const durationMs = observationMetricDurationMs(
+        recordConnectionSetupTiming(
+          "setup_to_code",
           setupObservationMetrics.current.setupStartedAtMs,
-          observedAtMs,
         );
-        if (durationMs !== null) {
-          captureProductAnalyticsEvent({
-            durationMs,
-            event: "connection_setup_timing_recorded",
-            phase: "start_to_code_observed",
-          });
-          setupObservationMetrics.current = {
-            ...setupObservationMetrics.current,
-            qrObservedAtMs: observedAtMs,
-            startToQrCaptured: true,
-          };
-        }
+        setupObservationMetrics.current = {
+          ...setupObservationMetrics.current,
+          setupToCodeCaptured: true,
+        };
       }
       if (
-        nextState === "connected" &&
-        !setupObservationMetrics.current.qrToActiveCaptured
+        nextState === "connecting" &&
+        setupObservationMetrics.current.connectingStartedAtMs === null
       ) {
-        const durationMs = observationMetricDurationMs(
-          setupObservationMetrics.current.qrObservedAtMs,
-          performance.now(),
-        );
-        if (durationMs !== null) {
-          captureProductAnalyticsEvent({
-            durationMs,
-            event: "connection_setup_timing_recorded",
-            phase: "code_observed_to_active_observed",
-          });
-          setupObservationMetrics.current = {
-            ...setupObservationMetrics.current,
-            qrToActiveCaptured: true,
-          };
-        }
+        setupObservationMetrics.current = {
+          ...setupObservationMetrics.current,
+          connectingStartedAtMs: currentObservationTimeMs(),
+        };
       }
     };
 
@@ -1325,22 +1363,30 @@ export function PublicBoundaryJourney({
         if (!isCurrent()) return;
         replaceQrImage(URL.createObjectURL(image));
         markState("qr_available");
-        observeAgain();
+        observeAgain("qr_available");
         return;
       }
       if (response.status === 202) {
         replaceQrImage(null);
-        markState(
+        const nextState =
           response.headers.get("x-connection-setup-state") === "connecting"
             ? "connecting"
-            : "pending",
-        );
-        observeAgain();
+            : "pending";
+        markState(nextState);
+        observeAgain(nextState);
         return;
       }
       if (response.status === 204) {
         replaceQrImage(null);
         markState("connected");
+        recordConnectionSetupTiming(
+          "linking_to_active",
+          setupObservationMetrics.current.connectingStartedAtMs,
+        );
+        setupObservationMetrics.current = {
+          ...setupObservationMetrics.current,
+          connectingStartedAtMs: null,
+        };
         if ((await loadConnections(token)) === null) {
           if (isCurrent()) markState("unavailable");
         }
@@ -1354,13 +1400,25 @@ export function PublicBoundaryJourney({
         body.error === "provisioning_failed" ||
         body.error === "provisioning_quarantined"
       ) {
+        setupObservationMetrics.current = {
+          ...setupObservationMetrics.current,
+          connectingStartedAtMs: null,
+        };
         markState(body.error);
         return;
       }
+      setupObservationMetrics.current = {
+        ...setupObservationMetrics.current,
+        connectingStartedAtMs: null,
+      };
       markState("unavailable");
     } catch {
       if (isCurrent()) {
         replaceQrImage(null);
+        setupObservationMetrics.current = {
+          ...setupObservationMetrics.current,
+          connectingStartedAtMs: null,
+        };
         markState("unavailable");
       }
     }
@@ -1549,10 +1607,9 @@ export function PublicBoundaryJourney({
     stopObserving();
     const requestGeneration = observationGeneration.current;
     setupObservationMetrics.current = {
-      qrObservedAtMs: null,
-      setupStartedAtMs: performance.now(),
-      startToQrCaptured: false,
-      qrToActiveCaptured: false,
+      connectingStartedAtMs: null,
+      setupStartedAtMs: currentObservationTimeMs(),
+      setupToCodeCaptured: false,
     };
     setupStateRef.current = "loading";
     setSetupState("loading");
@@ -1675,10 +1732,9 @@ export function PublicBoundaryJourney({
     if (setupId === null) return;
     stopObserving();
     setupObservationMetrics.current = {
-      qrObservedAtMs: null,
+      connectingStartedAtMs: null,
       setupStartedAtMs: null,
-      startToQrCaptured: false,
-      qrToActiveCaptured: false,
+      setupToCodeCaptured: false,
     };
     setupStateRef.current = "cancelling";
     setSetupState("cancelling");

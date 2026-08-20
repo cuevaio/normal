@@ -5,7 +5,7 @@ import type {
   SessionReconciliation,
 } from "@whatsapp-mcp/contracts/provider-control";
 import { Effect, Layer } from "effect";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 import {
   ConnectionSetupProvisioningClock,
   ConnectionSetupProvisioningIdentifiers,
@@ -243,6 +243,20 @@ const makeHarness = (options: {
   };
 };
 
+const waitFor = async (check: () => void, timeoutMs = 1_000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      check();
+      return;
+    } catch {
+      if (Date.now() >= deadline)
+        throw new Error("timed out waiting for test condition");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+};
+
 describe("Connection Setup provisioning saga", () => {
   test("reconciles absence before one create and encrypts provider identity before advancing", async () => {
     const harness = makeHarness({
@@ -442,7 +456,7 @@ describe("Connection Setup provisioning saga", () => {
     const first = Effect.runPromise(
       provisionConnectionSetup(setupId).pipe(Effect.provide(harness.layer)),
     );
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(harness.calls).toContain("create");
     });
     const concurrent = await Effect.runPromise(

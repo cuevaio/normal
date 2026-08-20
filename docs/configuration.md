@@ -758,35 +758,30 @@ and receives no Provider API Credential, database binding, KMS authority, or
 provider-control binding. Production cannot select the protocol-observable
 provider used by the acceptance tests.
 
-Safe QR telemetry is limited to `connection_setup.qr.completed`, service, and
-one normalized outcome. A setup's first successful provisioning claim emits
+Safe QR telemetry is limited to `connection_setup.qr.completed`, service, one
+normalized outcome, and bounded request duration. A setup's first successful provisioning claim emits
 `connection_setup.provision.claimed` with only `queueDelayMs`, measured from
 durable setup creation to the persisted first claim. Provision completion emits
 normalized outcome, optional normalized failure code, and
 first-claim-to-terminal-transition `durationMs`; retries carry no duration and
 legacy in-flight setups without a first-claim timestamp do not invent one. Safe listing
-telemetry adds only the connection count
-to `whatsapp_connection.list.completed`. Neither event contains a User,
+telemetry adds only the connection count and bounded request duration to
+`whatsapp_connection.list.completed`. Neither event contains a User,
 Personal Account, Connection Setup, WhatsApp Connection, number, QR byte,
 provider value, credential, ingress identity, secret, ciphertext, or key
 reference.
 
-The approved first-party target is p95 observation lag at or below 750 ms in
-the deterministic browser scheduler fixture, independent of provider time. The
-fixture replays 18 fixed transition offsets from 0 through 5 seconds. The old
-fixed 750 ms policy measured p50/p95/p99 of 250/700/700 ms. The bounded policy
-measured 200/600/600 ms before code observation and 200/750/750 ms from code
-observation to active observation. These are measured fixture results, not
-production provider percentiles. The schedule starts at 250 ms, steps up by 250
-ms, and caps at 1 second before code display or 2 seconds while waiting for
-activation, reducing early waits and repeated reads without weakening the
-reconciled lifecycle boundaries.
+The committed browser regression verifies only the deterministic polling policy
+at the narrowest boundary. It does not assert a production target or provider
+percentile. The schedule starts at 250 ms, steps up by 250 ms, caps at 1 second
+while Normal is still preparing a code, and caps at 2 seconds while waiting for
+the user to scan or WhatsApp to finish linking.
 
 Anonymous browser metrics use the literal observable phases
-`start_to_code_observed` and `code_observed_to_active_observed`; they do not
-claim to know when WhatsApp accepted a scan. Each phase is emitted once per
-browser flow. Repeated API status reads emit outcomes without setup-age timing,
-so polling frequency cannot weight latency percentiles.
+`setup_to_code` and `linking_to_active`. They record
+only the phase and `durationMs` once per browser flow and do not claim to know
+when WhatsApp accepted a scan. Repeated API status reads emit outcomes without
+setup-age timing, so polling frequency cannot weight latency percentiles.
 
 ## WhatsApp Connection disconnect and reconnect
 

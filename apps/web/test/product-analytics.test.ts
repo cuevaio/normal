@@ -81,15 +81,22 @@ describe("product analytics boundary", () => {
       isAllowlistedProductAnalyticsEvent({
         durationMs: 320,
         event: "connection_setup_timing_recorded",
-        phase: "start_to_code_observed",
+        phase: "setup_to_code",
       }),
     ).toBe(true);
+    expect(
+      isAllowlistedProductAnalyticsEvent({
+        durationMs: 900_001,
+        event: "connection_setup_timing_recorded",
+        phase: "setup_to_code",
+      }),
+    ).toBe(false);
 
     captureProductAnalyticsEvent(allowed);
     captureProductAnalyticsEvent({
       durationMs: 320,
       event: "connection_setup_timing_recorded",
-      phase: "start_to_code_observed",
+      phase: "setup_to_code",
     });
     captureProductAnalyticsEvent({
       event: "onboarding_completed",
@@ -112,7 +119,7 @@ describe("product analytics boundary", () => {
       properties: {
         $process_person_profile: false,
         durationMs: 320,
-        phase: "start_to_code_observed",
+        phase: "setup_to_code",
       },
     });
     const body = requests[0]?.body as {

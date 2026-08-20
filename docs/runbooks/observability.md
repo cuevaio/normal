@@ -37,7 +37,7 @@ Confirm the `alert-delivery-canary` arrives in the ticket destination with only 
   credentials, search terms, message content, raw bodies, or tenant identifiers.
 - Connection Setup timing uses privacy-safe transition events. Anonymous
   browser `connection_setup_timing_recorded` events measure
-  `start_to_code_observed` and `code_observed_to_active_observed` once per flow.
+  `setup_to_code` and `linking_to_active` once per flow.
   API `connection_setup.provision.claimed.queueDelayMs` measures durable setup
   creation to its persisted first Neon claim, while
   `connection_setup.provision.completed.durationMs` measures that first claim
@@ -51,12 +51,10 @@ Confirm the `alert-delivery-canary` arrives in the ticket destination with only 
 
 ## Connection Setup performance verification
 
-The committed deterministic scheduler regression is the only locally asserted
-percentile. Run `bun test test/connection-setup-observation.test.ts` from
-`apps/web`; its fixed 18-transition corpus reports the documented before/after
-values and enforces p95 first-party observation lag at or below 750 ms. It does
-not emulate Wasender or WhatsApp and must not be presented as an end-to-end
-production baseline.
+The committed deterministic scheduler regression verifies the bounded browser
+polling policy only. Run `bun test test/connection-setup-observation.test.ts`
+from `apps/web`; it asserts the change-sensitive delay schedule, terminal
+copy, and duration helper without claiming a production percentile.
 
 After deployment, query a minimum seven complete days with at least 100
 successful Connection Setups. Compute p50/p95/p99 separately for each browser
@@ -73,10 +71,10 @@ distributions attribute aggregate components and must not be added together as
 if independently sampled percentiles belonged to the same setup.
 
 Provider-dependent end-to-end p50/p95/p99 cannot be asserted from local fake
-provider runs. Platform Operations must use that production baseline to propose
-and approve total start-to-code and code-to-active targets. Until then, only the
-750 ms p95 first-party observation target is approved; Wasender and WhatsApp
-time remains reported separately and has no invented objective.
+provider runs. Platform Operations must use the production baseline to propose
+and approve any total start-to-code and code-to-active targets. Until then,
+Wasender and WhatsApp time remains reported separately and no production target
+is invented locally.
 - API Key retention telemetry is limited to `api_key.retention.completed`, the
   bounded expired and purged counts, and the API service name. Do not add
   handles, names, hints, digests, credentials, or tenant identifiers.

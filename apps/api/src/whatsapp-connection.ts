@@ -948,6 +948,7 @@ export const createWhatsAppConnectionHandler =
 
     return Effect.runPromise(
       Effect.gen(function* () {
+        const telemetryStartedAt = Date.now();
         const identity = yield* HumanIdentity;
         const clerkUserId = yield* identity.verify(request);
         if (nameMatch !== null && requestedName !== null) {
@@ -1044,6 +1045,7 @@ export const createWhatsAppConnectionHandler =
           );
           const telemetry = yield* SafeTelemetry;
           yield* telemetry.emit({
+            durationMs: Math.max(0, Date.now() - telemetryStartedAt),
             event: "connection_setup.qr.completed",
             outcome: observation.outcome,
             service: "api",
@@ -1060,6 +1062,7 @@ export const createWhatsAppConnectionHandler =
         const telemetry = yield* SafeTelemetry;
         yield* telemetry.emit({
           connectionCount: connections.length,
+          durationMs: Math.max(0, Date.now() - telemetryStartedAt),
           event: "whatsapp_connection.list.completed",
           service: "api",
         });

@@ -118,6 +118,7 @@ export interface ConnectionSetupProvisionRecoveryEnqueuedEvent {
 }
 
 export interface ConnectionSetupQrCompletedEvent {
+  readonly durationMs: number;
   readonly event: "connection_setup.qr.completed";
   readonly outcome:
     | "connected"
@@ -132,6 +133,7 @@ export interface ConnectionSetupQrCompletedEvent {
 
 export interface WhatsAppConnectionListCompletedEvent {
   readonly connectionCount: number;
+  readonly durationMs: number;
   readonly event: "whatsapp_connection.list.completed";
   readonly service: "api";
 }

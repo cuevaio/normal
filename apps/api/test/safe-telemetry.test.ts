@@ -139,6 +139,24 @@ describe("safe telemetry serialization", () => {
     });
   });
 
+  test("keeps only safe timing fields on connection setup telemetry", () => {
+    const serialized = serializeSafeTelemetry({
+      durationMs: 640,
+      event: "connection_setup.qr.completed",
+      outcome: "qr_available",
+      phoneNumber: sensitive.phoneNumber,
+      qrData: "private-qr-data",
+      service: "api",
+    });
+
+    expect(JSON.parse(serialized)).toEqual({
+      durationMs: 640,
+      event: "connection_setup.qr.completed",
+      outcome: "qr_available",
+      service: "api",
+    });
+  });
+
   test("rejects non-scalar values in allowlisted fields without serializing them", () => {
     let serialized = false;
     const maliciousOutcome = {
