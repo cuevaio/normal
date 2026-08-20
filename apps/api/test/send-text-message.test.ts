@@ -308,6 +308,130 @@ describe("atomic send workflow", () => {
     ]);
   });
 
+  test.each([
+    {
+      destination: { phone: "+15551234567" },
+      providerJid: "15551234567@s.whatsapp.net",
+      recipientType: "phone" as const,
+      to: "+15551234567",
+    },
+    {
+      destination: { username: "@jane_doe" },
+      providerJid: "15551234567@s.whatsapp.net",
+      recipientType: "username" as const,
+      to: "@jane_doe",
+    },
+  ])(
+    "sends an arbitrary $recipientType without persisting its address",
+    async (example) => {
+      const recordProviderOutcome = vi.fn(async ({ status }) => ({
+        createdAt: new Date("2026-08-03T12:00:00.000Z"),
+        publicId: "snd_123456789012345678947",
+        status,
+        statusChangedAt: new Date("2026-08-03T12:00:01.000Z"),
+      }));
+      const repository: AtomicSendRepository = {
+        commit: async (request, encrypt) => {
+          expect(request).toMatchObject({
+            directRecipientType: example.recipientType,
+            recipientPublicId: null,
+          });
+          expect(JSON.stringify(request)).not.toContain(example.to);
+          await encrypt(material);
+          return {
+            outcome: "created",
+            provider: {
+              ...material,
+              authority: protectedValue(storedAuthority),
+              identityKey: protectedValue("x".repeat(32)),
+              messageSearchKey: protectedValue("s".repeat(32)),
+              recipientType: example.recipientType,
+            },
+            receipt: {
+              createdAt: new Date("2026-08-03T12:00:00.000Z"),
+              publicId: "snd_123456789012345678947",
+              status: "processing",
+              statusChangedAt: new Date("2026-08-03T12:00:00.000Z"),
+            },
+          };
+        },
+        expireLeases: vi.fn(),
+        recordProviderOutcome,
+      };
+      const encryption: EnvelopeEncryption = {
+        createConnectionKey: () => Effect.die("unused"),
+        createPersonalAccountKey: () => Effect.die("unused"),
+        decrypt: ({ context }) =>
+          Effect.succeed(
+            new TextEncoder().encode(
+              context.fieldOrObjectPurpose === "provider-session-authority"
+                ? storedAuthority
+                : "x".repeat(32),
+            ),
+          ),
+        decryptMany: () => Effect.die("unused"),
+        encrypt: () =>
+          Effect.succeed({
+            ciphertext: btoa("encrypted-pending-content"),
+            keyVersion: 1,
+            nonce: btoa(String.fromCharCode(...new Uint8Array(12))),
+            version: 1,
+          }),
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: unknown, request: RequestInit) => {
+          expect(JSON.parse(String(request.body))).toEqual({
+            to: example.to,
+            text: input.text,
+          });
+          return Response.json({
+            data: {
+              jid: example.providerJid,
+              msgId: 48,
+              status: "in_progress",
+            },
+            success: true,
+          });
+        }),
+      );
+      const service = makeAtomicSendTextMessageService({
+        encryption,
+        fingerprintKey: await importSendFingerprintKey("47".repeat(32)),
+        hourRequestLimit: 600,
+        minuteRequestLimit: 60,
+        nextAuditLogId: () => "50000000-0000-4000-8000-000000000047",
+        nextSend: () => ({
+          id: "60000000-0000-4000-8000-000000000047",
+          publicId: "snd_123456789012345678947",
+        }),
+        now: () => new Date("2026-08-03T12:00:01.000Z"),
+        repository,
+        sendDailyLimit: 200,
+        sendPerMinuteLimit: 10,
+        telemetry: () => undefined,
+      });
+      const { recipientId: _recipientId, ...directInput } = input;
+
+      await expect(
+        Effect.runPromise(
+          service.send({
+            ...directInput,
+            ...example.destination,
+          }),
+        ),
+      ).resolves.toMatchObject({
+        outcome: "receipt",
+        receipt: { status: "accepted" },
+      });
+      expect(recordProviderOutcome).toHaveBeenCalledWith({
+        changedAt: new Date("2026-08-03T12:00:01.000Z"),
+        sendId: "60000000-0000-4000-8000-000000000047",
+        status: "accepted",
+      });
+    },
+  );
+
   test("projects identity-bearing sent evidence as a Stored Message", async () => {
     const recordProviderOutcome = vi.fn(async ({ status }) => ({
       createdAt: new Date("2026-08-03T12:00:00.000Z"),

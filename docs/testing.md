@@ -76,8 +76,8 @@ coverage, audit-before-release, last-selected Connection Deletion as invalid
 credentials, constant-shape not found for a deleted, excluded, or unselected
 Connection or Conversation, and retained disconnected reads. REST Send
 Operation tests prove `POST /v1/connections/{connection_id}/send-operations`
-requires `messages:send`, an `Idempotency-Key`, exact text, and a `ctc_` or
-`grp_` recipient; exact replay and payload conflict stay on the shared send
+requires `messages:send`, an `Idempotency-Key`, exact text, and exactly one
+`ctc_`/`grp_` handle, E.164 phone, or WhatsApp username destination; exact replay and payload conflict stay on the shared send
 operation; failed and unknown post-boundary outcomes remain Send Operation
 resources; and pre-operation failures use Problem Details.
 `GET /v1/connections/{connection_id}/send-operations/{send_operation_id}`

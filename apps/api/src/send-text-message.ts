@@ -78,15 +78,15 @@ const fingerprint = async (
   key: CryptoKey,
   input: {
     connectionId: string;
+    destinationIdentity: string;
     grant: SendGrantIdentity;
-    recipientId: string;
     text: string;
   },
 ): Promise<string> => {
   const parts = [
     fingerprintSubject(input.grant),
     input.connectionId,
-    input.recipientId,
+    input.destinationIdentity,
     input.text,
   ].map((value) => encoder.encode(value));
   const size = parts.reduce((sum, value) => sum + 4 + value.byteLength, 0);
@@ -145,13 +145,30 @@ export const makeAtomicSendTextMessageService = (
 ): SendTextMessageService => ({
   send: (input, deferProviderAttempt) =>
     Effect.tryPromise(async (): Promise<SendTextMessageResult> => {
+      const destinations = [
+        input.recipientId,
+        input.phone,
+        input.username,
+      ].filter((value): value is string => value !== undefined);
+      if (destinations.length !== 1) {
+        return { outcome: "service_unavailable" };
+      }
+      const destination =
+        input.recipientId !== undefined
+          ? ({ kind: "recipient", value: input.recipientId } as const)
+          : input.phone !== undefined
+            ? ({ kind: "phone", value: input.phone } as const)
+            : ({ kind: "username", value: input.username ?? "" } as const);
       const observedAt = options.now();
       const send = options.nextSend();
       const grant = input.grant;
       const requestFingerprint = await fingerprint(options.fingerprintKey, {
         connectionId: input.connectionId,
+        destinationIdentity:
+          destination.kind === "recipient"
+            ? destination.value
+            : `${destination.kind}:${destination.value}`,
         grant,
-        recipientId: input.recipientId,
         text: input.text,
       });
       const committed = await options.repository.commit(
@@ -166,7 +183,12 @@ export const makeAtomicSendTextMessageService = (
           minuteRequestLimit: options.minuteRequestLimit,
           observedAt,
           pendingExpiresAt: new Date(observedAt.valueOf() + 7 * 86_400_000),
-          recipientPublicId: input.recipientId,
+          ...(destination.kind === "recipient"
+            ? { recipientPublicId: destination.value }
+            : {
+                directRecipientType: destination.kind,
+                recipientPublicId: null,
+              }),
           sendDailyLimit: options.sendDailyLimit,
           sendId: send.id,
           sendPublicId: send.publicId,
@@ -245,26 +267,6 @@ export const makeAtomicSendTextMessageService = (
                 recordId: provider.connectionKey.connectionId,
               }),
             );
-            const recipient = await decryptString(
-              envelope(provider.recipient),
-              {
-                entity:
-                  provider.recipientType === "contact"
-                    ? "directory-contact"
-                    : "whatsapp-group",
-                purpose: "provider-identity",
-                recordId: provider.recipientRecordId,
-              },
-            );
-            const contactPhone =
-              provider.recipientType === "contact" &&
-              provider.contactPhone != null
-                ? await decryptString(envelope(provider.contactPhone), {
-                    entity: "directory-contact",
-                    purpose: "phone-number",
-                    recordId: provider.recipientRecordId,
-                  })
-                : null;
             const identityBytes = await Effect.runPromise(
               options.encryption.decrypt({
                 ...opened,
@@ -279,16 +281,45 @@ export const makeAtomicSendTextMessageService = (
               }),
             );
             try {
-              const resolvedRecipient =
-                contactPhone === null
-                  ? (Redacted.make(recipient) as WasenderRecipientRoute)
-                  : await makeWasenderRecipientRoute(
-                      Redacted.make(
-                        identityBytes,
-                      ) as WasenderIdentityProtectionKey,
-                      "contact",
-                      contactPhone,
-                    );
+              let resolvedRecipient: WasenderRecipientRoute;
+              if (!("recipient" in provider)) {
+                resolvedRecipient = await makeWasenderRecipientRoute(
+                  Redacted.make(identityBytes) as WasenderIdentityProtectionKey,
+                  "contact",
+                  destination.value,
+                );
+              } else {
+                const recipient = await decryptString(
+                  envelope(provider.recipient),
+                  {
+                    entity:
+                      provider.recipientType === "contact"
+                        ? "directory-contact"
+                        : "whatsapp-group",
+                    purpose: "provider-identity",
+                    recordId: provider.recipientRecordId,
+                  },
+                );
+                const contactPhone =
+                  provider.recipientType === "contact" &&
+                  provider.contactPhone != null
+                    ? await decryptString(envelope(provider.contactPhone), {
+                        entity: "directory-contact",
+                        purpose: "phone-number",
+                        recordId: provider.recipientRecordId,
+                      })
+                    : null;
+                resolvedRecipient =
+                  contactPhone === null
+                    ? (Redacted.make(recipient) as WasenderRecipientRoute)
+                    : await makeWasenderRecipientRoute(
+                        Redacted.make(
+                          identityBytes,
+                        ) as WasenderIdentityProtectionKey,
+                        "contact",
+                        contactPhone,
+                      );
+              }
               const locator = "send-recipient" as RecipientLocator;
               const adapter = makeWasenderTextSending({
                 authority: Redacted.make(authority) as never,
@@ -324,6 +355,8 @@ export const makeAtomicSendTextMessageService = (
               sendId: send.id,
               status,
               ...(messageIdentity !== undefined &&
+              (provider.recipientType === "contact" ||
+                provider.recipientType === "group") &&
               (status === "sent" || status === "delivered" || status === "read")
                 ? {
                     storedMessage: await (async () => {

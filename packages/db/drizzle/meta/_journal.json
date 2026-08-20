@@ -183,6 +183,13 @@
       "when": 1787242636000,
       "tag": "0025_reject_content_free_stored_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1787250000000,
+      "tag": "0026_allow_direct_send_destinations",
+      "breakpoints": true
     }
   ]
 }

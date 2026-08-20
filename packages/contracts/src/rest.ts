@@ -9,6 +9,7 @@ import {
   SendId,
 } from "./handles";
 import {
+  makePublicContract,
   makePublicObjectContract,
   SendStatus,
   UtcTimestamp,
@@ -49,6 +50,16 @@ export const SendText = Schema.String.pipe(
   }),
 );
 export type SendText = typeof SendText.Type;
+
+export const SendPhone = Schema.String.pipe(
+  Schema.pattern(/^\+[1-9][0-9]{1,14}$/),
+);
+export type SendPhone = typeof SendPhone.Type;
+
+export const SendUsername = Schema.String.pipe(
+  Schema.pattern(/^@[A-Za-z0-9._-]{1,64}$/),
+);
+export type SendUsername = typeof SendUsername.Type;
 
 export const RestConnectionState = Schema.Literal(
   "connected",
@@ -410,10 +421,16 @@ export type ProblemDetails = typeof ProblemDetailsContract.schema.Type;
 export const problemType = (code: ProblemCode): ProblemDetails["type"] =>
   `https://docs.normal.fast/problems/${code}` as ProblemDetails["type"];
 
-export const RestCreateSendOperationContract = makePublicObjectContract({
-  recipient_id: Schema.Union(ContactId, GroupId),
-  text: SendText,
-});
+export const RestCreateSendOperationContract = makePublicContract(
+  Schema.Union(
+    Schema.Struct({
+      recipient_id: Schema.Union(ContactId, GroupId),
+      text: SendText,
+    }),
+    Schema.Struct({ phone: SendPhone, text: SendText }),
+    Schema.Struct({ username: SendUsername, text: SendText }),
+  ),
+);
 export type RestCreateSendOperation =
   typeof RestCreateSendOperationContract.schema.Type;
 

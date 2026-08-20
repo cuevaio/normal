@@ -103,7 +103,7 @@ Authentication infrastructure or Neon unavailability returns a safe 503 and fail
 | `messages:read` | List conversations, read/search Stored Messages, and read eligible Stored Media. |
 | `messages:send` | Create Send Operations and read status for operations created by the same API Key. |
 
-Send permission never implies Directory or Stored Message read permission. A send-only caller can use a previously known `ctc_` or `grp_` handle but cannot discover recipients or content.
+Send permission never implies Directory or Stored Message read permission. A send-only caller can use a previously known `ctc_` or `grp_` handle or supply a Direct Address, but cannot discover recipients or content.
 
 ### Public REST Resources
 
@@ -117,7 +117,7 @@ All request objects are closed, fields use `snake_case`, timestamps use RFC 3339
 | GET | `/v1/connections/{connection_id}/conversations` | `messages:read` | Page WhatsApp Conversations by Conversation Activity. |
 | GET | `/v1/connections/{connection_id}/conversations/{conversation_id}/messages` | `messages:read` | Page complete retained Stored Message content, history boundary, and intersecting Ingestion Gaps. |
 | POST | `/v1/connections/{connection_id}/messages/search` | `messages:read` | Search exact normalized words from a privacy-safe JSON body. |
-| POST | `/v1/connections/{connection_id}/send-operations` | `messages:send` | Create or replay one idempotent text Send Operation for a `ctc_` or `grp_` recipient. |
+| POST | `/v1/connections/{connection_id}/send-operations` | `messages:send` | Create or replay one idempotent text Send Operation for exactly one handle, E.164 phone, or WhatsApp username destination. |
 | GET | `/v1/connections/{connection_id}/send-operations/{send_operation_id}` | `messages:send` | Read the originating API Key's local Send Status. |
 | GET | `/v1/connections/{connection_id}/messages/{message_id}/media/{media_id}` | `messages:read` | Read eligible binary Stored Media with private no-store headers. |
 

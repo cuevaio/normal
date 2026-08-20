@@ -26,8 +26,9 @@ const sendMessageUrl = "https://www.wasenderapi.com/api/send-message";
 const textEncoder = new TextEncoder();
 
 const contactIdentifier =
-  /^(?:\+?[1-9]\d{6,14}|[1-9]\d{6,14}(?::\d{1,5})?@s\.whatsapp\.net|[1-9]\d{1,31}(?::\d{1,5})?@lid)$/u;
+  /^(?:\+[1-9]\d{1,14}|[1-9]\d{6,14}|[1-9]\d{6,14}(?::\d{1,5})?@s\.whatsapp\.net|[1-9]\d{1,31}(?::\d{1,5})?@lid|@[A-Za-z0-9._-]{1,64})$/u;
 const groupIdentifier = /^[1-9]\d{1,31}(?:-[1-9]\d{1,31})?@g\.us$/u;
+const usernameIdentifier = /^@[A-Za-z0-9._-]{1,64}$/u;
 
 const providerDestination = (
   kind: "contact" | "group",
@@ -37,17 +38,20 @@ const providerDestination = (
     return groupIdentifier.test(identifier) ? identifier : null;
   if (!contactIdentifier.test(identifier)) return null;
   const phone =
-    /^(?:\+)?([1-9]\d{6,14})$/u.exec(identifier)?.[1] ??
+    /^\+([1-9]\d{1,14})$/u.exec(identifier)?.[1] ??
+    /^([1-9]\d{6,14})$/u.exec(identifier)?.[1] ??
     /^([1-9]\d{6,14})(?::\d{1,5})?@s\.whatsapp\.net$/u.exec(identifier)?.[1];
   return phone === undefined ? identifier : `+${phone}`;
 };
 
 const canonicalRecipient = (value: string): string | null => {
   const phone =
-    /^(?:\+)?([1-9]\d{6,14})$/u.exec(value)?.[1] ??
+    /^\+([1-9]\d{1,14})$/u.exec(value)?.[1] ??
+    /^([1-9]\d{6,14})$/u.exec(value)?.[1] ??
     /^([1-9]\d{6,14})(?::\d{1,5})?@s\.whatsapp\.net$/u.exec(value)?.[1];
   if (phone !== undefined) return `pn:${phone}`;
   if (/^[1-9]\d{1,31}(?::\d{1,5})?@lid$/u.test(value)) return `lid:${value}`;
+  if (usernameIdentifier.test(value)) return `username:${value}`;
   return groupIdentifier.test(value) ? `group:${value}` : null;
 };
 
@@ -55,6 +59,15 @@ const sameRecipient = (left: unknown, right: string): boolean =>
   typeof left === "string" &&
   canonicalRecipient(left) !== null &&
   canonicalRecipient(left) === canonicalRecipient(right);
+
+const isUsernameRecipient = (value: string): boolean =>
+  usernameIdentifier.test(value);
+
+const isResolvedUsernameRecipient = (value: unknown): boolean =>
+  typeof value === "string" &&
+  /^(?:\+[1-9]\d{1,14}|[1-9]\d{6,14}|[1-9]\d{6,14}(?::\d{1,5})?@s\.whatsapp\.net|[1-9]\d{1,31}(?::\d{1,5})?@lid)$/u.test(
+    value,
+  );
 
 interface TextSendRuntime {
   readonly clearTimeout: (handle: unknown) => void;
@@ -268,10 +281,15 @@ const classifyResponse = async (
       key.fromMe !== true ||
       typeof key.id !== "string" ||
       !isProtectedString(key.id) ||
-      !sameRecipient(key.remoteJid, providerRecipient) ||
       status === null
     ) {
       return { outcome: "ambiguous", reason: "invalid_response" };
+    }
+    if (!sameRecipient(key.remoteJid, providerRecipient)) {
+      return isUsernameRecipient(providerRecipient) &&
+        isResolvedUsernameRecipient(key.remoteJid)
+        ? { outcome: "provider_acknowledgement", status: "accepted" }
+        : { outcome: "ambiguous", reason: "invalid_response" };
     }
     return {
       messageIdentity: await protectMessageIdentity(identityKey, key.id),
@@ -285,7 +303,9 @@ const classifyResponse = async (
     typeof data.msgId === "number" &&
     Number.isSafeInteger(data.msgId) &&
     data.msgId > 0 &&
-    sameRecipient(data.jid, providerRecipient) &&
+    (sameRecipient(data.jid, providerRecipient) ||
+      (isUsernameRecipient(providerRecipient) &&
+        isResolvedUsernameRecipient(data.jid))) &&
     data.status === "in_progress";
 
   return documentedDataAcknowledgement

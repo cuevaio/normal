@@ -341,16 +341,18 @@ For every `resources/read`, the server:
 
 ## `send_text_message`
 
-Requires `messages:send`. The destination is a required `recipient_id` containing either a `ctc_` or `grp_` handle owned by the explicit `connection_id`. A WhatsApp Recipient does not need an already-observed WhatsApp Conversation. The tool does not accept `conversation_id`, a raw phone number, or a provider identifier.
+Requires `messages:send`. Exactly one destination is required: `recipient_id` containing a `ctc_` or `grp_` handle owned by the explicit `connection_id`, `phone` containing an E.164 number, or `username` containing a WhatsApp username. A WhatsApp Recipient does not need an already-observed WhatsApp Conversation, and a Direct Address does not need a Directory entry. The tool does not accept `conversation_id`, phone or LID JIDs, Group JIDs, or channel identifiers.
 
-For an unbound new-send request, the handle must be marked as an active non-deleted contact or currently joined group in the latest Directory projection. Unknown, removed, unjoined, and connection-mismatched handles then return the same `isError: true` result with `error_code: "recipient_not_found"` and `retryable: false` before quota reservation or operation creation. Passing this projected check does not guarantee provider routability, and the tool makes no live recipient preflight call.
+For an unbound handle request, the handle must be marked as an active non-deleted contact or currently joined group in the latest Directory projection. Unknown, removed, unjoined, and connection-mismatched handles return the same `isError: true` result with `error_code: "recipient_not_found"` and `retryable: false` before quota reservation or operation creation. A Direct Address may be arbitrary, but fails with that same result while any Recipient Exclusion is active on the Connection. Passing either check does not guarantee provider routability, and the tool makes no live recipient preflight call.
 
 Input fields:
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `connection_id` | `con_` handle | yes | Explicit selected WhatsApp Connection. |
-| `recipient_id` | `ctc_` or `grp_` handle | yes | Contact or group owned by that connection. |
+| `recipient_id` | `ctc_` or `grp_` handle | exactly one destination | Contact or group owned by that connection. |
+| `phone` | E.164 string | exactly one destination | Direct phone address beginning with `+`. |
+| `username` | string matching `^@[A-Za-z0-9._-]{1,64}$` | exactly one destination | Direct WhatsApp username address. |
 | `text` | string, 1-4,096 Unicode scalar values | yes | Exact outbound text containing at least one value outside Unicode 17.0 `White_Space`. |
 | `idempotency_key` | string matching `^[A-Za-z0-9_-]{21}$` | yes | Caller-generated NanoID-default-alphabet retry identity governed by ADR 0006. |
 
@@ -360,8 +362,8 @@ Validation and execution precedence is fixed:
 
 1. Validate the closed input schema and Unicode rules.
 2. Check the current grant, `messages:send` permission or scope, and requested connection grant.
-3. Resolve the same-authorization idempotency binding. Return an exact replay or `idempotency_conflict` before current health, Directory, or quota checks.
-4. Only for an unbound key, require `connected` state, projected recipient eligibility, and available quota, then atomically create the attempt.
+3. Resolve the same-authorization idempotency binding. Return an exact replay or `idempotency_conflict` before current health, Directory, exclusion, or quota checks.
+4. Only for an unbound key, require `connected` state, projected recipient eligibility for a handle or no active exclusion for a Direct Address, and available quota, then atomically create the attempt.
 
 Only a WhatsApp Connection currently in `connected` state may create a Send Operation. `connecting`, `disconnected`, `reconnect_required`, and `degraded` return `isError: true` with `error_code: "connection_unavailable"` and `retryable: true` before quota reservation or operation creation.
 
@@ -413,9 +415,9 @@ After a Send Operation crosses the atomic durable provider-attempt boundary, eve
 }
 ```
 
-`idempotent_replay` is `true` when the same grant repeats the same `idempotency_key`, `connection_id`, `recipient_id`, and exact text and receives the existing Send Operation. For an API Key, the grant identity is the same across REST and MCP. A replay never consumes send quota or invokes the provider again. The receipt does not echo text, recipient or connection handles, the idempotency key, provider identifiers, or a Stored Message handle.
+`idempotent_replay` is `true` when the same grant repeats the same `idempotency_key`, `connection_id`, exact destination, and exact text and receives the existing Send Operation. For an API Key, the grant identity is the same across REST and MCP. A replay never consumes send quota or invokes the provider again. The receipt does not echo text, destination, connection handles, the idempotency key, provider identifiers, or a Stored Message handle.
 
-After schema validation and current grant, permission or scope, and connection-grant checks, the server resolves a retained idempotency binding before checking health, projected recipient eligibility, or quota for a new send. An exact replay therefore returns its current receipt even if the connection later disconnected or the recipient projection changed. For schema-valid input on a currently granted connection, reusing a bound key with different `connection_id`, `recipient_id`, or exact text returns `isError: true`, `error_code: "idempotency_conflict"`, and `retryable: false`, without resolving the replacement recipient. Malformed input fails schema first, and an ungranted requested connection fails authorization before binding lookup. Only an unbound key proceeds through current new-send preflight and quota reservation.
+After schema validation and current grant, permission or scope, and connection-grant checks, the server resolves a retained idempotency binding before checking health, destination eligibility, exclusion state, or quota for a new send. An exact replay therefore returns its current receipt even if the connection later disconnected or eligibility changed. For schema-valid input on a currently granted connection, reusing a bound key with a different `connection_id`, destination, or exact text returns `isError: true`, `error_code: "idempotency_conflict"`, and `retryable: false`, without resolving the replacement destination. Malformed input fails schema first, and an ungranted requested connection fails authorization before binding lookup. Only an unbound key proceeds through current new-send preflight and quota reservation.
 
 The Send Operation and its idempotency binding have a storage and replay-protection maximum of 90 days after `created_at`, independently of Message Retention Policy. Status and replay additionally require the originating grant to remain active; MCP Authorization revocation or absolute session expiry and API Key revocation or expiry end access immediately. A later authorization or replacement API Key does not inherit earlier operations. Connection or Personal Account Deletion removes them sooner. After ordinary operation expiry, `send_id` is not found and the old key is unbound; submitting that key again creates a new Send Operation. Clients must generate one fresh key per send intent and use replay only while both the binding and originating grant remain active. Every MCP invocation still receives a separate Client Confirmation.
 

@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "description": "Normal's public REST API for one User's server-side personal automations.\n\n## Getting started\n\nCreate an API Key from the signed-in dashboard at `/dashboard/api-keys`. Choose a unique name, any non-empty subset of the four permissions, the WhatsApp Connections this automation may use, and an optional expiry. The plaintext credential is shown once. If that response is lost, create a replacement key.\n\nCall `https://api.normal.fast` from a server. Do not put an API Key in a browser, mobile app, query parameter, cookie, or this documentation site.\n\n```bash\ncurl -sS https://api.normal.fast/v1/connections \\\n  -H 'Authorization: Bearer <API Key>'\n```\n\nSigned-in API Key management routes (`/v1/api-keys`) are product routes. They require a Clerk bearer token, the exact web Origin, and — for creation — first-factor verification within five minutes. They are not authenticated with an API Key.\n\n## Server-side authentication\n\nSend one `Authorization: Bearer <API Key>` header. The credential uses the `normal_apk_` split format: a public `apk_` handle and a high-entropy secret shown only at creation. Duplicate or oversized authorization headers are rejected.\n\nNeon is the sole authority for validity, selected Connections, permissions, expiry, and revocation. There is no cache that can extend a revoked or expired key. Invalid, malformed, expired, or revoked credentials return the same 401 Problem Details shape.\n\n## Permissions\n\n| Permission | Capabilities |\n| --- | --- |\n| `connections:read` | List WhatsApp Connections explicitly selected for this API Key. |\n| `directory:read` | Page Directory contacts and currently joined groups. |\n| `messages:read` | Page WhatsApp Conversations, complete Stored Messages, private exact-word search, and eligible Stored Media. |\n| `messages:send` | Create or replay text Send Operations and read Send Status for operations created by this key. |\n\nPermissions are independent. `messages:send` never implies Directory or Stored Message read permission. A newly created WhatsApp Connection is never added to an existing API Key.\n\n## Pagination\n\nCollection responses use `data`, `pagination`, and optional `meta`. `pagination` contains `next_cursor` and `has_more`. The default page size is 20 and the maximum is 50, except Stored Message search which remains capped at 20.\n\nREST cursors are short-lived HMAC keyset cursors bound to the calling API Key, operation, WhatsApp Connection, normalized filters or a keyed digest of search terms, limit, sort version, and a 15-minute expiry. MCP cursors are not accepted. A tampered, expired, or rebound cursor returns 400. Search terms themselves never appear in a cursor.\n\n## Problem Details\n\nREST errors use RFC 9457 `application/problem+json` with `type`, `title`, `status`, a safe `detail`, a stable Normal `code`, and optional `retryable`, `retry_after_seconds`, or `resets_at`.\n\n| Code | Status | Meaning |\n| --- | --- | --- |\n| `invalid_credentials` | 401 | Missing, malformed, expired, or revoked API Key. |\n| `insufficient_permission` | 403 | The grant does not include the required permission. |\n| `not_found` | 404 | Unknown, cross-tenant, deleted, excluded, or mismatched resource. The shape is constant. |\n| `invalid_request` / `invalid_cursor` | 400 | Closed request, header, or cursor contract failed. |\n| `idempotency_conflict` / `connection_unavailable` | 409 | Idempotency payload mismatch, or the Connection is not connected for a new send. |\n| `rate_limited` | 429 | Personal Account or API Key quota is exhausted. |\n| `unavailable` | 503 | Authentication, audit, or quota authority is unavailable. The request fails closed. |\n\nEach `type` is `https://docs.normal.fast/problems/{code}`.\n\n## Idempotency\n\n`POST /v1/connections/{connection_id}/send-operations` requires `Idempotency-Key` using the NanoID default alphabet (21 characters). Exact replay returns the existing Send Operation without calling the provider again or consuming send quota. A changed payload under the same key returns `idempotency_conflict`.\n\n## Ambiguous sends\n\nA Send Operation is not a Stored Message. After the durable provider-attempt boundary, `failed` and `unknown` remain Send Operation resources, not HTTP execution errors. An unknown outcome means the provider may have accepted the message. Normal never automatically retries an unknown Send Operation. `GET /v1/connections/{connection_id}/send-operations/{send_operation_id}` returns the originating key's current local Send Status and never contacts the provider.\n\n## Retention and history coverage\n\nStored Messages, Stored Media, and Pending Send Content follow the User's Message Retention Policy. The default is 30 days. Pending Send Content also expires at most seven days after Send Operation creation.\n\nMessage pages include the Message History Window (`history_starts_at`, `history_start_reason`) and intersecting Ingestion Gaps. History is observed, not provider-certified complete. The absence of a known gap does not prove that every provider message arrived.\n\nDisconnected WhatsApp Connections remain readable for retained history. New Send Operations require a connected Connection.\n\n## Media\n\nEligible Stored Media appears as an authenticated nested path on the Stored Message, never an MCP URI, public URL, provider URL, R2 URL, or presigned URL. `GET` that path with the same API Key. v1 returns the complete ready object up to 16 MiB after Activity Log admission and full-byte quota reservation. Responses use the normalized MIME type, a sanitized optional filename, and `Cache-Control: private, no-store`. Range and chunk downloads are not provided.\n\nUnknown, mismatched, excluded, non-ready, unauthorized, or oversized media share one constant-shape 404.\n\n## Deletion\n\nConnection Deletion immediately removes that WhatsApp Connection from every API Key. If it was a key's last selected Connection, the key is revoked and its digest is cleared. Personal Account Deletion revokes every API Key and clears every digest before purge continues. Safe expired or revoked metadata remains visible in the dashboard for 90 days, then purges. Activity Logs retain their own 90-day window.\n\nWhatsApp Recipient Exclusions apply beneath every API Key. Excluded recipients are absent from Directory, conversation, message, and media results. A send to an excluded recipient returns the same 404 as an unknown recipient. Removing an exclusion never restores purged history.\n\n## Restore invalidation\n\nA production database restore globally invalidates every restored API Key before verification traffic reopens. Digests are cleared and the API Key HMAC authority is rotated. Previous HMAC generations are not accepted as a fallback. Users create replacement keys after recovery.\n\n## Privacy\n\nDo not send raw phone numbers, provider identifiers, or self-attested confirmation flags. Public fields use opaque handles (`con_`, `ctc_`, `grp_`, `cvs_`, `msg_`, `med_`, `snd_`, `apk_`) and suffix-only phone presentation.\n\nSearch terms, message content, media bytes, credentials, credential digests, full phone numbers, provider payloads, raw bodies, and tenant identifiers must not appear in URLs, cursors, Activity Logs, telemetry, or Problem Details. `POST /v1/connections/{connection_id}/messages/search` accepts terms only in a closed JSON body and binds pagination to a keyed digest of the normalized terms.\n\nThis documentation site cannot execute authenticated requests or persist an API Key. Server-side curl and language examples are generated for copy-out use only.",
+    "description": "Normal's public REST API for one User's server-side personal automations.\n\n## Getting started\n\nCreate an API Key from the signed-in dashboard at `/dashboard/api-keys`. Choose a unique name, any non-empty subset of the four permissions, the WhatsApp Connections this automation may use, and an optional expiry. The plaintext credential is shown once. If that response is lost, create a replacement key.\n\nCall `https://api.normal.fast` from a server. Do not put an API Key in a browser, mobile app, query parameter, cookie, or this documentation site.\n\n```bash\ncurl -sS https://api.normal.fast/v1/connections \\\n  -H 'Authorization: Bearer <API Key>'\n```\n\nSigned-in API Key management routes (`/v1/api-keys`) are product routes. They require a Clerk bearer token, the exact web Origin, and — for creation — first-factor verification within five minutes. They are not authenticated with an API Key.\n\n## Server-side authentication\n\nSend one `Authorization: Bearer <API Key>` header. The credential uses the `normal_apk_` split format: a public `apk_` handle and a high-entropy secret shown only at creation. Duplicate or oversized authorization headers are rejected.\n\nNeon is the sole authority for validity, selected Connections, permissions, expiry, and revocation. There is no cache that can extend a revoked or expired key. Invalid, malformed, expired, or revoked credentials return the same 401 Problem Details shape.\n\n## Permissions\n\n| Permission | Capabilities |\n| --- | --- |\n| `connections:read` | List WhatsApp Connections explicitly selected for this API Key. |\n| `directory:read` | Page Directory contacts and currently joined groups. |\n| `messages:read` | Page WhatsApp Conversations, complete Stored Messages, private exact-word search, and eligible Stored Media. |\n| `messages:send` | Create or replay text Send Operations and read Send Status for operations created by this key. |\n\nPermissions are independent. `messages:send` never implies Directory or Stored Message read permission. A newly created WhatsApp Connection is never added to an existing API Key.\n\n## Pagination\n\nCollection responses use `data`, `pagination`, and optional `meta`. `pagination` contains `next_cursor` and `has_more`. The default page size is 20 and the maximum is 50, except Stored Message search which remains capped at 20.\n\nREST cursors are short-lived HMAC keyset cursors bound to the calling API Key, operation, WhatsApp Connection, normalized filters or a keyed digest of search terms, limit, sort version, and a 15-minute expiry. MCP cursors are not accepted. A tampered, expired, or rebound cursor returns 400. Search terms themselves never appear in a cursor.\n\n## Problem Details\n\nREST errors use RFC 9457 `application/problem+json` with `type`, `title`, `status`, a safe `detail`, a stable Normal `code`, and optional `retryable`, `retry_after_seconds`, or `resets_at`.\n\n| Code | Status | Meaning |\n| --- | --- | --- |\n| `invalid_credentials` | 401 | Missing, malformed, expired, or revoked API Key. |\n| `insufficient_permission` | 403 | The grant does not include the required permission. |\n| `not_found` | 404 | Unknown, cross-tenant, deleted, excluded, or mismatched resource. The shape is constant. |\n| `invalid_request` / `invalid_cursor` | 400 | Closed request, header, or cursor contract failed. |\n| `idempotency_conflict` / `connection_unavailable` | 409 | Idempotency payload mismatch, or the Connection is not connected for a new send. |\n| `rate_limited` | 429 | Personal Account or API Key quota is exhausted. |\n| `unavailable` | 503 | Authentication, audit, or quota authority is unavailable. The request fails closed. |\n\nEach `type` is `https://docs.normal.fast/problems/{code}`.\n\n## Idempotency\n\n`POST /v1/connections/{connection_id}/send-operations` requires `Idempotency-Key` using the NanoID default alphabet (21 characters). Exact replay returns the existing Send Operation without calling the provider again or consuming send quota. A changed payload under the same key returns `idempotency_conflict`.\n\n## Ambiguous sends\n\nA Send Operation is not a Stored Message. After the durable provider-attempt boundary, `failed` and `unknown` remain Send Operation resources, not HTTP execution errors. An unknown outcome means the provider may have accepted the message. Normal never automatically retries an unknown Send Operation. `GET /v1/connections/{connection_id}/send-operations/{send_operation_id}` returns the originating key's current local Send Status and never contacts the provider.\n\n## Retention and history coverage\n\nStored Messages, Stored Media, and Pending Send Content follow the User's Message Retention Policy. The default is 30 days. Pending Send Content also expires at most seven days after Send Operation creation.\n\nMessage pages include the Message History Window (`history_starts_at`, `history_start_reason`) and intersecting Ingestion Gaps. History is observed, not provider-certified complete. The absence of a known gap does not prove that every provider message arrived.\n\nDisconnected WhatsApp Connections remain readable for retained history. New Send Operations require a connected Connection.\n\n## Media\n\nEligible Stored Media appears as an authenticated nested path on the Stored Message, never an MCP URI, public URL, provider URL, R2 URL, or presigned URL. `GET` that path with the same API Key. v1 returns the complete ready object up to 16 MiB after Activity Log admission and full-byte quota reservation. Responses use the normalized MIME type, a sanitized optional filename, and `Cache-Control: private, no-store`. Range and chunk downloads are not provided.\n\nUnknown, mismatched, excluded, non-ready, unauthorized, or oversized media share one constant-shape 404.\n\n## Deletion\n\nConnection Deletion immediately removes that WhatsApp Connection from every API Key. If it was a key's last selected Connection, the key is revoked and its digest is cleared. Personal Account Deletion revokes every API Key and clears every digest before purge continues. Safe expired or revoked metadata remains visible in the dashboard for 90 days, then purges. Activity Logs retain their own 90-day window.\n\nWhatsApp Recipient Exclusions apply beneath every API Key. Excluded recipients are absent from Directory, conversation, message, and media results. A send to an excluded recipient returns the same 404 as an unknown recipient. Because a Direct Address cannot be proven distinct from an excluded recipient, all direct phone and username sends fail with that same 404 while any exclusion is active on the Connection. Removing an exclusion never restores purged history or Pending Send Content.\n\n## Restore invalidation\n\nA production database restore globally invalidates every restored API Key before verification traffic reopens. Digests are cleared and the API Key HMAC authority is rotated. Previous HMAC generations are not accepted as a fallback. Users create replacement keys after recovery.\n\n## Privacy\n\nDirect phone numbers and usernames are accepted only in the closed Send Operation request body. They are used in memory for one provider attempt and never persisted, returned, logged, or placed in telemetry. Other public fields use opaque handles (`con_`, `ctc_`, `grp_`, `cvs_`, `msg_`, `med_`, `snd_`, `apk_`) and suffix-only phone presentation.\n\nSearch terms, message content, media bytes, credentials, credential digests, full phone numbers, provider payloads, raw bodies, and tenant identifiers must not appear in URLs, cursors, Activity Logs, telemetry, or Problem Details. `POST /v1/connections/{connection_id}/messages/search` accepts terms only in a closed JSON body and binds pagination to a keyed digest of the normalized terms.\n\nThis documentation site cannot execute authenticated requests or persist an API Key. Server-side curl and language examples are generated for copy-out use only.",
     "title": "Normal API",
     "version": "1.0.0"
   },
@@ -1350,7 +1350,7 @@
     },
     "/v1/connections/{connection_id}/send-operations": {
       "post": {
-        "description": "Create or exactly replay one text Send Operation for a known active `ctc_` or joined `grp_` recipient. Requires `Idempotency-Key`. Raw phone numbers, provider identifiers, conversation identifiers, and self-attested confirmation flags are not accepted. Exact replay returns the existing operation without resending. Failed and unknown post-boundary outcomes remain Send Operation resources.",
+        "description": "Create or exactly replay one text Send Operation using exactly one destination: a known active `ctc_` contact, a joined `grp_` group, an E.164 `phone`, or a WhatsApp `username`. Requires `Idempotency-Key`. Conversation identifiers, provider JIDs, channel identifiers, and self-attested confirmation flags are not accepted. Direct addresses are not persisted or returned and fail closed while a Recipient Exclusion is active on the Connection. Exact replay returns the existing operation without resending. Failed and unknown post-boundary outcomes remain Send Operation resources.",
         "operationId": "createSendOperation",
         "parameters": [
           {
@@ -2189,31 +2189,71 @@
       },
       "CreateSendOperation": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "required": [
-          "recipient_id",
-          "text"
-        ],
-        "properties": {
-          "recipient_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "description": "a string matching the pattern ^ctc_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
-                "pattern": "^ctc_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+        "anyOf": [
+          {
+            "type": "object",
+            "required": [
+              "recipient_id",
+              "text"
+            ],
+            "properties": {
+              "recipient_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "a string matching the pattern ^ctc_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                    "pattern": "^ctc_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                  },
+                  {
+                    "type": "string",
+                    "description": "a string matching the pattern ^grp_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
+                    "pattern": "^grp_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+                  }
+                ]
               },
-              {
-                "type": "string",
-                "description": "a string matching the pattern ^grp_[A-Za-z0-9_-]{21}(?![\\s\\S])$",
-                "pattern": "^grp_[A-Za-z0-9_-]{21}(?![\\s\\S])$"
+              "text": {
+                "type": "string"
               }
-            ]
+            },
+            "additionalProperties": false
           },
-          "text": {
-            "type": "string"
+          {
+            "type": "object",
+            "required": [
+              "phone",
+              "text"
+            ],
+            "properties": {
+              "phone": {
+                "type": "string",
+                "description": "a string matching the pattern ^\\+[1-9][0-9]{1,14}$",
+                "pattern": "^\\+[1-9][0-9]{1,14}$"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "username",
+              "text"
+            ],
+            "properties": {
+              "username": {
+                "type": "string",
+                "description": "a string matching the pattern ^@[A-Za-z0-9._-]{1,64}$",
+                "pattern": "^@[A-Za-z0-9._-]{1,64}$"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
           }
-        },
-        "additionalProperties": false
+        ]
       },
       "CreatedApiKey": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",

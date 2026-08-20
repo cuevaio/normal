@@ -223,8 +223,10 @@ describe("Send Operation grant identities", () => {
     grant: ReturnType<typeof apiSendGrant> | ReturnType<typeof mcpSendGrant>,
     overrides: {
       readonly auditLogId: string;
+      readonly directRecipientType?: "phone" | "username";
       readonly fingerprint: string;
       readonly idempotencyKey: string;
+      readonly recipientPublicId?: string | null;
       readonly sendId: string;
       readonly sendPublicId: string;
     },
@@ -301,6 +303,101 @@ describe("Send Operation grant identities", () => {
       mcp_authorization_id: null,
       tool_name: "send_text_message",
     });
+  });
+
+  test("stores no direct address and fails closed once a recipient exclusion exists", async () => {
+    const direct = await sends.commit(
+      commitInput(apiGrantA, {
+        auditLogId: "51000000-0000-4000-8000-000000000090",
+        directRecipientType: "phone",
+        fingerprint: `sf1_${"D".repeat(43)}`,
+        idempotencyKey: "123456789012345678990",
+        recipientPublicId: null,
+        sendId: "60000000-0000-4000-8000-000000000090",
+        sendPublicId: "snd_123456789012345678990",
+      }),
+      encrypt,
+    );
+    expect(direct).toMatchObject({
+      outcome: "created",
+      provider: { recipientType: "phone" },
+    });
+    const persisted = await database.query<{
+      recipient_public_id: string | null;
+      recipient_type: string;
+    }>(
+      `SELECT recipient_type, recipient_public_id FROM public.send_operations
+       WHERE public_id = 'snd_123456789012345678990'`,
+    );
+    expect(persisted.rows[0]).toEqual({
+      recipient_public_id: null,
+      recipient_type: "phone",
+    });
+    await expect(
+      database.query(
+        `UPDATE public.send_operations SET recipient_type = 'contact'
+         WHERE public_id = 'snd_123456789012345678990'`,
+      ),
+    ).rejects.toThrow();
+
+    await sends.recordProviderOutcome({
+      changedAt: new Date(observedAt.valueOf() + 500),
+      sendId: "60000000-0000-4000-8000-000000000090",
+      status: "accepted",
+    });
+    const clearedAfterAttempt = await database.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM public.pending_send_contents
+       WHERE send_operation_id = '60000000-0000-4000-8000-000000000090'`,
+    );
+    expect(clearedAfterAttempt.rows[0]?.count).toBe(0);
+
+    const awaitingOutcome = await sends.commit(
+      commitInput(apiGrantA, {
+        auditLogId: "51000000-0000-4000-8000-000000000092",
+        directRecipientType: "username",
+        fingerprint: `sf1_${"F".repeat(43)}`,
+        idempotencyKey: "123456789012345678992",
+        recipientPublicId: null,
+        sendId: "60000000-0000-4000-8000-000000000092",
+        sendPublicId: "snd_123456789012345678992",
+      }),
+      encrypt,
+    );
+    expect(awaitingOutcome.outcome).toBe("created");
+
+    await database.query(
+      `INSERT INTO public.whatsapp_recipient_exclusions (
+         personal_account_id, whatsapp_connection_id, recipient_kind,
+         recipient_locator, recipient_public_id, excluded, effective_at
+       ) VALUES ($1, $2, 'contact', $3, $4, true, $5)`,
+      [
+        accountId,
+        connectionId,
+        `di1_${"A".repeat(43)}`,
+        contactPublicId,
+        new Date(observedAt.valueOf() + 1_000),
+      ],
+    );
+    const pending = await database.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM public.pending_send_contents
+       WHERE send_operation_id = '60000000-0000-4000-8000-000000000092'`,
+    );
+    expect(pending.rows[0]?.count).toBe(0);
+
+    await expect(
+      sends.commit(
+        commitInput(apiGrantA, {
+          auditLogId: "51000000-0000-4000-8000-000000000091",
+          directRecipientType: "username",
+          fingerprint: `sf1_${"E".repeat(43)}`,
+          idempotencyKey: "123456789012345678991",
+          recipientPublicId: null,
+          sendId: "60000000-0000-4000-8000-000000000091",
+          sendPublicId: "snd_123456789012345678991",
+        }),
+        encrypt,
+      ),
+    ).resolves.toEqual({ outcome: "recipient_not_found" });
   });
 
   test("records the MCP channel independently from an API Key principal", async () => {

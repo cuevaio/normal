@@ -3,7 +3,7 @@ import {
   restRouteRegistry,
 } from "@whatsapp-mcp/contracts/openapi";
 import { Effect, Layer } from "effect";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   ApiKeyHmac,
   ApiKeyHmacError,
@@ -20,7 +20,7 @@ import {
   type StoredMediaContainerFailure,
   StoredMediaContainerService,
 } from "../src/encryption/stored-media-container";
-import { SendTextMessage, type SendTextMessageResult } from "../src/mcp";
+import { SendTextMessage, type SendTextMessageService } from "../src/mcp";
 import {
   createRestHandler,
   isRestRequest,
@@ -93,16 +93,7 @@ const makeHarness = (options?: {
   readonly permissions?: ReadonlyArray<
     "connections:read" | "directory:read" | "messages:read" | "messages:send"
   >;
-  readonly send?: (
-    input: {
-      readonly connectionId: string;
-      readonly grant: { readonly kind: "api" | "mcp" };
-      readonly idempotencyKey: string;
-      readonly recipientId: string;
-      readonly text: string;
-    },
-    deferProviderAttempt?: (attempt: Promise<void>) => void,
-  ) => Effect.Effect<SendTextMessageResult, never>;
+  readonly send?: SendTextMessageService["send"];
 }) => {
   const telemetry: Array<SafeTelemetryEvent> = [];
   const persistence: RestPersistenceService = {
@@ -2425,6 +2416,38 @@ describe("REST Send Operations", () => {
     expect(JSON.stringify(harness.telemetry)).not.toContain(sendBody.text);
   });
 
+  test.each([
+    {
+      body: { phone: "+15551234567", text: "hello" },
+      destination: { phone: "+15551234567" },
+    },
+    {
+      body: { username: "@jane_doe", text: "hello" },
+      destination: { username: "@jane_doe" },
+    },
+  ])("accepts a direct destination", async ({ body, destination }) => {
+    const send = vi.fn<SendTextMessageService["send"]>(() =>
+      Effect.succeed({ outcome: "receipt", receipt }),
+    );
+    const response = await makeHarness({
+      permissions: ["messages:send"],
+      send,
+    }).handler(
+      request(sendPath, {
+        body,
+        idempotencyKey,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining(destination),
+      undefined,
+    );
+    expect(send.mock.calls[0]?.[0].recipientId).toBeUndefined();
+  });
+
   test("replays an exact Send Operation and rejects changed or unaccepted payloads", async () => {
     const replay = await makeHarness({
       permissions: ["messages:send"],
@@ -2492,6 +2515,25 @@ describe("REST Send Operations", () => {
     );
     expect(rejected.status).toBe(400);
     expect(await rejected.json()).toMatchObject({
+      code: "invalid_request",
+      status: 400,
+    });
+
+    const multipleDestinations = await makeHarness({
+      permissions: ["messages:send"],
+    }).handler(
+      request(sendPath, {
+        body: {
+          phone: "+15551234567",
+          text: "hello",
+          username: "@jane_doe",
+        },
+        idempotencyKey,
+        method: "POST",
+      }),
+    );
+    expect(multipleDestinations.status).toBe(400);
+    expect(await multipleDestinations.json()).toMatchObject({
       code: "invalid_request",
       status: 400,
     });

@@ -89,11 +89,15 @@ A direct chat or group chat within one WhatsApp Connection.
 _Avoid_: Thread
 
 **WhatsApp Recipient**:
-A contact or joined group marked active in the latest WhatsApp Directory projection for one WhatsApp Connection and therefore eligible for an outbound attempt. A WhatsApp Recipient can exist before the platform observes a WhatsApp Conversation and is addressed by its Directory identity rather than a raw phone number or provider identifier; projection staleness means provider routability is not guaranteed.
+A contact or joined group marked active in the latest WhatsApp Directory projection for one WhatsApp Connection and therefore eligible for an outbound attempt by its Directory identity. A WhatsApp Recipient can exist before the platform observes a WhatsApp Conversation; projection staleness means provider routability is not guaranteed.
 _Avoid_: Conversation, raw destination
 
+**Direct Address**:
+An E.164 phone number or WhatsApp username supplied for one outbound Send Operation without requiring an existing WhatsApp Recipient. A Direct Address is validated, used only in memory for the single provider attempt, and retained afterward only inside the non-reversible idempotency fingerprint. It is never returned, logged, or used to infer a WhatsApp Recipient or Stored Message identity. Direct Address sends fail closed while any WhatsApp Recipient Exclusion applies to the Connection because Normal cannot prove that an alias does not identify an excluded recipient.
+_Avoid_: WhatsApp Recipient, provider identifier, retained destination
+
 **WhatsApp Recipient Exclusion**:
-A User-owned rule, scoped to one WhatsApp Connection and one WhatsApp Recipient, that stops Normal from tracking that recipient. While it applies, the recipient is absent from every MCP Directory, chat, message, and Stored Media result, a new Send Operation to it is rejected as recipient not found, and no provider observation for it creates a WhatsApp Conversation, Stored Message, Stored Media, or readable Pending Send Content. Setting one purges the recipient's existing Message Store history and records a permanent purge cutoff that survives a database restore; removing one permits only future observations and future sends and never restores purged history. The WhatsApp Directory projection for the recipient is retained so the User can still recognize and manage it.
+A User-owned rule, scoped to one WhatsApp Connection and one WhatsApp Recipient, that stops Normal from tracking that recipient. While it applies, the recipient is absent from every MCP Directory, chat, message, and Stored Media result, a new Send Operation to it is rejected as recipient not found, every Direct Address send on that Connection is rejected with the same result, and no provider observation for it creates a WhatsApp Conversation, Stored Message, Stored Media, or readable Pending Send Content. Setting one purges the recipient's existing Message Store history and all unattributed Direct Address Pending Send Content on the Connection, and records a permanent purge cutoff that survives a database restore; removing one permits only future observations and future sends and never restores purged history. The WhatsApp Directory projection for the recipient is retained so the User can still recognize and manage it.
 _Avoid_: Block, mute, hidden contact, display filter
 
 **Conversation Activity**:

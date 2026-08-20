@@ -648,7 +648,7 @@ describe("REST contracts", () => {
     expect(artifact).toBe(serializedOpenApiDocument());
   });
 
-  test("rejects excess Send Operation properties and unaccepted destinations", () => {
+  test("accepts exactly one supported Send Operation destination", () => {
     const created = {
       recipient_id: "ctc_xxxxxxxxxxxxxxxxxxxxx",
       text: " exact\ne\u0301 ",
@@ -663,6 +663,18 @@ describe("REST contracts", () => {
       recipient_id: "grp_xxxxxxxxxxxxxxxxxxxxx",
       text: "hello",
     });
+    expect(
+      decodeRestCreateSendOperation({
+        phone: "+12",
+        text: "hello",
+      }) as unknown,
+    ).toEqual({ phone: "+12", text: "hello" });
+    expect(
+      decodeRestCreateSendOperation({
+        username: "@jane_doe",
+        text: "hello",
+      }) as unknown,
+    ).toEqual({ username: "@jane_doe", text: "hello" });
     expect(() =>
       decodeRestCreateSendOperation({
         ...created,
@@ -677,8 +689,28 @@ describe("REST contracts", () => {
     ).toThrow();
     expect(() =>
       decodeRestCreateSendOperation({
-        recipient_id: "+15551234567",
+        phone: "15551234567",
         text: "hello",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeRestCreateSendOperation({
+        username: "jane_doe",
+        text: "hello",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeRestCreateSendOperation({
+        recipient_id: created.recipient_id,
+        phone: "+15551234567",
+        text: "hello",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeRestCreateSendOperation({
+        phone: "+15551234567",
+        text: "hello",
+        username: "@jane_doe",
       }),
     ).toThrow();
     expect(() =>

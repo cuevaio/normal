@@ -118,7 +118,7 @@ export const restRouteRegistry = [
   },
   {
     description:
-      "Create or exactly replay one text Send Operation for a known active `ctc_` or joined `grp_` recipient. Requires `Idempotency-Key`. Raw phone numbers, provider identifiers, conversation identifiers, and self-attested confirmation flags are not accepted. Exact replay returns the existing operation without resending. Failed and unknown post-boundary outcomes remain Send Operation resources.",
+      "Create or exactly replay one text Send Operation using exactly one destination: a known active `ctc_` contact, a joined `grp_` group, an E.164 `phone`, or a WhatsApp `username`. Requires `Idempotency-Key`. Conversation identifiers, provider JIDs, channel identifiers, and self-attested confirmation flags are not accepted. Direct addresses are not persisted or returned and fail closed while a Recipient Exclusion is active on the Connection. Exact replay returns the existing operation without resending. Failed and unknown post-boundary outcomes remain Send Operation resources.",
     method: "POST",
     operationId: "createSendOperation",
     path: "/v1/connections/{connection_id}/send-operations",

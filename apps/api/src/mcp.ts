@@ -329,14 +329,30 @@ export type SendTextMessageResult =
       readonly retryAfterSeconds: number;
     };
 
+type SendDestination =
+  | {
+      readonly phone: string;
+      readonly recipientId?: never;
+      readonly username?: never;
+    }
+  | {
+      readonly phone?: never;
+      readonly recipientId: string;
+      readonly username?: never;
+    }
+  | {
+      readonly phone?: never;
+      readonly recipientId?: never;
+      readonly username: string;
+    };
+
 export interface SendTextMessageService {
   readonly send: (
-    input: {
+    input: SendDestination & {
       readonly channel: "api" | "mcp";
       readonly connectionId: string;
       readonly grant: SendGrantIdentity;
       readonly idempotencyKey: string;
-      readonly recipientId: string;
       readonly text: string;
     },
     deferProviderAttempt?: (attempt: Promise<void>) => void,
@@ -584,7 +600,7 @@ const readMessagesDescription =
 const listContactsDescription =
   "Find active contacts in one selected WhatsApp Connection. When the User names a person, call this tool with its search input; do not use search_messages to locate a person. contact_id can be passed to send_text_message. conversation_id can be passed to read_messages when messages:read is granted and retained activity exists; otherwise it is null.";
 const sendTextMessageDescription =
-  "Send exact text once to a current WhatsApp Recipient after Client Confirmation. Use recipient_id already returned by list_contacts, list_groups, list_chats, or read_messages; do not look up the same recipient again. Generate a fresh idempotency_key of exactly 21 characters matching [A-Za-z0-9_-]{21}; reuse that exact key only to retry the same connection, recipient, and text.";
+  "Send exact text once after Client Confirmation. Supply exactly one destination: recipient_id returned by a Directory or message tool, an E.164 phone beginning with +, or a WhatsApp username beginning with @. Generate a fresh idempotency_key of exactly 21 characters matching [A-Za-z0-9_-]{21}; reuse that exact key only to retry the same connection, destination, and text.";
 const searchMessagesDescription =
   "Search exact normalized words in retained Stored Message text and captions within one selected WhatsApp Connection. Results are newest first, not relevance ranked.";
 const ListGroupsInput = z
@@ -685,25 +701,42 @@ const hasUnpairedSurrogate = (value: string): boolean => {
   }
   return false;
 };
-const SendTextMessageInput = z
-  .object({
-    connection_id: z.string().regex(/^con_[A-Za-z0-9_-]{21}$/u),
-    recipient_id: z.string().regex(/^(?:ctc|grp)_[A-Za-z0-9_-]{21}$/u),
-    text: z
-      .string()
-      .min(1)
-      .refine((value) => {
-        const length = Array.from(value).length;
-        return (
-          length >= 1 &&
-          length <= 4_096 &&
-          !hasUnpairedSurrogate(value) &&
-          !isOnlyUnicodeWhiteSpace(value)
-        );
-      }, "text must contain 1 to 4096 Unicode scalar values and non-whitespace"),
-    idempotency_key: z.string().regex(/^[A-Za-z0-9_-]{21}$/u),
-  })
-  .strict();
+const SendTextMessageCommon = {
+  connection_id: z.string().regex(/^con_[A-Za-z0-9_-]{21}$/u),
+  text: z
+    .string()
+    .min(1)
+    .refine((value) => {
+      const length = Array.from(value).length;
+      return (
+        length >= 1 &&
+        length <= 4_096 &&
+        !hasUnpairedSurrogate(value) &&
+        !isOnlyUnicodeWhiteSpace(value)
+      );
+    }, "text must contain 1 to 4096 Unicode scalar values and non-whitespace"),
+  idempotency_key: z.string().regex(/^[A-Za-z0-9_-]{21}$/u),
+} as const;
+const SendTextMessageInput = z.union([
+  z
+    .object({
+      ...SendTextMessageCommon,
+      recipient_id: z.string().regex(/^(?:ctc|grp)_[A-Za-z0-9_-]{21}$/u),
+    })
+    .strict(),
+  z
+    .object({
+      ...SendTextMessageCommon,
+      phone: z.string().regex(/^\+[1-9]\d{1,14}$/u),
+    })
+    .strict(),
+  z
+    .object({
+      ...SendTextMessageCommon,
+      username: z.string().regex(/^@[A-Za-z0-9._-]{1,64}$/u),
+    })
+    .strict(),
+]);
 const SendTextMessageOutputSchema = z
   .object({
     send_id: z.string().regex(/^snd_[A-Za-z0-9_-]{21}$/u),
@@ -1146,7 +1179,11 @@ const sendTextMessage = (
             })
           : mcpSendGrant(authorization),
         idempotencyKey: input.idempotency_key,
-        recipientId: input.recipient_id,
+        ...(input && "recipient_id" in input
+          ? { recipientId: input.recipient_id }
+          : "phone" in input
+            ? { phone: input.phone }
+            : { username: input.username }),
         text: input.text,
       },
       deferProviderAttempt,

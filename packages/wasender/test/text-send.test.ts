@@ -42,6 +42,9 @@ const identityRecipientRoute = Redacted.make(
     "15551234567@s.whatsapp.net",
   ),
 ) as WasenderRecipientRoute;
+const usernameRecipientRoute = Redacted.make(
+  await sealRecipientRoute(routeKeys, "contact", "@jane_doe"),
+) as WasenderRecipientRoute;
 const exactText = "  cafe\u0301\nsecond line  ";
 
 interface RecordedAttempt {
@@ -175,6 +178,72 @@ describe("real Wasender text-send adapter", () => {
       "application/json",
     );
     expect(harness.attempts[0]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test("sends a documented username and accepts a resolved direct JID acknowledgement", async () => {
+    const harness = makeHarness({
+      fetch: () =>
+        Response.json({
+          data: {
+            jid: "15551234567@s.whatsapp.net",
+            msgId: 100_001,
+            status: "in_progress",
+          },
+          success: true,
+        }),
+      recipientRoute: usernameRecipientRoute,
+    });
+
+    await expect(send(harness.sending)).resolves.toEqual({
+      outcome: "provider_acknowledgement",
+      status: "accepted",
+    });
+    expect(harness.attempts[0]?.body).toBe(
+      JSON.stringify({ to: "@jane_doe", text: exactText }),
+    );
+  });
+
+  test("does not treat a username alias response as stable recipient identity", async () => {
+    const harness = makeHarness({
+      fetch: () =>
+        Response.json({
+          data: {
+            key: {
+              fromMe: true,
+              id: "message-id-via-username",
+              remoteJid: "15551234567@s.whatsapp.net",
+            },
+            status: 2,
+          },
+          success: true,
+        }),
+      recipientRoute: usernameRecipientRoute,
+    });
+
+    await expect(send(harness.sending)).resolves.toEqual({
+      outcome: "provider_acknowledgement",
+      status: "accepted",
+    });
+  });
+
+  test("rejects acknowledgement for a different username", async () => {
+    const harness = makeHarness({
+      fetch: () =>
+        Response.json({
+          data: {
+            jid: "@different_user",
+            msgId: 100_002,
+            status: "in_progress",
+          },
+          success: true,
+        }),
+      recipientRoute: usernameRecipientRoute,
+    });
+
+    await expect(send(harness.sending)).resolves.toEqual({
+      outcome: "ambiguous",
+      reason: "invalid_response",
+    });
   });
 
   test("returns protected identity evidence only for the resolved recipient", async () => {

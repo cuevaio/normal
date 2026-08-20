@@ -184,6 +184,11 @@ const makeHarness = (
   const messageSearchQueries: Array<ReadonlyArray<string> | null> = [];
   const principals: Array<"api_key" | "mcp_authorization"> = [];
   const sendGrantKinds: Array<"api" | "mcp"> = [];
+  const sendDestinations: Array<{
+    readonly phone?: string;
+    readonly recipientId?: string;
+    readonly username?: string;
+  }> = [];
   const layer = Layer.mergeAll(
     Layer.succeed(McpToolClock, {
       now: Effect.succeed(new Date("2026-07-31T12:00:00.000Z")),
@@ -267,6 +272,13 @@ const makeHarness = (
     Layer.succeed(SendTextMessage, {
       send: (input) => {
         sendGrantKinds.push(input.grant.kind);
+        sendDestinations.push({
+          ...(input.phone === undefined ? {} : { phone: input.phone }),
+          ...(input.recipientId === undefined
+            ? {}
+            : { recipientId: input.recipientId }),
+          ...(input.username === undefined ? {} : { username: input.username }),
+        });
         return Effect.succeed(
           overrides.sendResult ?? {
             outcome: "receipt" as const,
@@ -850,6 +862,7 @@ const makeHarness = (
     messageSearchQueries,
     principals,
     sendGrantKinds,
+    sendDestinations,
     telemetry,
   };
 };
@@ -2633,6 +2646,74 @@ describe("atomic send_text_message MCP boundary", () => {
       },
     });
   });
+
+  test.each([
+    {
+      arguments: { phone: "+15551234567" },
+      destination: { phone: "+15551234567" },
+    },
+    {
+      arguments: { username: "@jane_doe" },
+      destination: { username: "@jane_doe" },
+    },
+  ])(
+    "accepts a direct destination after Client Confirmation",
+    async (example) => {
+      const harness = makeHarness({ scopes: ["messages:send"] });
+      const response = await harness.handler(
+        jsonRpcRequest("tools/call", {
+          name: "send_text_message",
+          arguments: {
+            connection_id: "con_123456789012345678901",
+            idempotency_key: "123456789012345678901",
+            text: "direct hello",
+            ...example.arguments,
+          },
+        }),
+        {},
+        executionContext,
+        authorization,
+      );
+
+      expect(response.status).toBe(200);
+      expect(harness.sendDestinations).toEqual([example.destination]);
+    },
+  );
+
+  test.each([
+    {},
+    { phone: "+15551234567", username: "@jane_doe" },
+    {
+      phone: "+15551234567",
+      recipient_id: "ctc_123456789012345678901",
+    },
+    { phone: "15551234567" },
+    { username: "jane_doe" },
+  ])(
+    "rejects an invalid direct destination before sending",
+    async (destination) => {
+      const harness = makeHarness({ scopes: ["messages:send"] });
+      const response = await harness.handler(
+        jsonRpcRequest("tools/call", {
+          name: "send_text_message",
+          arguments: {
+            connection_id: "con_123456789012345678901",
+            idempotency_key: "123456789012345678901",
+            text: "direct hello",
+            ...destination,
+          },
+        }),
+        {},
+        executionContext,
+        authorization,
+      );
+
+      expect(await response.json()).toMatchObject({
+        result: { isError: true },
+      });
+      expect(harness.sendDestinations).toEqual([]);
+    },
+  );
 
   test("extends the request lifetime before the send service completes", async () => {
     const deferredOperations: Array<Promise<unknown>> = [];

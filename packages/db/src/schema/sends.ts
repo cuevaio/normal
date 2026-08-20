@@ -32,7 +32,7 @@ export const sendOperationsInApp = publicSchema.table(
     activityLogId: uuid("tool_call_log_id").notNull(),
     whatsappConnectionId: uuid("whatsapp_connection_id").notNull(),
     recipientType: text("recipient_type").notNull(),
-    recipientPublicId: text("recipient_public_id").notNull(),
+    recipientPublicId: text("recipient_public_id"),
     status: text().notNull(),
     createdAt: timestamp("created_at", {
       withTimezone: true,
@@ -112,11 +112,11 @@ export const sendOperationsInApp = publicSchema.table(
     ),
     check(
       "send_operations_recipient_type_check",
-      sql`recipient_type = ANY (ARRAY['contact'::text, 'group'::text])`,
+      sql`recipient_type = ANY (ARRAY['contact'::text, 'group'::text, 'phone'::text, 'username'::text])`,
     ),
     check(
       "send_operations_recipient_public_id_check",
-      sql`recipient_public_id ~ '^(ctc|grp)_[A-Za-z0-9_-]{21}$'::text`,
+      sql`(recipient_type = 'contact' AND recipient_public_id IS NOT NULL AND recipient_public_id ~ '^ctc_[A-Za-z0-9_-]{21}$'::text) OR (recipient_type = 'group' AND recipient_public_id IS NOT NULL AND recipient_public_id ~ '^grp_[A-Za-z0-9_-]{21}$'::text) OR (recipient_type IN ('phone', 'username') AND recipient_public_id IS NULL)`,
     ),
     check(
       "send_operations_status_check",

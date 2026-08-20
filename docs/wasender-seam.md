@@ -163,6 +163,10 @@ the adapter returns only a connection-keyed HMAC of that identifier. A
 timeout, lost connection, `408`, `5xx`, oversized or malformed response, or
 unverifiable identity is ambiguous and is never retried. Complete
 authentication, recipient, provider, and throttling rejections are definitive.
+For a Direct Address username, a response that resolves the alias to a phone or
+LID JID is acknowledgement-only because the provider does not document that
+alias mapping as stable identity. It may advance the causally bound operation to
+`accepted`, but cannot materialize Pending Send Content as a Stored Message.
 
 Adapter telemetry may contain only the operation class, normalized outcome,
 attempt count, duration, and bounded byte counts. It never contains capability

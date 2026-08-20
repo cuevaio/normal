@@ -1094,7 +1094,9 @@ export const makeWebhookEventRepository = (
           operation !== undefined &&
           materialize !== undefined &&
           ["sent", "delivered", "read"].includes(input.status) &&
-          operation.ciphertext != null
+          operation.ciphertext != null &&
+          typeof operation.recipient_locator === "string" &&
+          typeof operation.recipient_public_id === "string"
         ) {
           const projected = await materialize({
             ciphertext: bytes(operation.ciphertext) ?? new Uint8Array(),

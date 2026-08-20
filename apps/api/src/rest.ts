@@ -3392,7 +3392,11 @@ const createSendOperation = (
             publicId: grant.id,
           }),
           idempotencyKey,
-          recipientId: body.recipient_id,
+          ...(body && "recipient_id" in body
+            ? { recipientId: body.recipient_id }
+            : "phone" in body
+              ? { phone: body.phone }
+              : { username: body.username }),
           text: body.text,
         },
         deferProviderAttempt,

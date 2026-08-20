@@ -10,6 +10,7 @@ import {
   storedMessagesInApp,
   whatsappConversationsInApp,
   whatsappGroupsInApp,
+  whatsappRecipientExclusionsInApp,
 } from "./schema";
 
 export interface SendCiphertext {
@@ -35,15 +36,22 @@ export interface SendEncryptionMaterial {
   };
 }
 
-export interface SendProviderMaterial extends SendEncryptionMaterial {
+interface SendProviderBase extends SendEncryptionMaterial {
   readonly authority: SendCiphertext;
-  readonly contactPhone?: SendCiphertext | null;
   readonly identityKey: SendCiphertext;
   readonly messageSearchKey: SendCiphertext;
-  readonly recipient: SendCiphertext;
-  readonly recipientType: "contact" | "group";
-  readonly recipientRecordId: string;
 }
+
+export type SendProviderMaterial = SendProviderBase &
+  (
+    | {
+        readonly contactPhone?: SendCiphertext | null;
+        readonly recipient: SendCiphertext;
+        readonly recipientType: "contact" | "group";
+        readonly recipientRecordId: string;
+      }
+    | { readonly recipientType: "phone" | "username" }
+  );
 
 export interface SendReceiptRecord {
   readonly createdAt: Date;
@@ -93,7 +101,8 @@ export type CommitSendInput = {
   readonly minuteRequestLimit: number;
   readonly observedAt: Date;
   readonly pendingExpiresAt: Date;
-  readonly recipientPublicId: string;
+  readonly directRecipientType?: "phone" | "username";
+  readonly recipientPublicId: string | null;
   readonly sendDailyLimit: number;
   readonly sendId: string;
   readonly sendPublicId: string;
@@ -456,11 +465,46 @@ export const makePgAtomicSendRepository = (
           await finishAudit("execution_error", "connection_unavailable");
           return { outcome: "connection_unavailable" as const };
         }
-        const recipientType = input.recipientPublicId.startsWith("ctc_")
-          ? "contact"
-          : "group";
-        const recipient =
-          recipientType === "contact"
+        const recipientType =
+          input.directRecipientType ??
+          (input.recipientPublicId?.startsWith("ctc_") ? "contact" : "group");
+        const directRecipient =
+          recipientType === "phone" || recipientType === "username";
+        if (
+          (directRecipient && input.recipientPublicId !== null) ||
+          (!directRecipient && input.recipientPublicId === null)
+        ) {
+          throw new Error("invalid send recipient input");
+        }
+        if (directRecipient) {
+          const activeExclusion = await db
+            .select({
+              recipientPublicId:
+                whatsappRecipientExclusionsInApp.recipientPublicId,
+            })
+            .from(whatsappRecipientExclusionsInApp)
+            .where(
+              and(
+                eq(
+                  whatsappRecipientExclusionsInApp.personalAccountId,
+                  accountId,
+                ),
+                eq(
+                  whatsappRecipientExclusionsInApp.whatsappConnectionId,
+                  connectionId,
+                ),
+                eq(whatsappRecipientExclusionsInApp.excluded, true),
+              ),
+            )
+            .limit(1);
+          if (activeExclusion.length > 0) {
+            await finishAudit("execution_error", "recipient_not_found");
+            return { outcome: "recipient_not_found" as const };
+          }
+        }
+        const recipient = directRecipient
+          ? []
+          : recipientType === "contact"
             ? await db
                 .select({
                   phone_ciphertext_version:
@@ -489,7 +533,7 @@ export const makePgAtomicSendRepository = (
                     ),
                     eq(
                       directoryContactsInApp.publicId,
-                      input.recipientPublicId,
+                      input.recipientPublicId ?? "",
                     ),
                     eq(directoryContactsInApp.active, true),
                     sql`NOT public.whatsapp_recipient_excluded(${accountId}, ${connectionId}, 'contact', ${directoryContactsInApp.providerIdentityIndex})`,
@@ -514,7 +558,7 @@ export const makePgAtomicSendRepository = (
                         ${accountId}, ${connectionId}, 'group', groups.provider_locator
                       )`,
               );
-        if (recipient[0] === undefined) {
+        if (!directRecipient && recipient[0] === undefined) {
           await finishAudit("execution_error", "recipient_not_found");
           return { outcome: "recipient_not_found" as const };
         }
@@ -695,31 +739,33 @@ export const makePgAtomicSendRepository = (
         await db.execute(sql`COMMIT`);
         transactionCommitted = true;
         const recipientRow = recipient[0];
-        return {
-          outcome: "created" as const,
-          receipt: {
-            createdAt: input.observedAt,
-            publicId: input.sendPublicId,
-            status: "processing" as const,
-            statusChangedAt: input.observedAt,
+        const providerBase: SendProviderBase = {
+          ...encryptionMaterial,
+          authority: {
+            ciphertext: bytes(row.authority_ciphertext),
+            keyVersion: integer(row.authority_key_version),
+            nonce: bytes(row.authority_nonce),
           },
-          provider: {
-            ...encryptionMaterial,
-            authority: {
-              ciphertext: bytes(row.authority_ciphertext),
-              keyVersion: integer(row.authority_key_version),
-              nonce: bytes(row.authority_nonce),
-            },
-            identityKey: {
-              ciphertext: bytes(row.identity_ciphertext),
-              keyVersion: integer(row.identity_key_version),
-              nonce: bytes(row.identity_nonce),
-            },
-            messageSearchKey: {
-              ciphertext: bytes(row.message_search_key_ciphertext),
-              keyVersion: integer(row.message_search_key_version),
-              nonce: bytes(row.message_search_key_nonce),
-            },
+          identityKey: {
+            ciphertext: bytes(row.identity_ciphertext),
+            keyVersion: integer(row.identity_key_version),
+            nonce: bytes(row.identity_nonce),
+          },
+          messageSearchKey: {
+            ciphertext: bytes(row.message_search_key_ciphertext),
+            keyVersion: integer(row.message_search_key_version),
+            nonce: bytes(row.message_search_key_nonce),
+          },
+        };
+        let providerMaterial: SendProviderMaterial;
+        if (directRecipient) {
+          providerMaterial = { ...providerBase, recipientType };
+        } else {
+          if (recipientRow === undefined) {
+            throw new Error("send recipient material unavailable");
+          }
+          providerMaterial = {
+            ...providerBase,
             contactPhone:
               recipientType === "contact" &&
               recipientRow.phone_ciphertext !== null &&
@@ -738,7 +784,17 @@ export const makePgAtomicSendRepository = (
             },
             recipientType,
             recipientRecordId: scalar(recipientRow, "recipient_record_id"),
+          };
+        }
+        return {
+          outcome: "created" as const,
+          receipt: {
+            createdAt: input.observedAt,
+            publicId: input.sendPublicId,
+            status: "processing" as const,
+            statusChangedAt: input.observedAt,
           },
+          provider: providerMaterial,
         };
       } catch (error) {
         if (!transactionCommitted) await db.execute(sql`ROLLBACK`);
@@ -957,6 +1013,8 @@ export const makePgAtomicSendRepository = (
         result[0] !== undefined &&
         input.messageIdentity !== undefined &&
         input.storedMessage !== undefined &&
+        (result[0].recipient_type === "contact" ||
+          result[0].recipient_type === "group") &&
         ["sent", "delivered", "read"].includes(input.status)
       ) {
         const recipient = await db

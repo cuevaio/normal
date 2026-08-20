@@ -39,22 +39,26 @@ export const makePublicObjectContract = <
     ([Schema.Struct.Context<Fields>] extends [never] ? unknown : never),
 ) => {
   const schema = Schema.Struct(fields);
-  const noContextSchema = schema as unknown as Schema.Schema<
-    typeof schema.Type,
-    typeof schema.Encoded,
-    never
-  >;
-
-  return {
-    schema,
-    jsonSchema: JSONSchema.make(schema, {
-      target: "jsonSchema2020-12",
-    }),
-    decodeUnknown: Schema.decodeUnknownSync(noContextSchema, {
-      onExcessProperty: "error",
-    }),
-  } as const;
+  return makePublicContract(
+    schema as unknown as Schema.Schema<
+      typeof schema.Type,
+      typeof schema.Encoded,
+      never
+    >,
+  );
 };
+
+export const makePublicContract = <Type, Encoded>(
+  schema: Schema.Schema<Type, Encoded, never>,
+) => ({
+  schema,
+  jsonSchema: JSONSchema.make(schema, {
+    target: "jsonSchema2020-12",
+  }),
+  decodeUnknown: Schema.decodeUnknownSync(schema, {
+    onExcessProperty: "error",
+  }),
+});
 
 export type PublicObjectContract<A> = {
   readonly decodeUnknown: (input: unknown) => A;
