@@ -13,9 +13,9 @@ describe("connection setup observation policy", () => {
   });
 
   test("polls more slowly while waiting for the QR scan", () => {
-    expect(nextConnectionSetupPollDelayMs("qr_available", 0)).toBe(1_000);
-    expect(nextConnectionSetupPollDelayMs("qr_available", 2)).toBe(1_500);
-    expect(nextConnectionSetupPollDelayMs("qr_available", 8)).toBe(2_000);
+    expect(nextConnectionSetupPollDelayMs("qr_available", 0)).toBe(2_000);
+    expect(nextConnectionSetupPollDelayMs("qr_available", 2)).toBe(2_500);
+    expect(nextConnectionSetupPollDelayMs("qr_available", 20)).toBe(5_000);
   });
 
   test("keeps scan-to-active polling responsive but bounded", () => {

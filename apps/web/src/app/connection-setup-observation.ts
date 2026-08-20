@@ -13,7 +13,7 @@ const minimumPollDelayMsByState: Readonly<
   connecting: 250,
   pending: 250,
   provisioned: 250,
-  qr_available: 1_000,
+  qr_available: 2_000,
   replayed: 250,
 };
 
@@ -23,7 +23,7 @@ const maximumPollDelayMsByState: Readonly<
   connecting: 1_500,
   pending: 1_000,
   provisioned: 1_000,
-  qr_available: 2_000,
+  qr_available: 5_000,
   replayed: 1_000,
 };
 

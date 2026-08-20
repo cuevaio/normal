@@ -17,6 +17,7 @@ import {
   type FormEvent,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -527,6 +528,8 @@ export function PublicBoundaryJourney({
   } | null>(null);
   const activeQrImageUrl = useRef<string | null>(null);
   const activeReconnectQrUrl = useRef<string | null>(null);
+  const activeLifecycleRequest = useRef<AbortController | null>(null);
+  const activeObservationRequest = useRef<AbortController | null>(null);
   const lifecycleGeneration = useRef(0);
   const lifecycleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const observationGeneration = useRef(0);
@@ -842,6 +845,8 @@ export function PublicBoundaryJourney({
     lifecycleGeneration.current += 1;
     lifecyclePollAttempt.current = 0;
     lifecyclePollState.current = "idle";
+    activeLifecycleRequest.current?.abort();
+    activeLifecycleRequest.current = null;
     if (lifecycleTimer.current !== null) {
       clearTimeout(lifecycleTimer.current);
       lifecycleTimer.current = null;
@@ -853,6 +858,8 @@ export function PublicBoundaryJourney({
     observationGeneration.current += 1;
     observationAttempt.current = 0;
     setupStateRef.current = "idle";
+    activeObservationRequest.current?.abort();
+    activeObservationRequest.current = null;
     if (observationTimer.current !== null) {
       clearTimeout(observationTimer.current);
       observationTimer.current = null;
@@ -862,17 +869,21 @@ export function PublicBoundaryJourney({
   const stopObservingOnIdentityChange = useEffectEvent(stopObserving);
 
   useEffect(() => {
-    if (identityState === "signed_in") return;
+    if (identityState !== "signed_out" && identityState !== "unavailable") {
+      return;
+    }
     stopObservingOnIdentityChange();
   }, [identityState, stopObservingOnIdentityChange]);
 
   useEffect(() => {
-    if (identityState === "signed_in") return;
+    if (identityState !== "signed_out" && identityState !== "unavailable") {
+      return;
+    }
     stopLifecyclePolling();
     setConnectionLifecycleAction(null);
   }, [identityState]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (previousView.current === view) return;
     previousView.current = view;
     if (view !== "connections") {
@@ -1194,13 +1205,19 @@ export function PublicBoundaryJourney({
         setConnectionLifecycleAction(null);
         return;
       }
+      const controller = new AbortController();
+      activeLifecycleRequest.current = controller;
       const response = await fetch(
         `${connectionsEndpoint}/${encodeURIComponent(connectionId)}/${action}`,
         {
           headers: { authorization: `Bearer ${token}` },
           method: "POST",
+          signal: controller.signal,
         },
       );
+      if (activeLifecycleRequest.current === controller) {
+        activeLifecycleRequest.current = null;
+      }
       if (!isCurrent()) return;
       if (
         response.ok &&
@@ -1275,6 +1292,7 @@ export function PublicBoundaryJourney({
             : "WhatsApp Connection needs recovery before new side effects.",
       }));
     } catch {
+      activeLifecycleRequest.current = null;
       if (isCurrent()) {
         stopLifecyclePolling();
         setConnectionLifecycleAction(null);
@@ -1354,9 +1372,15 @@ export function PublicBoundaryJourney({
         markState("unavailable");
         return;
       }
+      const controller = new AbortController();
+      activeObservationRequest.current = controller;
       const response = await fetch(`${connectionSetupEndpoint}/${setupId}/qr`, {
         headers: { authorization: `Bearer ${token}` },
+        signal: controller.signal,
       });
+      if (activeObservationRequest.current === controller) {
+        activeObservationRequest.current = null;
+      }
       if (!isCurrent()) return;
       if (response.status === 200) {
         const image = await response.blob();
@@ -1413,6 +1437,7 @@ export function PublicBoundaryJourney({
       };
       markState("unavailable");
     } catch {
+      activeObservationRequest.current = null;
       if (isCurrent()) {
         replaceQrImage(null);
         setupObservationMetrics.current = {

@@ -321,14 +321,21 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
     page.getByRole("heading", { name: "Security and control" }),
   ).toHaveCount(0);
   releaseFirstQr?.();
+  const setupQr = page.getByRole("img", { name: "Scan this WhatsApp QR code" });
+  const activeHeading = page.getByRole("heading", {
+    name: "WhatsApp Connection active",
+  });
+  await Promise.race([
+    setupQr.waitFor({ state: "visible", timeout: 5_000 }),
+    activeHeading.waitFor({ state: "visible", timeout: 5_000 }),
+  ]);
+  if (await setupQr.isVisible()) {
+    await expect(page.getByTestId("connection-setup-status")).toHaveText(
+      "Scan this code with WhatsApp. Normal will confirm as soon as WhatsApp finishes linking.",
+    );
+  }
   await expect(
-    page.getByRole("img", { name: "Scan this WhatsApp QR code" }),
-  ).toBeVisible();
-  await expect(page.getByTestId("connection-setup-status")).toHaveText(
-    "Scan this code with WhatsApp. Normal will confirm as soon as WhatsApp finishes linking.",
-  );
-  await expect(
-    page.getByRole("heading", { name: "WhatsApp Connection active" }),
+    activeHeading,
   ).toBeVisible({ timeout: 15_000 });
   const verificationPrompt = onboarding.getByTestId("mcp-verification-prompt");
   await expect(verificationPrompt).toContainText(

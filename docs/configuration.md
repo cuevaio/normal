@@ -774,8 +774,8 @@ reference.
 The committed browser regression verifies only the deterministic polling policy
 at the narrowest boundary. It does not assert a production target or provider
 percentile. The schedule starts at 250 ms, steps up by 250 ms, caps at 1 second
-while Normal is still preparing a code, and caps at 2 seconds while waiting for
-the user to scan or WhatsApp to finish linking.
+while Normal is still preparing a code, and caps at 5 seconds while waiting for
+the user to scan before returning to faster post-scan polling.
 
 Anonymous browser metrics use the literal observable phases
 `setup_to_code` and `linking_to_active`. They record
