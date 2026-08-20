@@ -620,14 +620,7 @@ test.describe("Connection Setup loading UI", () => {
       signedIn: true,
       token: "signed-second-test-user",
     });
-    await page.goto("/dashboard");
-    await expect(
-      page.getByRole("heading", { name: "Overview", exact: true }),
-    ).toBeVisible();
-    await page
-      .getByRole("button", { name: "Open dashboard navigation" })
-      .click();
-    await page.getByRole("link", { name: "WhatsApp Connections" }).click();
+    await page.goto("/dashboard/connections");
     await completeFirstConnectionProfile(page);
     const onboarding = page.getByTestId("first-connection-onboarding");
     await onboarding
@@ -747,9 +740,7 @@ test("shows a terminal provisioning failure during Connection Setup", async ({
     signedIn: true,
     token: "signed-second-test-user",
   });
-  await page.goto("/dashboard");
-
-  await page.getByRole("link", { name: "WhatsApp Connections" }).click();
+  await page.goto("/dashboard/connections");
   await completeFirstConnectionProfile(page);
   const onboarding = page.getByTestId("first-connection-onboarding");
   await onboarding

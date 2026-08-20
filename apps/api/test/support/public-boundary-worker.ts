@@ -122,9 +122,7 @@ const TEST_LAYER_SENTINEL = "TEST_LAYER_SENTINEL_DO_NOT_INCLUDE_IN_PRODUCTION";
 const TEST_FAULT_INJECTOR_SENTINEL =
   "TEST_FAULT_INJECTOR_DO_NOT_INCLUDE_IN_PRODUCTION";
 
-const browserOrigin = `http://127.0.0.1:${
-  process.env.PLAYWRIGHT_WEB_PORT ?? "3000"
-}`;
+const defaultBrowserOrigin = "http://127.0.0.1:3000";
 const onboardingProfiles = new Map<
   string,
   {
@@ -2001,79 +1999,94 @@ const selectedFailure = (request: Request): FailureTarget | undefined => {
     : undefined;
 };
 
-const worker = createPublicBoundaryWorker({
-  browserOrigin,
-  fallback: (request, environment) =>
-    isRecipientExclusionRequest(request)
-      ? createRecipientExclusionHandler(
-          makeTestLayer(selectedFailure(request), environment),
-          browserOrigin,
-        )(request)
-      : isMessageRetentionRequest(request)
-        ? createMessageRetentionHandler(
+const makeWorker = (browserOrigin: string) =>
+  createPublicBoundaryWorker({
+    browserOrigin,
+    fallback: (request, environment) =>
+      isRecipientExclusionRequest(request)
+        ? createRecipientExclusionHandler(
             makeTestLayer(selectedFailure(request), environment),
             browserOrigin,
-            [7, 30, 90],
           )(request)
-        : new URL(request.url).pathname === "/test/webhook-queue"
-          ? Promise.resolve(
-              new Response(JSON.stringify(publishedWebhookMessages), {
-                headers: {
-                  "cache-control": "no-store",
-                  "content-type": "application/json; charset=utf-8",
-                },
-              }),
-            )
-          : new URL(request.url).pathname === "/test/webhook-dead-letters"
+        : isMessageRetentionRequest(request)
+          ? createMessageRetentionHandler(
+              makeTestLayer(selectedFailure(request), environment),
+              browserOrigin,
+              [7, 30, 90],
+            )(request)
+          : new URL(request.url).pathname === "/test/webhook-queue"
             ? Promise.resolve(
-                new Response(JSON.stringify([...deadLetteredWebhookEvents]), {
+                new Response(JSON.stringify(publishedWebhookMessages), {
                   headers: {
                     "cache-control": "no-store",
                     "content-type": "application/json; charset=utf-8",
                   },
                 }),
               )
-            : new URL(request.url).pathname === "/test/webhook-replay-attempts"
+            : new URL(request.url).pathname === "/test/webhook-dead-letters"
               ? Promise.resolve(
-                  new Response(
-                    JSON.stringify(
-                      [...webhookReplayAttempts.entries()].map(
-                        ([requestId, attempt]) => ({
-                          requestId,
-                          status: attempt.status,
-                        }),
-                      ),
-                    ),
-                    {
-                      headers: {
-                        "cache-control": "no-store",
-                        "content-type": "application/json; charset=utf-8",
-                      },
+                  new Response(JSON.stringify([...deadLetteredWebhookEvents]), {
+                    headers: {
+                      "cache-control": "no-store",
+                      "content-type": "application/json; charset=utf-8",
                     },
-                  ),
+                  }),
                 )
-              : new URL(request.url).pathname === "/test/provider-observations"
+              : new URL(request.url).pathname === "/test/webhook-replay-attempts"
                 ? Promise.resolve(
-                    new Response(JSON.stringify(providerObservations), {
-                      headers: {
-                        "cache-control": "no-store",
-                        "content-type": "application/json; charset=utf-8",
+                    new Response(
+                      JSON.stringify(
+                        [...webhookReplayAttempts.entries()].map(
+                          ([requestId, attempt]) => ({
+                            requestId,
+                            status: attempt.status,
+                          }),
+                        ),
+                      ),
+                      {
+                        headers: {
+                          "cache-control": "no-store",
+                          "content-type": "application/json; charset=utf-8",
+                        },
                       },
-                    }),
+                    ),
                   )
-                : createProductionHandler({
-                    ...environment,
-                    WEBHOOK_HYPERDRIVE: {
-                      connectionString:
-                        "postgresql://webhook-runtime@hyperdrive.test/database",
-                    },
-                  } as Env)(request),
-  layerFor: (request, environment) =>
-    makeTestLayer(selectedFailure(request), environment),
-  provisioningLayer: makeTestLayer(undefined),
-  webhookEventLayer: (environment) => makeTestLayer(undefined, environment),
-  webhookRecoveryLayer: (environment) => makeTestLayer(undefined, environment),
-  webhookReplayLayer: (environment) => makeTestLayer(undefined, environment),
-});
+                : new URL(request.url).pathname === "/test/provider-observations"
+                  ? Promise.resolve(
+                      new Response(JSON.stringify(providerObservations), {
+                        headers: {
+                          "cache-control": "no-store",
+                          "content-type": "application/json; charset=utf-8",
+                        },
+                      }),
+                    )
+                  : createProductionHandler({
+                      ...environment,
+                      WEBHOOK_HYPERDRIVE: {
+                        connectionString:
+                          "postgresql://webhook-runtime@hyperdrive.test/database",
+                      },
+                    } as Env)(request),
+    layerFor: (request, environment) =>
+      makeTestLayer(selectedFailure(request), environment),
+    provisioningLayer: makeTestLayer(undefined),
+    webhookEventLayer: (environment) => makeTestLayer(undefined, environment),
+    webhookRecoveryLayer: (environment) => makeTestLayer(undefined, environment),
+    webhookReplayLayer: (environment) => makeTestLayer(undefined, environment),
+  });
+
+const baseWorker = makeWorker(defaultBrowserOrigin);
+
+const worker: ExportedHandler<Env> = {
+  fetch(request, environment, context) {
+    return makeWorker(request.headers.get("origin") ?? defaultBrowserOrigin).fetch(
+      request,
+      environment,
+      context,
+    );
+  },
+  queue: baseWorker.queue,
+  scheduled: baseWorker.scheduled,
+};
 
 export default worker;
