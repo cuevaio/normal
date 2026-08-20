@@ -22,20 +22,15 @@ export class CloudflareAnalyticsError extends Error {
 const firstPartyQuery = `
   query FirstPartyAvailability(
     $zoneTag: string!
-    $start: Time!
-    $end: Time!
+    $filter: ZoneHttpRequestsAdaptiveGroupsFilter_InputObject!
   ) {
     viewer {
       zones(filter: { zoneTag: $zoneTag }) {
-        httpRequests1hGroups(
-          filter: {
-            datetime_geq: $start
-            datetime_leq: $end
-          }
-          limit: 5000
+        httpRequestsAdaptiveGroups(
+          filter: $filter
+          limit: 1
         ) {
-          dimensions { clientRequestHTTPHost }
-          sum { requests }
+          count
           ratio { status5xx }
         }
       }
@@ -124,48 +119,37 @@ export const queryFirstPartyAvailability = async (
       {
         query: firstPartyQuery,
         variables: {
-          end: input.completedAt,
-          start: input.startedAt,
+          filter: {
+            clientRequestHTTPHost: api.hostname,
+            datetime_geq: input.startedAt,
+            datetime_leq: input.completedAt,
+          },
           zoneTag: required(env.CLOUDFLARE_ZONE_ID, "Cloudflare zone"),
         },
       },
       fetcher,
     ),
   );
-  const groups = result.httpRequests1hGroups;
-  if (!Array.isArray(groups) || groups.length === 0 || groups.length > 5000)
+  const groups = result.httpRequestsAdaptiveGroups;
+  if (!Array.isArray(groups) || groups.length !== 1)
     throw new CloudflareAnalyticsError("response");
-  let total = 0;
-  let failed = 0;
-  for (const group of groups) {
-    if (typeof group !== "object" || group === null || Array.isArray(group))
-      throw new CloudflareAnalyticsError("response");
-    const candidate = group as {
-      readonly dimensions?: { readonly clientRequestHTTPHost?: unknown };
-      readonly ratio?: { readonly status5xx?: unknown };
-      readonly sum?: { readonly requests?: unknown };
-    };
-    const hostname = candidate.dimensions?.clientRequestHTTPHost;
-    const requests = candidate.sum?.requests;
-    const ratio = candidate.ratio?.status5xx;
-    if (
-      typeof hostname !== "string" ||
-      typeof requests !== "number" ||
-      !Number.isFinite(requests) ||
-      requests < 0 ||
-      typeof ratio !== "number" ||
-      !Number.isFinite(ratio) ||
-      ratio < 0 ||
-      ratio > 1
-    )
-      throw new CloudflareAnalyticsError("response");
-    if (hostname !== api.hostname) continue;
-    total += requests;
-    failed += requests * ratio;
-  }
-  if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(failed))
+  const candidate = groups[0] as {
+    readonly count?: unknown;
+    readonly ratio?: { readonly status5xx?: unknown };
+  };
+  const requests = candidate.count;
+  const ratio = candidate.ratio?.status5xx;
+  if (
+    typeof requests !== "number" ||
+    !Number.isFinite(requests) ||
+    requests <= 0 ||
+    typeof ratio !== "number" ||
+    !Number.isFinite(ratio) ||
+    ratio < 0 ||
+    ratio > 1
+  )
     throw new CloudflareAnalyticsError("response");
-  return Math.round((100 - (failed / total) * 100) * 1_000_000) / 1_000_000;
+  return Math.round((100 - ratio * 100) * 1_000_000) / 1_000_000;
 };
 
 export type PagerDelivery = "delivered" | "failed" | "pending";

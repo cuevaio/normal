@@ -41,42 +41,33 @@ const environment = {
 
 describe("production availability authority", () => {
   test("binds live first-party, dependency, and sampled-key evidence to the exact request", async () => {
-    const fetcher = vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.includes("cloudflare.com")) {
-        return Response.json({
-          data: {
-            viewer: {
-              zones: [
-                {
-                  httpRequests1hGroups: [
-                    {
-                      dimensions: { clientRequestHTTPHost: "api.normal.fast" },
-                      sum: { requests: 10_000 },
-                      ratio: { status5xx: 0.001 },
-                    },
-                    {
-                      dimensions: { clientRequestHTTPHost: "api.normal.fast" },
-                      sum: { requests: 10_000 },
-                      ratio: { status5xx: 0.003 },
-                    },
-                    {
-                      dimensions: { clientRequestHTTPHost: "normal.fast" },
-                      sum: { requests: 50_000 },
-                      ratio: { status5xx: 0.5 },
-                    },
-                  ],
-                },
-              ],
+    const fetcher = vi.fn(
+      async (input: string | URL | Request, _init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("cloudflare.com")) {
+          return Response.json({
+            data: {
+              viewer: {
+                zones: [
+                  {
+                    httpRequestsAdaptiveGroups: [
+                      {
+                        count: 20_000,
+                        ratio: { status5xx: 0.002 },
+                      },
+                    ],
+                  },
+                ],
+              },
             },
-          },
-        });
-      }
-      return new Response(
-        `<div data-page="${JSON.stringify(page).replaceAll('"', "&quot;")}"></div>`,
-        { headers: { "content-type": "text/html" } },
-      );
-    });
+          });
+        }
+        return new Response(
+          `<div data-page="${JSON.stringify(page).replaceAll('"', "&quot;")}"></div>`,
+          { headers: { "content-type": "text/html" } },
+        );
+      },
+    );
     const response = await handleAvailability(
       new Request("https://operations.normal.fast/v1/availability", {
         method: "POST",
@@ -99,6 +90,19 @@ describe("production availability authority", () => {
       "https://wasenderapi.com/status",
       expect.objectContaining({ redirect: "manual" }),
     );
+    const analyticsCall = fetcher.mock.calls.find(([input]) =>
+      String(input).includes("cloudflare.com"),
+    );
+    expect(analyticsCall).toBeDefined();
+    expect(JSON.parse(String(analyticsCall?.[1]?.body))).toMatchObject({
+      variables: {
+        filter: {
+          clientRequestHTTPHost: "api.normal.fast",
+          datetime_geq: "2026-07-20T12:00:00.000Z",
+          datetime_leq: asOf,
+        },
+      },
+    });
   });
 
   test("rejects extended requests before external access", async () => {
