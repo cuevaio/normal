@@ -59,6 +59,7 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   let bootstrapMethod: string | undefined;
   let bootstrapRequests = 0;
   const analyticsEvents: Array<Record<string, unknown>> = [];
+  let onboardingProfileClient: string | undefined;
   const setupBodies: Array<{
     readonly idempotency_key: string;
     readonly name: string;
@@ -97,6 +98,14 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   await page.route("https://api.example.test/**", async (route) => {
     const original = route.request();
     const requestPath = new URL(original.url()).pathname;
+    if (
+      requestPath === "/v1/personal-account/onboarding-profile" &&
+      original.method() === "PUT"
+    ) {
+      onboardingProfileClient = (
+        original.postDataJSON() as { readonly intended_mcp_client: string }
+      ).intended_mcp_client;
+    }
     if (requestPath === "/v1/personal-account/bootstrap") {
       bootstrapMethod = original.method();
       bootstrapRequests += 1;
@@ -302,6 +311,7 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   await expect(page.getByTestId("connection-setup-status")).toHaveText(
     "Connection Setup started. Preparing your QR code.",
   );
+  expect(onboardingProfileClient).toBe("chatgpt");
   await page.getByRole("link", { name: "Activity Log" }).click();
   await page.getByRole("link", { name: "WhatsApp Connections" }).click();
   await expect(
@@ -340,7 +350,7 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
           | undefined;
         return (
           capture.event === "feature_used" &&
-          properties?.feature === "onboarding_chatgpt_opened"
+          properties?.feature === "mcp_guide_opened"
         );
       }),
     )
@@ -349,7 +359,7 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
     const properties = capture.properties as
       | Record<string, unknown>
       | undefined;
-    return properties?.feature === "onboarding_chatgpt_opened";
+    return properties?.feature === "mcp_guide_opened";
   });
   expect(
     Object.keys(chatGptCapture?.properties as Record<string, unknown>).sort(),

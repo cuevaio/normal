@@ -122,7 +122,7 @@ describe("product analytics boundary", () => {
     ).not.toThrow();
   });
 
-  test("allowlists the prominent ChatGPT onboarding action without identifying properties", async () => {
+  test("allowlists the MCP guide action without identifying properties", async () => {
     const requests: Array<unknown> = [];
     globalThis.fetch = ((_input, init) => {
       requests.push(JSON.parse(String(init?.body)) as unknown);
@@ -134,7 +134,7 @@ describe("product analytics boundary", () => {
     });
     const action: ProductAnalyticsEvent = {
       event: "feature_used",
-      feature: "onboarding_chatgpt_opened",
+      feature: "mcp_guide_opened",
     };
 
     expect(isAllowlistedProductAnalyticsEvent(action)).toBe(true);
@@ -153,7 +153,7 @@ describe("product analytics boundary", () => {
     expect(requests[0]).toMatchObject({
       event: "feature_used",
       properties: {
-        feature: "onboarding_chatgpt_opened",
+        feature: "mcp_guide_opened",
         $process_person_profile: false,
       },
     });
