@@ -122,8 +122,9 @@ const TEST_LAYER_SENTINEL = "TEST_LAYER_SENTINEL_DO_NOT_INCLUDE_IN_PRODUCTION";
 const TEST_FAULT_INJECTOR_SENTINEL =
   "TEST_FAULT_INJECTOR_DO_NOT_INCLUDE_IN_PRODUCTION";
 
-const browserOrigin = "http://127.0.0.1:3000";
-const personalAccounts = new Map<string, string>();
+const browserOrigin = `http://127.0.0.1:${
+  process.env.PLAYWRIGHT_WEB_PORT ?? "3000"
+}`;
 const onboardingProfiles = new Map<
   string,
   {
@@ -176,6 +177,9 @@ let originatingSendGrantId: string | null = null;
 let originatingSendConnectionId: string | null = null;
 const testAuthorizationId = "mca_123456789012345678901";
 const testPersonalAccountId = "10000000-0000-4000-8000-000000000018";
+const personalAccounts = new Map<string, string>([
+  ["user_second_test_public_boundary", testPersonalAccountId],
+]);
 const apiKeys: Array<{
   clerkUserId: string;
   connectionIds: ReadonlyArray<string>;

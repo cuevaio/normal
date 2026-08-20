@@ -136,7 +136,7 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
       data: original.postDataBuffer(),
       headers: {
         ...original.headers(),
-        origin: "http://127.0.0.1:3000",
+        origin: webOrigin,
       },
       method: original.method(),
     });
@@ -509,7 +509,7 @@ test("resumes first-connection onboarding after a completed profile without repe
       data: original.postDataBuffer(),
       headers: {
         ...original.headers(),
-        origin: "http://127.0.0.1:3000",
+        origin: webOrigin,
       },
       method: original.method(),
     });
@@ -598,7 +598,7 @@ test.describe("Connection Setup loading UI", () => {
         data: original.postDataBuffer(),
         headers: {
           ...original.headers(),
-          origin: "http://127.0.0.1:3000",
+          origin: webOrigin,
         },
         method: original.method(),
       });
@@ -620,7 +620,14 @@ test.describe("Connection Setup loading UI", () => {
       signedIn: true,
       token: "signed-second-test-user",
     });
-    await page.goto("/dashboard/connections");
+    await page.goto("/dashboard");
+    await expect(
+      page.getByRole("heading", { name: "Overview", exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Open dashboard navigation" })
+      .click();
+    await page.getByRole("link", { name: "WhatsApp Connections" }).click();
     await completeFirstConnectionProfile(page);
     const onboarding = page.getByTestId("first-connection-onboarding");
     await onboarding
@@ -723,7 +730,7 @@ test("shows a terminal provisioning failure during Connection Setup", async ({
       data: original.postDataBuffer(),
       headers: {
         ...original.headers(),
-        origin: "http://127.0.0.1:3000",
+        origin: webOrigin,
       },
       method: original.method(),
     });
@@ -798,7 +805,7 @@ test("keeps the Personal Account usable when MCP Authorization listing is unavai
       data: original.postDataBuffer(),
       headers: {
         ...original.headers(),
-        origin: "http://127.0.0.1:3000",
+        origin: webOrigin,
       },
       method: original.method(),
     });
