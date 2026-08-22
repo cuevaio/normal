@@ -374,6 +374,14 @@ export interface ActivityLogReviewCompletedEvent {
   readonly service: "api";
 }
 
+export interface AccountInsightsReviewCompletedEvent {
+  readonly event: "account_insights.review.completed";
+  readonly inboundCount: number;
+  readonly outboundCount: number;
+  readonly service: "api";
+  readonly windowDays: number;
+}
+
 export interface GroupDirectoryReconciliationCompletedEvent {
   readonly appliedCount?: number | undefined;
   readonly event: "group_directory.reconciliation.completed";
@@ -534,6 +542,7 @@ export type SafeTelemetryEvent =
   | RecipientExclusionTransitionCompletedEvent
   | SendDispatchLeaseSweepCompletedEvent
   | StoredMediaContainerEvent
+  | AccountInsightsReviewCompletedEvent
   | ActivityLogReviewCompletedEvent
   | WebhookEventDeadLetterCompletedEvent
   | WebhookEventReplayCompletedEvent

@@ -468,6 +468,31 @@ describe("public-boundary Worker harness", () => {
     });
   });
 
+  test("returns aggregate account insights through the signed-in product boundary", async () => {
+    const response = await exports.default.fetch(
+      new Request("https://api.example.test/v1/personal-account/insights", {
+        headers: {
+          authorization: "Bearer signed-test-user",
+          origin: "http://127.0.0.1:3000",
+        },
+      }),
+    );
+    const body = (await response.json()) as {
+      readonly generated_at?: unknown;
+      readonly series?: ReadonlyArray<unknown>;
+      readonly window_days?: unknown;
+    };
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(body.window_days).toBe(30);
+    expect(body.generated_at).toBe("2026-01-02T03:05:00.000Z");
+    expect(body.series).toHaveLength(30);
+    expect(JSON.stringify(body)).not.toMatch(
+      /phone|credential|token|payload|provider|tenant|ciphertext|content/iu,
+    );
+  });
+
   test("lists safe Activity Logs through the signed-in product boundary", async () => {
     const response = await exports.default.fetch(
       new Request("https://api.example.test/v1/activity-logs", {

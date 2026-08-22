@@ -239,6 +239,11 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
     page.getByRole("navigation", { name: "Dashboard navigation" }),
   ).toBeVisible();
   await expect(page).toHaveURL(/\/dashboard\/authorizations$/u);
+  await expect(
+    page.getByRole("heading", {
+      name: "Connect Normal to Claude or ChatGPT",
+    }),
+  ).toBeVisible();
   const authorizations = page.getByRole("region", {
     name: "MCP Authorizations",
   });
@@ -446,6 +451,22 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   );
   await page.reload();
   await expect(page.getByTestId("first-connection-onboarding")).toHaveCount(0);
+  await page.getByRole("link", { name: "Overview" }).click();
+  const overview = page.getByRole("region", { name: "Account overview" });
+  await expect(overview).toBeVisible();
+  await expect(overview).toContainText(
+    "In the last 30 days, 12 messages arrived and 3 messages went out.",
+  );
+  await expect(overview).toContainText("Messages arrived");
+  await expect(overview).toContainText("Messages sent");
+  await expect(overview.getByText("12", { exact: true }).first()).toBeVisible();
+  await expect(overview.getByText("3", { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Connect Normal to Claude or ChatGPT",
+    }),
+  ).toHaveCount(0);
+  await page.getByRole("link", { name: "WhatsApp Connections" }).click();
   await page.getByRole("button", { name: "Register WhatsApp Number" }).click();
   await expect(page.getByLabel("Name", { exact: true })).toBeEnabled();
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue("");
@@ -934,7 +955,7 @@ test("starts irreversible Connection Deletion and keeps the deleted connection g
       page.getByRole("img", { name: "Scan this WhatsApp QR code" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "WhatsApp Connection active" }),
+      page.getByRole("heading", { name: "Connect your MCP Client" }),
     ).toBeVisible({ timeout: 15_000 });
     await onboarding.getByRole("button", { name: "Go to dashboard" }).click();
     await expect(page).toHaveURL(/\/dashboard$/u);

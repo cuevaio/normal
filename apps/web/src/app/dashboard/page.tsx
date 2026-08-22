@@ -12,7 +12,7 @@ export default async function DashboardPage() {
   await connection();
   return (
     <DashboardRoute
-      description="Connect your MCP Clients and review your Personal Account."
+      description="See how your WhatsApp is being used, without opening a chat."
       title="Overview"
     />
   );

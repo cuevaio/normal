@@ -11,6 +11,7 @@ import {
   makeSendId,
 } from "@whatsapp-mcp/contracts/handles";
 import type { ProviderControlService } from "@whatsapp-mcp/contracts/provider-control";
+import { makePgAccountInsightsRepository } from "@whatsapp-mcp/db/account-insights";
 import { makePgActivityLogRepository } from "@whatsapp-mcp/db/activity-log";
 import { makePgApiKeyRepository } from "@whatsapp-mcp/db/api-key";
 import {
@@ -59,6 +60,13 @@ import {
   type WasenderIdentityProtectionKey,
 } from "@whatsapp-mcp/wasender/session";
 import { Config, ConfigProvider, Data, Effect, Layer, Redacted } from "effect";
+import {
+  AccountInsightsClock,
+  AccountInsightsPersistence,
+  AccountInsightsPersistenceError,
+  createAccountInsightsHandler,
+  isAccountInsightsRequest,
+} from "./account-insights";
 import {
   ActivityLogClock,
   ActivityLogPersistence,
@@ -1914,6 +1922,28 @@ const activityLogLayer = (environment: ApiEnvironment) =>
     }),
   );
 
+const accountInsightsLayer = (environment: ApiEnvironment) =>
+  Layer.mergeAll(
+    Layer.succeed(AccountInsightsClock, {
+      now: Effect.sync(() => new Date()),
+    }),
+    Layer.succeed(AccountInsightsPersistence, {
+      read: (clerkUserId, observedAt) =>
+        Effect.tryPromise({
+          try: () => {
+            const connectionString = environment.HYPERDRIVE?.connectionString;
+            if (typeof connectionString !== "string") {
+              throw new Error("database unavailable");
+            }
+            return makePgAccountInsightsRepository(
+              connectionString,
+            ).readForUser(clerkUserId, observedAt);
+          },
+          catch: () => new AccountInsightsPersistenceError(),
+        }),
+    }),
+  );
+
 const mcpToolRuntimeLayer = (environment: ApiEnvironment) =>
   Layer.mergeAll(
     Layer.succeed(McpToolClock, {
@@ -2517,6 +2547,7 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
     mcpToolPersistenceLayer(environment),
     mcpToolRuntimeLayer(environment),
     activityLogLayer(environment),
+    accountInsightsLayer(environment),
     sendLayer,
     mcpCursorSigningLayer(environment),
   );
@@ -2551,6 +2582,10 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
     environment.CLERK_AUTHORIZED_PARTY ?? "",
   );
   const activityLogHandler = createActivityLogHandler(
+    layer,
+    environment.CLERK_AUTHORIZED_PARTY ?? "",
+  );
+  const accountInsightsHandler = createAccountInsightsHandler(
     layer,
     environment.CLERK_AUTHORIZED_PARTY ?? "",
   );
@@ -2694,6 +2729,9 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
         }
         if (isActivityLogRequest(nextRequest)) {
           return activityLogHandler(nextRequest);
+        }
+        if (isAccountInsightsRequest(nextRequest)) {
+          return accountInsightsHandler(nextRequest);
         }
         if (isWhatsAppConnectionRequest(nextRequest)) {
           return whatsAppConnectionHandler(nextRequest);

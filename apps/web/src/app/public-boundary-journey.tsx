@@ -2,11 +2,12 @@
 
 import { useAuth, useClerk } from "@clerk/nextjs";
 import {
-  ApiKeyId,
-  McpAuthorizationId,
-  makeIdempotencyKey,
-} from "@whatsapp-mcp/contracts/handles";
-import { Schema } from "effect";
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { makeIdempotencyKey } from "@whatsapp-mcp/contracts/handles";
 import {
   ArrowUpDownIcon,
   ChevronLeftIcon,
@@ -62,7 +63,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { queryKeys } from "@/lib/query/keys";
+import {
+  type ActivityLog,
+  applyAuthorizationRevocation,
+  decodeSafeWhatsAppConnection,
+  fetchAccountInsights,
+  fetchActivityLogPage,
+  fetchConnectionsWithPolicies,
+  fetchMcpAuthorizations,
+  flattenActivityLogs,
+  type McpAuthorization,
+  removeConnection,
+  replaceConnection,
+  revokeMcpAuthorization,
+  type SafeWhatsAppConnection,
+} from "@/lib/query/resources";
 import { captureProductAnalyticsEvent } from "../effect/product-analytics";
+import { AccountOverview } from "./account-overview";
 import {
   nextConnectionSetupPollDelayMs,
   observationMetricDurationMs,
@@ -89,6 +107,7 @@ interface PublicBoundaryJourneyProps {
   readonly personalAccountEndpoint: string;
   readonly personalAccountDeletionEndpoint: string;
   readonly activityLogsEndpoint: string;
+  readonly accountInsightsEndpoint: string;
   readonly onFirstConnectionOnboardingChange?: (required: boolean) => void;
   readonly view?: PersonalAccountView;
 }
@@ -105,51 +124,7 @@ type JourneyState = "idle" | "loading" | "signed_out" | "unavailable" | "ok";
 
 type SetupState = ConnectionSetupState;
 
-interface McpAuthorization {
-  readonly client: {
-    readonly id: string;
-    readonly name: string;
-  };
-  readonly connectionIds: ReadonlyArray<string>;
-  readonly createdAt: string;
-  readonly expiresAt: string;
-  readonly expiryState: "active" | "expired";
-  readonly id: string;
-  readonly revocationState: "active" | "revoked";
-  readonly revokedAt: string | null;
-  readonly scopes: ReadonlyArray<
-    "connections:read" | "directory:read" | "messages:read" | "messages:send"
-  >;
-}
-
 type AuthorizationState = "idle" | "loading" | "ok" | "unavailable";
-
-interface ActivityLog {
-  readonly capability: string;
-  readonly channel: "api" | "mcp";
-  readonly client: { readonly id: string; readonly name: string };
-  readonly completedAt: string | null;
-  readonly counts: {
-    readonly mediaBytes: number;
-    readonly results: number | null;
-  };
-  readonly errorCode: string | null;
-  readonly latencyMs: number | null;
-  readonly outcome:
-    | "started"
-    | "success"
-    | "execution_error"
-    | "rate_limited"
-    | "authorization_denied";
-  readonly principal: "api_key" | "mcp_authorization";
-  readonly references: ReadonlyArray<string>;
-  readonly startedAt: string;
-}
-
-interface ActivityLogPage {
-  readonly logs: ReadonlyArray<ActivityLog>;
-  readonly nextCursor: string | null;
-}
 
 type ActivityLogSort =
   | "capability"
@@ -177,187 +152,11 @@ const compareOptionalNumbers = (
   return left - right;
 };
 
-const decodeActivityLogs = (value: unknown): ActivityLogPage | null => {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !Array.isArray((value as { activity_logs?: unknown }).activity_logs)
-  ) {
-    return null;
-  }
-  const nextCursor = (value as { next_cursor?: unknown }).next_cursor;
-  if (
-    nextCursor !== null &&
-    (typeof nextCursor !== "string" ||
-      !/^tcl_[A-Za-z0-9_-]{21}$/u.test(nextCursor))
-  ) {
-    return null;
-  }
-  const decoded: ActivityLog[] = [];
-  for (const candidate of (value as { activity_logs: unknown[] })
-    .activity_logs) {
-    if (typeof candidate !== "object" || candidate === null) return null;
-    const log = candidate as Record<string, unknown>;
-    const client = log.client as Record<string, unknown> | undefined;
-    const counts = log.counts as Record<string, unknown> | undefined;
-    const references = log.references as Record<string, unknown> | undefined;
-    if (
-      typeof log.capability !== "string" ||
-      !/^[a-z][a-z0-9_]{0,63}$/u.test(log.capability) ||
-      typeof client?.id !== "string" ||
-      typeof client.name !== "string" ||
-      (log.completed_at !== null && !isIsoDate(log.completed_at)) ||
-      typeof counts?.media_bytes !== "number" ||
-      (counts.results !== null && typeof counts.results !== "number") ||
-      (log.error_code !== null && typeof log.error_code !== "string") ||
-      (log.latency_ms !== null && typeof log.latency_ms !== "number") ||
-      (log.outcome !== "started" &&
-        log.outcome !== "success" &&
-        log.outcome !== "execution_error" &&
-        log.outcome !== "rate_limited" &&
-        log.outcome !== "authorization_denied") ||
-      typeof references !== "object" ||
-      references === null ||
-      (log.channel !== undefined &&
-        log.channel !== "mcp" &&
-        log.channel !== "api") ||
-      (references.mcp_authorization_id !== null &&
-        references.mcp_authorization_id !== undefined &&
-        !Schema.is(McpAuthorizationId)(references.mcp_authorization_id)) ||
-      (references.api_key_id !== null &&
-        references.api_key_id !== undefined &&
-        !Schema.is(ApiKeyId)(references.api_key_id)) ||
-      (typeof references.api_key_id === "string") ===
-        (typeof references.mcp_authorization_id === "string") ||
-      (references.whatsapp_connection_id !== null &&
-        (typeof references.whatsapp_connection_id !== "string" ||
-          !/^con_[A-Za-z0-9_-]{21}$/u.test(
-            references.whatsapp_connection_id,
-          ))) ||
-      (references.send_id !== null &&
-        (typeof references.send_id !== "string" ||
-          !/^snd_[A-Za-z0-9_-]{21}$/u.test(references.send_id))) ||
-      !isIsoDate(log.started_at)
-    ) {
-      return null;
-    }
-    decoded.push({
-      capability: log.capability,
-      channel: log.channel === "api" ? "api" : "mcp",
-      client: { id: client.id, name: client.name },
-      completedAt: log.completed_at,
-      counts: { mediaBytes: counts.media_bytes, results: counts.results },
-      errorCode: log.error_code,
-      latencyMs: log.latency_ms,
-      outcome: log.outcome,
-      principal:
-        typeof references.api_key_id === "string"
-          ? "api_key"
-          : "mcp_authorization",
-      references: [
-        ...(typeof references.mcp_authorization_id === "string"
-          ? [references.mcp_authorization_id]
-          : []),
-        ...(typeof references.api_key_id === "string"
-          ? [references.api_key_id]
-          : []),
-        ...(typeof references.whatsapp_connection_id === "string"
-          ? [references.whatsapp_connection_id]
-          : []),
-        ...(typeof references.send_id === "string" ? [references.send_id] : []),
-      ],
-      startedAt: log.started_at,
-    });
-  }
-  return { logs: decoded, nextCursor };
-};
-
 const scopeLabels: Record<McpAuthorization["scopes"][number], string> = {
   "connections:read": "Connection metadata",
   "directory:read": "WhatsApp Directory",
   "messages:read": "Stored Messages",
   "messages:send": "Send messages",
-};
-
-const isIsoDate = (value: unknown): value is string =>
-  typeof value === "string" &&
-  !Number.isNaN(Date.parse(value)) &&
-  new Date(value).toISOString() === value;
-
-const decodeMcpAuthorizations = (
-  value: unknown,
-): ReadonlyArray<McpAuthorization> | null => {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    Array.isArray(value) ||
-    !Array.isArray(
-      (value as { readonly mcp_authorizations?: unknown }).mcp_authorizations,
-    )
-  ) {
-    return null;
-  }
-  const decoded: Array<McpAuthorization> = [];
-  for (const candidate of (
-    value as { readonly mcp_authorizations: ReadonlyArray<unknown> }
-  ).mcp_authorizations) {
-    if (
-      typeof candidate !== "object" ||
-      candidate === null ||
-      Array.isArray(candidate)
-    ) {
-      return null;
-    }
-    const authorization = candidate as Record<string, unknown>;
-    const client = authorization.client;
-    const scopes = authorization.scopes;
-    const connectionIds = authorization.connection_ids;
-    if (
-      typeof client !== "object" ||
-      client === null ||
-      Array.isArray(client) ||
-      typeof (client as Record<string, unknown>).id !== "string" ||
-      typeof (client as Record<string, unknown>).name !== "string" ||
-      !Array.isArray(connectionIds) ||
-      connectionIds.some(
-        (connectionId) =>
-          typeof connectionId !== "string" ||
-          !/^con_[A-Za-z0-9_-]{21}$/u.test(connectionId),
-      ) ||
-      !Array.isArray(scopes) ||
-      scopes.some(
-        (scope) =>
-          typeof scope !== "string" || !Object.hasOwn(scopeLabels, scope),
-      ) ||
-      typeof authorization.id !== "string" ||
-      !/^mca_[A-Za-z0-9_-]{21}$/u.test(authorization.id) ||
-      !isIsoDate(authorization.created_at) ||
-      !isIsoDate(authorization.expires_at) ||
-      (authorization.expiry_state !== "active" &&
-        authorization.expiry_state !== "expired") ||
-      (authorization.revocation_state !== "active" &&
-        authorization.revocation_state !== "revoked") ||
-      (authorization.revoked_at !== null &&
-        !isIsoDate(authorization.revoked_at))
-    ) {
-      return null;
-    }
-    decoded.push({
-      client: {
-        id: (client as { readonly id: string }).id,
-        name: (client as { readonly name: string }).name,
-      },
-      connectionIds: connectionIds as ReadonlyArray<string>,
-      createdAt: authorization.created_at,
-      expiresAt: authorization.expires_at,
-      expiryState: authorization.expiry_state,
-      id: authorization.id,
-      revocationState: authorization.revocation_state,
-      revokedAt: authorization.revoked_at,
-      scopes: scopes as McpAuthorization["scopes"],
-    });
-  }
-  return decoded;
 };
 
 const displayTime = (value: string): string =>
@@ -368,53 +167,6 @@ const displayTime = (value: string): string =>
   }).format(new Date(value));
 
 type SetupCleanupState = ConnectionSetupCleanupState;
-
-interface SafeWhatsAppConnection {
-  readonly displayName: string;
-  readonly id: string;
-  readonly numberSuffix: string;
-  readonly state:
-    | "connected"
-    | "connecting"
-    | "degraded"
-    | "deleting"
-    | "disconnected"
-    | "reconnect_required";
-  readonly stateChangedAt: string;
-  readonly retentionDays: number | null;
-  readonly retentionOptions: ReadonlyArray<number>;
-}
-
-const decodeSafeWhatsAppConnection = (
-  connection: Record<string, unknown>,
-): SafeWhatsAppConnection | null => {
-  if (
-    typeof connection.display_name !== "string" ||
-    connection.display_name.length === 0 ||
-    typeof connection.id !== "string" ||
-    !/^con_[A-Za-z0-9_-]{21}$/u.test(connection.id) ||
-    typeof connection.number_suffix !== "string" ||
-    !/^[0-9]{4}$/u.test(connection.number_suffix) ||
-    (connection.state !== "connected" &&
-      connection.state !== "connecting" &&
-      connection.state !== "degraded" &&
-      connection.state !== "deleting" &&
-      connection.state !== "disconnected" &&
-      connection.state !== "reconnect_required") ||
-    typeof connection.state_changed_at !== "string"
-  ) {
-    return null;
-  }
-  return {
-    displayName: connection.display_name,
-    id: connection.id,
-    numberSuffix: connection.number_suffix,
-    state: connection.state,
-    stateChangedAt: connection.state_changed_at,
-    retentionDays: 30,
-    retentionOptions: [],
-  };
-};
 
 export function PublicBoundaryJourney({
   autoInitialize = false,
@@ -427,11 +179,14 @@ export function PublicBoundaryJourney({
   personalAccountEndpoint,
   personalAccountDeletionEndpoint,
   activityLogsEndpoint,
+  accountInsightsEndpoint,
   onFirstConnectionOnboardingChange,
   view = "overview",
 }: PublicBoundaryJourneyProps) {
   const { getToken: getClerkToken, isLoaded, isSignedIn } = useAuth();
   const clerk = useClerk();
+  const queryClient = useQueryClient();
+  const getToken = () => getClerkToken({ template: clerkJwtTemplate });
   const [identityUnavailable, setIdentityUnavailable] = useState(false);
   const identityState = identityUnavailable
     ? "unavailable"
@@ -442,22 +197,6 @@ export function PublicBoundaryJourney({
         : "signed_out";
   const [state, setState] = useState<JourneyState>("idle");
   const [setupState, setSetupState] = useState<SetupState>("idle");
-  const [authorizationState, setAuthorizationState] =
-    useState<AuthorizationState>("idle");
-  const [authorizations, setAuthorizations] = useState<
-    ReadonlyArray<McpAuthorization>
-  >([]);
-  const [activityLogState, setActivityLogState] =
-    useState<AuthorizationState>("idle");
-  const [activityLogs, setActivityLogs] = useState<ReadonlyArray<ActivityLog>>(
-    [],
-  );
-  const [activityLogCursor, setActivityLogCursor] = useState<string | null>(
-    null,
-  );
-  const [activityLogPageState, setActivityLogPageState] = useState<
-    "idle" | "loading" | "unavailable"
-  >("idle");
   const [activityLogSearch, setActivityLogSearch] = useState("");
   const [activityLogOutcome, setActivityLogOutcome] = useState<
     "all" | ActivityLog["outcome"]
@@ -474,9 +213,6 @@ export function PublicBoundaryJourney({
   const [setupCleanupState, setSetupCleanupState] =
     useState<SetupCleanupState | null>(null);
   const [setupId, setSetupId] = useState<string | null>(null);
-  const [connections, setConnections] = useState<
-    ReadonlyArray<SafeWhatsAppConnection>
-  >([]);
   const [configurationConnectionId, setConfigurationConnectionId] = useState<
     string | null
   >(null);
@@ -551,6 +287,185 @@ export function PublicBoundaryJourney({
   });
   const observationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const automaticallyInitialized = useRef(false);
+  const sawInitialConnections = useRef(false);
+
+  const connectionsQuery = useQuery({
+    enabled: state === "ok" && isLoaded && isSignedIn === true,
+    queryFn: async () => {
+      const token = await getToken();
+      if (token === null) throw new Error("signed out");
+      return fetchConnectionsWithPolicies(connectionsEndpoint, token);
+    },
+    queryKey: queryKeys.connectionWorkspace(),
+  });
+  const authorizationsQuery = useQuery({
+    enabled: state === "ok" && isLoaded && isSignedIn === true,
+    queryFn: async () => {
+      const token = await getToken();
+      if (token === null) throw new Error("signed out");
+      return fetchMcpAuthorizations(mcpAuthorizationsEndpoint, token);
+    },
+    queryKey: queryKeys.authorizations(),
+  });
+  const insightsQuery = useQuery({
+    enabled: state === "ok" && isLoaded && isSignedIn === true,
+    queryFn: async () => {
+      const token = await getToken();
+      if (token === null) throw new Error("signed out");
+      return fetchAccountInsights(accountInsightsEndpoint, token);
+    },
+    queryKey: queryKeys.accountInsights(),
+  });
+  const activityLogsQuery = useInfiniteQuery({
+    enabled: state === "ok" && isLoaded && isSignedIn === true,
+    getNextPageParam: (page: { readonly nextCursor: string | null }) =>
+      page.nextCursor,
+    initialPageParam: null as string | null,
+    queryFn: async ({ pageParam }) => {
+      const token = await getToken();
+      if (token === null) throw new Error("signed out");
+      return fetchActivityLogPage({
+        cursor: pageParam,
+        endpoint: activityLogsEndpoint,
+        token,
+      });
+    },
+    queryKey: queryKeys.activityLogs(),
+  });
+  const onboardingQuery = useQuery({
+    enabled:
+      state === "ok" &&
+      connectionsQuery.isSuccess &&
+      connectionsQuery.data.length === 0,
+    queryFn: async () => {
+      const token = await getToken();
+      if (token === null) throw new Error("signed out");
+      const response = await fetch(onboardingProfileEndpoint, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error("onboarding unavailable");
+      const profile = decodeOnboardingProfileResponse(await response.json());
+      if (profile === undefined) throw new Error("onboarding unavailable");
+      return profile;
+    },
+    queryKey: queryKeys.onboardingProfile(),
+  });
+  const revokeAuthorizationMutation = useMutation({
+    mutationFn: async (authorization: McpAuthorization) => {
+      const token = await getToken();
+      if (token === null) throw new Error("signed out");
+      return revokeMcpAuthorization({
+        authorization,
+        endpoint: mcpAuthorizationsEndpoint,
+        token,
+      });
+    },
+    onSuccess: (revoked) => {
+      queryClient.setQueryData(
+        queryKeys.authorizations(),
+        (current: ReadonlyArray<McpAuthorization> | undefined) =>
+          applyAuthorizationRevocation(current, revoked),
+      );
+    },
+  });
+
+  const connections = connectionsQuery.data ?? [];
+  const authorizations = authorizationsQuery.data ?? [];
+  const insights = insightsQuery.data ?? null;
+  const activityLogs = flattenActivityLogs(activityLogsQuery.data?.pages);
+  const activityLogCursor =
+    activityLogsQuery.data?.pages.at(-1)?.nextCursor ?? null;
+  const authorizationState: AuthorizationState = authorizationsQuery.isPending
+    ? "loading"
+    : authorizationsQuery.isError && authorizationsQuery.data === undefined
+      ? "unavailable"
+      : "ok";
+  const activityLogState: AuthorizationState = activityLogsQuery.isPending
+    ? "loading"
+    : activityLogsQuery.isError && activityLogsQuery.data === undefined
+      ? "unavailable"
+      : "ok";
+  const insightsState: AuthorizationState = insightsQuery.isPending
+    ? "loading"
+    : insightsQuery.isError && insightsQuery.data === undefined
+      ? "unavailable"
+      : "ok";
+  const activityLogPageState = activityLogsQuery.isFetchingNextPage
+    ? "loading"
+    : activityLogsQuery.isFetchNextPageError
+      ? "unavailable"
+      : "idle";
+  const dashboardUnavailable =
+    state === "unavailable" ||
+    (state === "ok" &&
+      connectionsQuery.isError &&
+      connectionsQuery.data === undefined) ||
+    (state === "ok" &&
+      connectionsQuery.isSuccess &&
+      connectionsQuery.data.length === 0 &&
+      onboardingQuery.isError &&
+      onboardingQuery.data === undefined);
+  const dashboardLoading =
+    state === "idle" ||
+    state === "loading" ||
+    (state === "ok" &&
+      connectionsQuery.data === undefined &&
+      !connectionsQuery.isError) ||
+    (state === "ok" &&
+      connectionsQuery.isSuccess &&
+      connectionsQuery.data.length === 0 &&
+      !sawInitialConnections.current &&
+      !showFirstConnectionOnboarding &&
+      !onboardingQuery.isError);
+  const dashboardReady =
+    state === "ok" && !dashboardLoading && !dashboardUnavailable;
+
+  useEffect(() => {
+    if (!connectionsQuery.isSuccess) return;
+    setRetentionDrafts((current) => {
+      const next = { ...current };
+      for (const connection of connectionsQuery.data) {
+        if (next[connection.id] === undefined) {
+          next[connection.id] =
+            connection.retentionDays === null
+              ? "until-deletion"
+              : String(connection.retentionDays);
+        }
+      }
+      return next;
+    });
+    setNameDrafts((current) => {
+      const next = { ...current };
+      for (const connection of connectionsQuery.data) {
+        if (next[connection.id] === undefined) {
+          next[connection.id] = connection.displayName;
+        }
+      }
+      return next;
+    });
+  }, [connectionsQuery.data, connectionsQuery.isSuccess]);
+
+  useEffect(() => {
+    if (state !== "ok" || !connectionsQuery.isSuccess) return;
+    if (connectionsQuery.data.length > 0) {
+      if (!sawInitialConnections.current) {
+        sawInitialConnections.current = true;
+        setOnboardingProfile(null);
+        setShowFirstConnectionOnboarding(false);
+      }
+      return;
+    }
+    if (!onboardingQuery.isSuccess || sawInitialConnections.current) return;
+    sawInitialConnections.current = true;
+    setOnboardingProfile(onboardingQuery.data);
+    setShowFirstConnectionOnboarding(true);
+  }, [
+    connectionsQuery.data,
+    connectionsQuery.isSuccess,
+    onboardingQuery.data,
+    onboardingQuery.isSuccess,
+    state,
+  ]);
 
   const normalizedActivityLogSearch = activityLogSearch.trim().toLowerCase();
   const filteredActivityLogs = activityLogs.filter((log) => {
@@ -638,8 +553,6 @@ export function PublicBoundaryJourney({
     [],
   );
 
-  const getToken = () => getClerkToken({ template: clerkJwtTemplate });
-
   const openSignIn = async () => {
     try {
       await clerk.openSignIn();
@@ -657,27 +570,11 @@ export function PublicBoundaryJourney({
   };
 
   const loadMoreActivityLogs = async (): Promise<boolean> => {
-    if (activityLogCursor === null || activityLogPageState === "loading")
-      return false;
-    setActivityLogPageState("loading");
-    try {
-      const token = await getToken();
-      if (token === null) throw new Error("signed out");
-      const nextPageUrl = new URL(activityLogsEndpoint);
-      nextPageUrl.searchParams.set("cursor", activityLogCursor);
-      const response = await fetch(nextPageUrl, {
-        headers: { authorization: `Bearer ${token}` },
-      });
-      const page = decodeActivityLogs(await response.json());
-      if (!response.ok || page === null) throw new Error("logs unavailable");
-      setActivityLogs((current) => [...current, ...page.logs]);
-      setActivityLogCursor(page.nextCursor);
-      setActivityLogPageState("idle");
-      return page.logs.length > 0;
-    } catch {
-      setActivityLogPageState("unavailable");
+    if (activityLogCursor === null || activityLogsQuery.isFetchingNextPage) {
       return false;
     }
+    const result = await activityLogsQuery.fetchNextPage();
+    return (result.data?.pages.at(-1)?.logs.length ?? 0) > 0;
   };
 
   const goToNextActivityLogPage = async () => {
@@ -715,6 +612,7 @@ export function PublicBoundaryJourney({
         throw new Error("deletion unavailable");
       }
       setState("signed_out");
+      queryClient.clear();
     } catch {
       setDeletionState("unavailable");
     }
@@ -754,8 +652,10 @@ export function PublicBoundaryJourney({
         throw new Error("invalid deletion response");
       }
 
-      setConnections((current) =>
-        current.filter((candidate) => candidate.id !== connection.id),
+      queryClient.setQueryData(
+        queryKeys.connectionWorkspace(),
+        (current: ReadonlyArray<SafeWhatsAppConnection> | undefined) =>
+          removeConnection(current, connection.id),
       );
       setConfigurationConnectionId((current) =>
         current === connection.id ? null : current,
@@ -882,83 +782,20 @@ export function PublicBoundaryJourney({
   };
 
   const loadConnections = async (token: string) => {
-    const response = await fetch(connectionsEndpoint, {
-      headers: { authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) return null;
-    const body = (await response.json()) as {
-      readonly whatsapp_connections?: ReadonlyArray<{
-        readonly display_name?: unknown;
-        readonly id?: unknown;
-        readonly number_suffix?: unknown;
-        readonly state?: unknown;
-        readonly state_changed_at?: unknown;
-      }>;
-    };
-    if (!Array.isArray(body.whatsapp_connections)) return null;
-    const parsed: SafeWhatsAppConnection[] = [];
-    for (const connection of body.whatsapp_connections) {
-      const decoded = decodeSafeWhatsAppConnection(connection);
-      if (decoded === null) return null;
-      parsed.push(decoded);
+    try {
+      const withPolicies = await fetchConnectionsWithPolicies(
+        connectionsEndpoint,
+        token,
+      );
+      queryClient.setQueryData(queryKeys.connectionWorkspace(), withPolicies);
+      queryClient.setQueryData(queryKeys.connections(), withPolicies);
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.accountInsights(),
+      });
+      return withPolicies;
+    } catch {
+      return null;
     }
-    const withPolicies = await Promise.all(
-      parsed.map(async (connection) => {
-        const response = await fetch(
-          `${connectionsEndpoint}/${encodeURIComponent(connection.id)}/retention-policy`,
-          {
-            headers: { authorization: `Bearer ${token}` },
-          },
-        );
-        if (!response.ok) throw new Error("retention unavailable");
-        const body = (await response.json()) as {
-          readonly allowed_days?: unknown;
-          readonly policy?: { readonly days?: unknown };
-        };
-        if (
-          !Array.isArray(body.allowed_days) ||
-          body.allowed_days.some((day) => typeof day !== "number") ||
-          (body.policy?.days !== null && typeof body.policy?.days !== "number")
-        )
-          throw new Error("invalid retention policy");
-        return {
-          ...connection,
-          retentionDays: body.policy.days as number | null,
-          retentionOptions: body.allowed_days as number[],
-        };
-      }),
-    );
-    setConnections(withPolicies);
-    setRetentionDrafts(
-      Object.fromEntries(
-        withPolicies.map((connection) => [
-          connection.id,
-          connection.retentionDays === null
-            ? "until-deletion"
-            : String(connection.retentionDays),
-        ]),
-      ),
-    );
-    setNameDrafts(
-      Object.fromEntries(
-        withPolicies.map((connection) => [
-          connection.id,
-          connection.displayName,
-        ]),
-      ),
-    );
-    return withPolicies;
-  };
-
-  const loadOnboardingProfile = async (token: string) => {
-    const response = await fetch(onboardingProfileEndpoint, {
-      headers: { authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) return false;
-    const profile = decodeOnboardingProfileResponse(await response.json());
-    if (profile === undefined) return false;
-    setOnboardingProfile(profile);
-    return true;
   };
 
   const renameConnection = async (connection: SafeWhatsAppConnection) => {
@@ -989,12 +826,13 @@ export function PublicBoundaryJourney({
           ? null
           : decodeSafeWhatsAppConnection(body.whatsapp_connection);
       if (!response.ok || renamed === null) throw new Error("rename failed");
-      setConnections((current) =>
-        current.map((candidate) =>
-          candidate.id === connection.id
-            ? { ...candidate, displayName: renamed.displayName }
-            : candidate,
-        ),
+      queryClient.setQueryData(
+        queryKeys.connectionWorkspace(),
+        (current: ReadonlyArray<SafeWhatsAppConnection> | undefined) =>
+          replaceConnection(current, {
+            ...connection,
+            displayName: renamed.displayName,
+          }),
       );
       setNameDrafts((current) => ({
         ...current,
@@ -1048,12 +886,13 @@ export function PublicBoundaryJourney({
       };
       if (body.policy?.days !== null && typeof body.policy?.days !== "number")
         throw new Error("invalid policy");
-      setConnections((current) =>
-        current.map((candidate) =>
-          candidate.id === connection.id
-            ? { ...candidate, retentionDays: body.policy?.days ?? null }
-            : candidate,
-        ),
+      queryClient.setQueryData(
+        queryKeys.connectionWorkspace(),
+        (current: ReadonlyArray<SafeWhatsAppConnection> | undefined) =>
+          replaceConnection(current, {
+            ...connection,
+            retentionDays: body.policy?.days ?? null,
+          }),
       );
       setRetentionAcknowledgements((current) => ({
         ...current,
@@ -1180,16 +1019,18 @@ export function PublicBoundaryJourney({
       ) {
         throw new Error("invalid lifecycle response");
       }
-      setConnections((current) =>
-        current.map((candidate) =>
-          candidate.id === connectionId
-            ? {
-                ...connection,
-                retentionDays: candidate.retentionDays,
-                retentionOptions: candidate.retentionOptions,
-              }
-            : candidate,
-        ),
+      queryClient.setQueryData(
+        queryKeys.connectionWorkspace(),
+        (current: ReadonlyArray<SafeWhatsAppConnection> | undefined) =>
+          replaceConnection(current, {
+            ...connection,
+            retentionDays:
+              current?.find((candidate) => candidate.id === connectionId)
+                ?.retentionDays ?? connection.retentionDays,
+            retentionOptions:
+              current?.find((candidate) => candidate.id === connectionId)
+                ?.retentionOptions ?? connection.retentionOptions,
+          }),
       );
       if (body.lifecycle.outcome === "in_progress") {
         setConnectionLifecycleStatus((current) => ({
@@ -1417,61 +1258,21 @@ export function PublicBoundaryJourney({
         setState("unavailable");
         return;
       }
-      const loadedConnections = await loadConnections(token);
-      if (loadedConnections === null) {
-        setState("unavailable");
-        return;
-      }
-      if (loadedConnections.length === 0) {
-        if (!(await loadOnboardingProfile(token))) {
-          setState("unavailable");
-          return;
-        }
-        setShowFirstConnectionOnboarding(true);
-      } else {
-        setOnboardingProfile(null);
-        setShowFirstConnectionOnboarding(false);
-      }
+      sawInitialConnections.current = false;
       setState("ok");
-      setAuthorizationState("loading");
-      setActivityLogState("loading");
-      try {
-        const [authorizationsResponse, logsResponse] = await Promise.all([
-          fetch(mcpAuthorizationsEndpoint, {
-            headers: { authorization: `Bearer ${token}` },
-          }),
-          fetch(activityLogsEndpoint, {
-            headers: { authorization: `Bearer ${token}` },
-          }),
-        ]);
-        const [authorizationsBody, logsBody] = await Promise.all([
-          authorizationsResponse.json(),
-          logsResponse.json(),
-        ]);
-        const decodedAuthorizations =
-          decodeMcpAuthorizations(authorizationsBody);
-        const decodedLogs = decodeActivityLogs(logsBody);
-        if (!authorizationsResponse.ok || decodedAuthorizations === null) {
-          setAuthorizationState("unavailable");
-        } else {
-          setAuthorizations(decodedAuthorizations);
-          setAuthorizationState("ok");
-        }
-        if (!logsResponse.ok || decodedLogs === null) {
-          setActivityLogState("unavailable");
-        } else {
-          setActivityLogs(decodedLogs.logs);
-          setActivityLogCursor(decodedLogs.nextCursor);
-          setActivityLogPageState("idle");
-          setActivityLogState("ok");
-        }
-      } catch {
-        setAuthorizationState("unavailable");
-        setActivityLogState("unavailable");
-      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.connections() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.authorizations() }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.accountInsights(),
+        }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs() }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.onboardingProfile(),
+        }),
+      ]);
     } catch {
       setState("unavailable");
-      setAuthorizationState("unavailable");
     }
   };
 
@@ -1505,53 +1306,18 @@ export function PublicBoundaryJourney({
     onFirstConnectionOnboardingChange?.(showFirstConnectionOnboarding);
   }, [onFirstConnectionOnboardingChange, showFirstConnectionOnboarding, state]);
 
+  useEffect(() => {
+    if (view !== "overview") return;
+    captureProductAnalyticsEvent({
+      event: "feature_used",
+      feature: "account_insights_viewed",
+    });
+  }, [view]);
+
   const revokeAuthorization = async (authorization: McpAuthorization) => {
     setRevokingAuthorization(authorization.id);
     try {
-      const token = await getToken();
-      if (token === null) {
-        setAuthorizationState("unavailable");
-        return;
-      }
-      const response = await fetch(
-        `${mcpAuthorizationsEndpoint}/${encodeURIComponent(authorization.id)}`,
-        {
-          headers: {
-            authorization: `Bearer ${token}`,
-          },
-          method: "DELETE",
-        },
-      );
-      const body = (await response.json()) as {
-        readonly mcp_authorization?: {
-          readonly id?: unknown;
-          readonly revocation_state?: unknown;
-          readonly revoked_at?: unknown;
-        };
-      };
-      const revoked = body.mcp_authorization;
-      if (
-        !response.ok ||
-        revoked?.id !== authorization.id ||
-        revoked.revocation_state !== "revoked" ||
-        !isIsoDate(revoked.revoked_at)
-      ) {
-        setAuthorizationState("unavailable");
-        return;
-      }
-      setAuthorizations((current) =>
-        current.map((item) =>
-          item.id === authorization.id
-            ? {
-                ...item,
-                revocationState: "revoked",
-                revokedAt: revoked.revoked_at as string,
-              }
-            : item,
-        ),
-      );
-    } catch {
-      setAuthorizationState("unavailable");
+      await revokeAuthorizationMutation.mutateAsync(authorization);
     } finally {
       setRevokingAuthorization(null);
     }
@@ -1786,18 +1552,18 @@ export function PublicBoundaryJourney({
                       ? "Your Personal Account is temporarily unavailable. Please try again."
                       : "Signed in. Continue to create or open your Personal Account."}
         </p>
-      ) : state === "idle" || state === "loading" ? (
+      ) : dashboardLoading ? (
         <div className="flex flex-col gap-3">
           <span className="sr-only">Loading Personal Account</span>
           <Skeleton className="h-5 w-40" />
           <Skeleton className="h-24 w-full" />
         </div>
-      ) : state === "unavailable" ? (
+      ) : dashboardUnavailable ? (
         <p aria-live="polite" className="text-sm text-muted-foreground">
           Your Personal Account is temporarily unavailable. Please try again.
         </p>
       ) : null}
-      {state === "ok" &&
+      {dashboardReady &&
       showFirstConnectionOnboarding &&
       (view === "onboarding" ||
         view === "overview" ||
@@ -1812,7 +1578,10 @@ export function PublicBoundaryJourney({
             clearSetupDraft();
             setShowFirstConnectionOnboarding(false);
           }}
-          onProfileSaved={setOnboardingProfile}
+          onProfileSaved={(profile) => {
+            setOnboardingProfile(profile);
+            queryClient.setQueryData(queryKeys.onboardingProfile(), profile);
+          }}
           setupForm={{
             connectionName,
             onCancelSetup: cancelSetup,
@@ -1828,13 +1597,21 @@ export function PublicBoundaryJourney({
           }}
         />
       ) : null}
-      {state === "ok" &&
+      {dashboardReady &&
       !(
         showFirstConnectionOnboarding &&
         (view === "onboarding" || view === "overview" || view === "connections")
       ) ? (
         <>
           {view === "overview" ? (
+            <AccountOverview
+              authorizations={authorizations}
+              connections={connections}
+              insights={insights}
+              insightsState={insightsState}
+            />
+          ) : null}
+          {view === "authorizations" ? (
             <McpConnectionGuides serverUrl={mcpServerUrl} />
           ) : null}
           {view === "authorizations" ? (
@@ -2292,7 +2069,7 @@ export function PublicBoundaryJourney({
           ) : null}
         </>
       ) : null}
-      {state === "ok" &&
+      {dashboardReady &&
       !showFirstConnectionOnboarding &&
       view === "connections" ? (
         <section
@@ -2744,7 +2521,7 @@ export function PublicBoundaryJourney({
           )}
         </section>
       ) : null}
-      {state === "ok" &&
+      {dashboardReady &&
       !showFirstConnectionOnboarding &&
       view === "settings" ? (
         <section
@@ -2765,7 +2542,7 @@ export function PublicBoundaryJourney({
           />
         </section>
       ) : null}
-      {state === "ok" && view === "settings" ? (
+      {dashboardReady && view === "settings" ? (
         <section
           aria-label="Personal Account Deletion"
           className="flex flex-col items-start gap-3"

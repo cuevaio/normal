@@ -29,6 +29,7 @@ export function ConfiguredPersonalAccountJourney({
 
   return (
     <PublicBoundaryJourney
+      accountInsightsEndpoint={configuration.accountInsightsEndpoint}
       activityLogsEndpoint={configuration.activityLogsEndpoint}
       autoInitialize
       clerkJwtTemplate={configuration.clerkJwtTemplate}
