@@ -10,6 +10,10 @@ const choose = async (page: Page, label: string, option: string) => {
 const reachActiveConnection = async (page: Page, client: string) => {
   const onboarding = page.getByTestId("first-connection-onboarding");
   await expect(onboarding).toBeVisible();
+  await expect(page).toHaveURL(/\/onboarding$/u);
+  await expect(
+    page.getByRole("navigation", { name: "Dashboard navigation" }),
+  ).toHaveCount(0);
   await onboarding.getByRole("button", { name: "Start onboarding" }).click();
   await choose(page, "Primary use case", "Search WhatsApp Conversations");
   await choose(page, "WhatsApp usage context", "Personal");
@@ -146,7 +150,7 @@ for (const { client, clientName, href } of clientCases) {
   test(`shows the active identity and correct ${client} next action`, async ({
     page,
   }) => {
-    await page.goto("/dashboard/connections");
+    await page.goto("/onboarding");
     const onboarding = await reachActiveConnection(page, client);
 
     await expect(onboarding).toContainText(

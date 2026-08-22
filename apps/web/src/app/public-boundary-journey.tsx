@@ -89,6 +89,7 @@ interface PublicBoundaryJourneyProps {
   readonly personalAccountEndpoint: string;
   readonly personalAccountDeletionEndpoint: string;
   readonly activityLogsEndpoint: string;
+  readonly onFirstConnectionOnboardingChange?: (required: boolean) => void;
   readonly view?: PersonalAccountView;
 }
 
@@ -97,7 +98,8 @@ export type PersonalAccountView =
   | "connections"
   | "authorizations"
   | "activity"
-  | "settings";
+  | "settings"
+  | "onboarding";
 
 type JourneyState = "idle" | "loading" | "signed_out" | "unavailable" | "ok";
 
@@ -425,6 +427,7 @@ export function PublicBoundaryJourney({
   personalAccountEndpoint,
   personalAccountDeletionEndpoint,
   activityLogsEndpoint,
+  onFirstConnectionOnboardingChange,
   view = "overview",
 }: PublicBoundaryJourneyProps) {
   const { getToken: getClerkToken, isLoaded, isSignedIn } = useAuth();
@@ -1497,6 +1500,11 @@ export function PublicBoundaryJourney({
     });
   }, [view]);
 
+  useEffect(() => {
+    if (state !== "ok") return;
+    onFirstConnectionOnboardingChange?.(showFirstConnectionOnboarding);
+  }, [onFirstConnectionOnboardingChange, showFirstConnectionOnboarding, state]);
+
   const revokeAuthorization = async (authorization: McpAuthorization) => {
     setRevokingAuthorization(authorization.id);
     try {
@@ -1791,7 +1799,9 @@ export function PublicBoundaryJourney({
       ) : null}
       {state === "ok" &&
       showFirstConnectionOnboarding &&
-      (view === "overview" || view === "connections") ? (
+      (view === "onboarding" ||
+        view === "overview" ||
+        view === "connections") ? (
         <FirstConnectionOnboarding
           connectedConnection={connections[0] ?? null}
           getToken={getToken}
@@ -1821,7 +1831,7 @@ export function PublicBoundaryJourney({
       {state === "ok" &&
       !(
         showFirstConnectionOnboarding &&
-        (view === "overview" || view === "connections")
+        (view === "onboarding" || view === "overview" || view === "connections")
       ) ? (
         <>
           {view === "overview" ? (
