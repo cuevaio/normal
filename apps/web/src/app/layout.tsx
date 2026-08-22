@@ -2,6 +2,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
 import { isClerkPublishableKey } from "../effect/clerk-config";
 import { parseProductAnalyticsConfiguration } from "../effect/product-analytics";
 import { ProductAnalyticsBootstrap } from "./product-analytics-bootstrap";
@@ -52,6 +53,7 @@ export default function RootLayout({
         >
           <ProductAnalyticsBootstrap configuration={productAnalytics} />
           <QueryProvider>{children}</QueryProvider>
+          <Toaster />
         </ThemeProvider>
       </body>
     </html>

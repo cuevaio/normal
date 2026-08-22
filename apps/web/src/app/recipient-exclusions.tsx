@@ -6,6 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useState } from "react";
+import { toast } from "sonner";
 import { queryKeys } from "@/lib/query/keys";
 import {
   applyRecipientExclusion,
@@ -126,11 +127,11 @@ export function RecipientExclusions({
         excluded,
         recipient,
       });
-      setStatus(
-        saved
-          ? `Normal no longer tracks ${recipientLabel(recipient)}.`
-          : `Normal may track ${recipientLabel(recipient)} again.`,
-      );
+      const nextStatus = saved
+        ? `Normal no longer tracks ${recipientLabel(recipient)}.`
+        : `Normal may track ${recipientLabel(recipient)} again.`;
+      setStatus(nextStatus);
+      toast.success(nextStatus);
     } catch {
       setStatus(
         `Could not save ${recipientLabel(recipient)}. Other settings still work.`,

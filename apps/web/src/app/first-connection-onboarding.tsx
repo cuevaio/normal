@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Field,
@@ -1257,6 +1258,7 @@ export function FirstConnectionOnboarding({
       setProfileState("idle");
       markStageCompleted("profile");
       captureProductAnalyticsEvent({ event: "onboarding_profile_completed" });
+      toast.success("Onboarding profile saved");
       setStage("security");
     } catch {
       setProfileState("unavailable");
@@ -1296,6 +1298,7 @@ export function FirstConnectionOnboarding({
       setProfile(savedProfile);
       onProfileSaved(savedProfile);
       setSecurityState("idle");
+      toast.success("Security completion saved");
       completeStage("security", "connection_setup");
     } catch {
       setSecurityState("unavailable");

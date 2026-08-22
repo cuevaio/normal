@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { installClerkBrowser } from "../support/clerk-browser";
+import { expectSuccessToast } from "../support/toasts";
 
 const choose = async (page: Page, label: string, option: string) => {
   const profile = page.getByRole("dialog", { name: "Onboarding profile" });
@@ -25,9 +26,11 @@ const reachActiveConnection = async (page: Page, client: string) => {
     .getByRole("dialog", { name: "Onboarding profile" })
     .getByRole("button", { name: "Save and continue" })
     .click();
+  await expectSuccessToast(page, "Onboarding profile saved");
   await onboarding
     .getByRole("button", { name: "Review complete. Start Connection Setup" })
     .click();
+  await expectSuccessToast(page, "Security completion saved");
   await onboarding
     .getByRole("button", { name: "Continue", exact: true })
     .click();

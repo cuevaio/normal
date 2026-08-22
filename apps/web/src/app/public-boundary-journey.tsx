@@ -21,6 +21,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -842,6 +843,7 @@ export function PublicBoundaryJourney({
         ...current,
         [connection.id]: "Name saved.",
       }));
+      toast.success("Name saved.");
     } catch {
       setNameStatus((current) => ({
         ...current,
@@ -902,6 +904,12 @@ export function PublicBoundaryJourney({
         ...current,
         [connection.id]: `Message Retention Policy saved. Current policy: ${body.policy?.days === null ? "retain until Connection Deletion" : `${body.policy?.days} days`}. Shorter policies apply promptly to retained content.`,
       }));
+      toast.success("Message Retention Policy saved", {
+        description:
+          body.policy?.days === null
+            ? "Current policy: retain until Connection Deletion. Shorter policies apply promptly to retained content."
+            : `Current policy: ${body.policy?.days} days. Shorter policies apply promptly to retained content.`,
+      });
     } catch {
       setRetentionStatus((current) => ({
         ...current,

@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { installClerkBrowser } from "../support/clerk-browser";
+import { expectSuccessToast } from "../support/toasts";
 
 const apiPort = process.env.PLAYWRIGHT_API_PORT ?? "8787";
 const webOrigin = `http://127.0.0.1:${process.env.PLAYWRIGHT_WEB_PORT ?? "3000"}`;
@@ -55,6 +56,7 @@ const completeFirstConnectionProfile = async (
     await choose("Intended MCP Client", intendedClient);
     await choose("Interested in a short research call?", "Yes");
     await profile.getByRole("button", { name: "Save and continue" }).click();
+    await expectSuccessToast(page, "Onboarding profile saved");
   }
   const securityHeading = page.getByRole("heading", {
     name: "Review security before you scan",
@@ -73,6 +75,7 @@ const completeFirstConnectionProfile = async (
     await onboarding
       .getByRole("button", { name: "Review complete. Start Connection Setup" })
       .click();
+    await expectSuccessToast(page, "Security completion saved");
   }
   await expect(
     page.getByRole("heading", { name: "Start Connection Setup" }),
@@ -501,6 +504,7 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   await expect(saveConfiguration).toBeEnabled();
   await saveConfiguration.click();
   await expect(configuration).toContainText("Name saved.");
+  await expectSuccessToast(page, "Name saved.");
   expect(renameRequests).toBe(1);
   expect(retentionUpdateRequests).toBe(0);
   await expect(connection).toContainText("Work WhatsApp");
@@ -509,6 +513,7 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   await page.getByRole("option", { name: "7 days" }).click();
   await saveConfiguration.click();
   await expect(configuration).toContainText("Current policy: 7 days");
+  await expectSuccessToast(page, "Message Retention Policy saved");
   expect(renameRequests).toBe(1);
   expect(retentionUpdateRequests).toBe(1);
   await retentionPolicy.click();
@@ -523,6 +528,7 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
     .check();
   await saveConfiguration.click();
   await expect(configuration).toContainText("retain until Connection Deletion");
+  await expectSuccessToast(page, "Message Retention Policy saved");
   await expect(page.getByTestId("whatsapp-connection")).not.toContainText(
     "session-authority",
   );
@@ -604,6 +610,7 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   await expect(page.getByTestId("recipient-exclusion-status")).toContainText(
     "Normal no longer tracks Ada Lovelace.",
   );
+  await expectSuccessToast(page, "Normal no longer tracks Ada Lovelace.");
   await expect(
     exclusions.getByRole("button", { name: "Track again Ada Lovelace" }),
   ).toBeVisible();
