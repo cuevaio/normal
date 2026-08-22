@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { isClerkPublishableKey } from "../effect/clerk-config";
 import { parseProductAnalyticsConfiguration } from "../effect/product-analytics";
 import { ProductAnalyticsBootstrap } from "./product-analytics-bootstrap";
+import { QueryProvider } from "./query-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -42,7 +43,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <ProductAnalyticsBootstrap configuration={productAnalytics} />
-        {children}
+        <QueryProvider>{children}</QueryProvider>
       </body>
     </html>
   );
