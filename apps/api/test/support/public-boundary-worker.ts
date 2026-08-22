@@ -1,4 +1,13 @@
+import {
+  ACCOUNT_INSIGHTS_WINDOW_DAYS,
+  accountInsightsWindow,
+  utcCalendarDate,
+} from "@whatsapp-mcp/db/account-insights";
 import { Effect, Layer } from "effect";
+import {
+  AccountInsightsClock,
+  AccountInsightsPersistence,
+} from "../../src/account-insights";
 import {
   ActivityLogClock,
   ActivityLogPersistence,
@@ -261,6 +270,58 @@ const whatsAppConnections: Array<{
     | "reconnect_required";
   stateChangedAt: string;
 }> = [];
+
+const testAccountInsights = (observedAt: Date) => {
+  const connected = whatsAppConnections.filter(
+    (connection) => connection.state === "connected",
+  ).length;
+  const needsAttention = whatsAppConnections.filter((connection) =>
+    ["disconnected", "reconnect_required", "degraded"].includes(
+      connection.state,
+    ),
+  ).length;
+  const total = whatsAppConnections.length;
+  const { currentStart } = accountInsightsWindow(observedAt);
+  const series = Array.from(
+    { length: ACCOUNT_INSIGHTS_WINDOW_DAYS },
+    (_, index) => {
+      const day = new Date(currentStart);
+      day.setUTCDate(day.getUTCDate() + index);
+      const recent = index >= ACCOUNT_INSIGHTS_WINDOW_DAYS - 3;
+      return {
+        date: utcCalendarDate(day),
+        inbound: total > 0 && recent ? 4 : 0,
+        outbound: total > 0 && recent ? 1 : 0,
+      };
+    },
+  );
+  const inbound = series.reduce((sum, point) => sum + point.inbound, 0);
+  const outbound = series.reduce((sum, point) => sum + point.outbound, 0);
+  return {
+    authorizations: { active: 1 },
+    connections: { connected, needsAttention, total },
+    conversations: {
+      active: total > 0 ? 3 : 0,
+      direct: total > 0 ? 8 : 0,
+      group: total > 0 ? 2 : 0,
+      total: total > 0 ? 10 : 0,
+    },
+    generatedAt: observedAt,
+    messages: {
+      inbound,
+      outbound,
+      previousInbound: total > 0 ? 9 : 0,
+      previousOutbound: total > 0 ? 3 : 0,
+    },
+    sends: {
+      confirmed: outbound,
+      failed: 0,
+      unknown: 0,
+    },
+    series,
+    windowDays: ACCOUNT_INSIGHTS_WINDOW_DAYS,
+  } as const;
+};
 const publishedWebhookMessages: WebhookIngressQueueMessage[] = [];
 const encryptedWebhookPayloads = new Map<string, Uint8Array>();
 const encryptedDisplayNames = new Map<string, string>();
@@ -567,6 +628,18 @@ const makeTestLayer = (
     }),
     Layer.succeed(ActivityLogClock, {
       now: Effect.succeed(new Date("2026-01-02T03:05:00.000Z")),
+    }),
+    Layer.succeed(AccountInsightsClock, {
+      now: Effect.succeed(new Date("2026-01-02T03:05:00.000Z")),
+    }),
+    Layer.succeed(AccountInsightsPersistence, {
+      read: (clerkUserId, observedAt) =>
+        Effect.succeed(
+          clerkUserId === "user_test_public_boundary" ||
+            clerkUserId === "user_second_test_public_boundary"
+            ? testAccountInsights(observedAt)
+            : null,
+        ),
     }),
     Layer.succeed(ActivityLogPersistence, {
       list: (clerkUserId, _observedAt, cursor) =>

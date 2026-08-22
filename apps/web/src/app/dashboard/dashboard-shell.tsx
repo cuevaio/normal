@@ -285,6 +285,9 @@ export function DashboardShell({
                     configuration.personalAccountEndpoint
                   }
                   activityLogsEndpoint={configuration.activityLogsEndpoint}
+                  accountInsightsEndpoint={
+                    configuration.accountInsightsEndpoint
+                  }
                   view={viewByPathname[pathname] ?? "overview"}
                 />
               )}

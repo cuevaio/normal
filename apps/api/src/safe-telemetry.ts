@@ -146,6 +146,12 @@ export const safeTelemetryFieldsByEvent = {
     "outcome",
     "plaintextBytes",
   ],
+  "account_insights.review.completed": [
+    ...common,
+    "inboundCount",
+    "outboundCount",
+    "windowDays",
+  ],
   "activity_log.review.completed": [...common, "logCount"],
   "webhook_event.dead_letter.completed": [
     ...common,

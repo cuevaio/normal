@@ -45,7 +45,8 @@ export type ProductAnalyticsEvent =
         | "additional_connection_setup"
         | "onboarding_chatgpt_opened"
         | "mcp_guide_opened"
-        | "activity_logs_viewed";
+        | "activity_logs_viewed"
+        | "account_insights_viewed";
     };
 
 export interface ProductAnalytics {
@@ -92,6 +93,7 @@ const features = new Set([
   "onboarding_chatgpt_opened",
   "mcp_guide_opened",
   "activity_logs_viewed",
+  "account_insights_viewed",
 ]);
 
 const hasExactKeys = (

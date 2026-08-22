@@ -64,6 +64,11 @@ import {
 } from "@/components/ui/table";
 import { captureProductAnalyticsEvent } from "../effect/product-analytics";
 import {
+  type AccountInsights,
+  decodeAccountInsights,
+} from "./account-insights";
+import { AccountOverview } from "./account-overview";
+import {
   nextConnectionSetupPollDelayMs,
   observationMetricDurationMs,
 } from "./connection-setup-observation";
@@ -89,6 +94,7 @@ interface PublicBoundaryJourneyProps {
   readonly personalAccountEndpoint: string;
   readonly personalAccountDeletionEndpoint: string;
   readonly activityLogsEndpoint: string;
+  readonly accountInsightsEndpoint: string;
   readonly view?: PersonalAccountView;
 }
 
@@ -425,6 +431,7 @@ export function PublicBoundaryJourney({
   personalAccountEndpoint,
   personalAccountDeletionEndpoint,
   activityLogsEndpoint,
+  accountInsightsEndpoint,
   view = "overview",
 }: PublicBoundaryJourneyProps) {
   const { getToken: getClerkToken, isLoaded, isSignedIn } = useAuth();
@@ -446,6 +453,9 @@ export function PublicBoundaryJourney({
   >([]);
   const [activityLogState, setActivityLogState] =
     useState<AuthorizationState>("idle");
+  const [insightsState, setInsightsState] =
+    useState<AuthorizationState>("idle");
+  const [insights, setInsights] = useState<AccountInsights | null>(null);
   const [activityLogs, setActivityLogs] = useState<ReadonlyArray<ActivityLog>>(
     [],
   );
@@ -878,6 +888,23 @@ export function PublicBoundaryJourney({
     setWhatsappNumber("");
   };
 
+  const loadInsights = async (token: string) => {
+    try {
+      const response = await fetch(accountInsightsEndpoint, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const decoded = decodeAccountInsights(await response.json());
+      if (!response.ok || decoded === null) {
+        setInsightsState("unavailable");
+        return;
+      }
+      setInsights(decoded);
+      setInsightsState("ok");
+    } catch {
+      setInsightsState("unavailable");
+    }
+  };
+
   const loadConnections = async (token: string) => {
     const response = await fetch(connectionsEndpoint, {
       headers: { authorization: `Bearer ${token}` },
@@ -944,6 +971,7 @@ export function PublicBoundaryJourney({
         ]),
       ),
     );
+    void loadInsights(token);
     return withPolicies;
   };
 
@@ -1432,22 +1460,29 @@ export function PublicBoundaryJourney({
       setState("ok");
       setAuthorizationState("loading");
       setActivityLogState("loading");
+      setInsightsState("loading");
       try {
-        const [authorizationsResponse, logsResponse] = await Promise.all([
-          fetch(mcpAuthorizationsEndpoint, {
-            headers: { authorization: `Bearer ${token}` },
-          }),
-          fetch(activityLogsEndpoint, {
-            headers: { authorization: `Bearer ${token}` },
-          }),
-        ]);
-        const [authorizationsBody, logsBody] = await Promise.all([
+        const [authorizationsResponse, logsResponse, insightsResponse] =
+          await Promise.all([
+            fetch(mcpAuthorizationsEndpoint, {
+              headers: { authorization: `Bearer ${token}` },
+            }),
+            fetch(activityLogsEndpoint, {
+              headers: { authorization: `Bearer ${token}` },
+            }),
+            fetch(accountInsightsEndpoint, {
+              headers: { authorization: `Bearer ${token}` },
+            }),
+          ]);
+        const [authorizationsBody, logsBody, insightsBody] = await Promise.all([
           authorizationsResponse.json(),
           logsResponse.json(),
+          insightsResponse.json(),
         ]);
         const decodedAuthorizations =
           decodeMcpAuthorizations(authorizationsBody);
         const decodedLogs = decodeActivityLogs(logsBody);
+        const decodedInsights = decodeAccountInsights(insightsBody);
         if (!authorizationsResponse.ok || decodedAuthorizations === null) {
           setAuthorizationState("unavailable");
         } else {
@@ -1462,13 +1497,21 @@ export function PublicBoundaryJourney({
           setActivityLogPageState("idle");
           setActivityLogState("ok");
         }
+        if (!insightsResponse.ok || decodedInsights === null) {
+          setInsightsState("unavailable");
+        } else {
+          setInsights(decodedInsights);
+          setInsightsState("ok");
+        }
       } catch {
         setAuthorizationState("unavailable");
         setActivityLogState("unavailable");
+        setInsightsState("unavailable");
       }
     } catch {
       setState("unavailable");
       setAuthorizationState("unavailable");
+      setInsightsState("unavailable");
     }
   };
 
@@ -1494,6 +1537,14 @@ export function PublicBoundaryJourney({
     captureProductAnalyticsEvent({
       event: "feature_used",
       feature: "activity_logs_viewed",
+    });
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== "overview") return;
+    captureProductAnalyticsEvent({
+      event: "feature_used",
+      feature: "account_insights_viewed",
     });
   }, [view]);
 
@@ -1825,6 +1876,14 @@ export function PublicBoundaryJourney({
       ) ? (
         <>
           {view === "overview" ? (
+            <AccountOverview
+              authorizations={authorizations}
+              connections={connections}
+              insights={insights}
+              insightsState={insightsState}
+            />
+          ) : null}
+          {view === "authorizations" ? (
             <McpConnectionGuides serverUrl={mcpServerUrl} />
           ) : null}
           {view === "authorizations" ? (

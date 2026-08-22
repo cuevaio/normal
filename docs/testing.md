@@ -37,6 +37,15 @@ Personal Account Deletion stays usable after a scoped recipient failure.
 Database coverage separately proves the transition, purge, suppression, and
 restore invariants against migrated Postgres under the production runtime role.
 
+The signed-in overview uses `GET /v1/personal-account/insights` for
+account-scoped counts only: WhatsApp Connection state totals, retained inbound
+and outbound Stored Message totals, conversation mix, confirmed or unknown Send
+Operations, active MCP Authorizations, and a 30-day UTC series. The response
+never includes message content, media, conversation names, phone numbers,
+credentials, tenant identifiers, or provider identifiers. Database coverage
+proves RLS isolation and that tombstones, expired content, and other Personal
+Accounts are excluded.
+
 The signed-in Activity Log review uses `GET /v1/activity-logs` and the
 canonical Activity Log contracts. The persisted table remains `tool_call_logs`
 as a storage name. MCP Authorization management lists and revokes through that
