@@ -112,21 +112,29 @@ test("creates, lists, and revokes an API Key across the browser-to-API boundary"
   ).toBeVisible();
   await expect(panel).toBeVisible();
   await expect(panel.getByText("No API Keys yet.")).toBeVisible();
+  await expect(panel.getByLabel("Name")).toHaveCount(0);
+
+  await panel.getByRole("button", { name: "Create API Key" }).click();
+  const createDialog = page.getByRole("dialog", { name: "Create an API Key" });
+  await expect(createDialog).toBeVisible();
   await expect(
-    panel.getByRole("checkbox", {
+    createDialog.getByRole("checkbox", {
       name: "Work WhatsApp, ending in 7890",
     }),
   ).toBeVisible();
 
-  await panel.getByLabel("Name").fill("CI");
-  await panel.getByRole("checkbox", { name: "Connection metadata" }).check();
-  await panel.getByRole("checkbox", { name: "Send messages" }).check();
-  await panel
+  await createDialog.getByLabel("Name").fill("CI");
+  await createDialog
+    .getByRole("checkbox", { name: "Connection metadata" })
+    .check();
+  await createDialog.getByRole("checkbox", { name: "Send messages" }).check();
+  await createDialog
     .getByRole("checkbox", {
       name: "Personal WhatsApp, ending in 3456",
     })
     .check();
-  await panel.getByRole("button", { name: "Create API Key" }).click();
+  await createDialog.getByRole("button", { name: "Create API Key" }).click();
+  await expect(createDialog).toBeHidden();
 
   const reveal = panel.getByLabel("New API Key credential");
   await expect(reveal).toBeVisible();
