@@ -3,6 +3,7 @@ export const queryKeys = {
   apiKeys: () => ["api-keys"] as const,
   authorizations: () => ["mcp-authorizations"] as const,
   connections: () => ["whatsapp-connections"] as const,
+  connectionWorkspace: () => ["whatsapp-connections", "workspace"] as const,
   oauthInspection: (request: string) => ["oauth-inspection", request] as const,
   onboardingProfile: () => ["onboarding-profile"] as const,
   recipients: (

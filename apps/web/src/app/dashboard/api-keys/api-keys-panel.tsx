@@ -28,7 +28,7 @@ import {
   applyApiKeyRevocation,
   createApiKey,
   fetchApiKeys,
-  fetchConnectionsWithPolicies,
+  fetchConnections,
   revokeApiKey,
   selectableConnections,
   upsertApiKey,
@@ -109,7 +109,7 @@ export function ApiKeysPanel({
     queryFn: async () => {
       const token = await readAccessToken();
       if (!token) throw new Error("signed out");
-      return fetchConnectionsWithPolicies(connectionsEndpoint, token);
+      return fetchConnections(connectionsEndpoint, token);
     },
     queryKey: queryKeys.connections(),
   });

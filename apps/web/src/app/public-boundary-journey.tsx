@@ -289,7 +289,7 @@ export function PublicBoundaryJourney({
       if (token === null) throw new Error("signed out");
       return fetchConnectionsWithPolicies(connectionsEndpoint, token);
     },
-    queryKey: queryKeys.connections(),
+    queryKey: queryKeys.connectionWorkspace(),
   });
   const authorizationsQuery = useQuery({
     enabled: state === "ok" && isLoaded && isSignedIn === true,
@@ -392,7 +392,8 @@ export function PublicBoundaryJourney({
     (state === "ok" &&
       connectionsQuery.isSuccess &&
       connectionsQuery.data.length === 0 &&
-      onboardingQuery.data === undefined &&
+      !sawInitialConnections.current &&
+      !showFirstConnectionOnboarding &&
       !onboardingQuery.isError);
   const dashboardReady =
     state === "ok" && !dashboardLoading && !dashboardUnavailable;
@@ -423,29 +424,25 @@ export function PublicBoundaryJourney({
   }, [connectionsQuery.data, connectionsQuery.isSuccess]);
 
   useEffect(() => {
-    if (
-      state !== "ok" ||
-      !connectionsQuery.isSuccess ||
-      sawInitialConnections.current
-    ) {
+    if (state !== "ok" || !connectionsQuery.isSuccess) return;
+    if (connectionsQuery.data.length > 0) {
+      if (!sawInitialConnections.current) {
+        sawInitialConnections.current = true;
+        setOnboardingProfile(null);
+        setShowFirstConnectionOnboarding(false);
+      }
       return;
     }
+    if (!onboardingQuery.isSuccess || sawInitialConnections.current) return;
     sawInitialConnections.current = true;
-    if (connectionsQuery.data.length === 0) {
-      setShowFirstConnectionOnboarding(true);
-    } else {
-      setOnboardingProfile(null);
-      setShowFirstConnectionOnboarding(false);
-    }
-  }, [connectionsQuery.data, connectionsQuery.isSuccess, state]);
-
-  useEffect(() => {
-    if (!showFirstConnectionOnboarding || !onboardingQuery.isSuccess) return;
     setOnboardingProfile(onboardingQuery.data);
+    setShowFirstConnectionOnboarding(true);
   }, [
+    connectionsQuery.data,
+    connectionsQuery.isSuccess,
     onboardingQuery.data,
     onboardingQuery.isSuccess,
-    showFirstConnectionOnboarding,
+    state,
   ]);
 
   const normalizedActivityLogSearch = activityLogSearch.trim().toLowerCase();
@@ -634,7 +631,7 @@ export function PublicBoundaryJourney({
       }
 
       queryClient.setQueryData(
-        queryKeys.connections(),
+        queryKeys.connectionWorkspace(),
         (current: ReadonlyArray<SafeWhatsAppConnection> | undefined) =>
           removeConnection(current, connection.id),
       );
@@ -768,6 +765,7 @@ export function PublicBoundaryJourney({
         connectionsEndpoint,
         token,
       );
+      queryClient.setQueryData(queryKeys.connectionWorkspace(), withPolicies);
       queryClient.setQueryData(queryKeys.connections(), withPolicies);
       return withPolicies;
     } catch {
@@ -804,7 +802,7 @@ export function PublicBoundaryJourney({
           : decodeSafeWhatsAppConnection(body.whatsapp_connection);
       if (!response.ok || renamed === null) throw new Error("rename failed");
       queryClient.setQueryData(
-        queryKeys.connections(),
+        queryKeys.connectionWorkspace(),
         (current: ReadonlyArray<SafeWhatsAppConnection> | undefined) =>
           replaceConnection(current, {
             ...connection,
@@ -864,7 +862,7 @@ export function PublicBoundaryJourney({
       if (body.policy?.days !== null && typeof body.policy?.days !== "number")
         throw new Error("invalid policy");
       queryClient.setQueryData(
-        queryKeys.connections(),
+        queryKeys.connectionWorkspace(),
         (current: ReadonlyArray<SafeWhatsAppConnection> | undefined) =>
           replaceConnection(current, {
             ...connection,
@@ -997,7 +995,7 @@ export function PublicBoundaryJourney({
         throw new Error("invalid lifecycle response");
       }
       queryClient.setQueryData(
-        queryKeys.connections(),
+        queryKeys.connectionWorkspace(),
         (current: ReadonlyArray<SafeWhatsAppConnection> | undefined) =>
           replaceConnection(current, {
             ...connection,

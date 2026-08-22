@@ -932,7 +932,7 @@ test("starts irreversible Connection Deletion and keeps the deleted connection g
       page.getByRole("img", { name: "Scan this WhatsApp QR code" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "WhatsApp Connection active" }),
+      page.getByRole("heading", { name: "Connect your MCP Client" }),
     ).toBeVisible({ timeout: 15_000 });
     await onboarding.getByRole("button", { name: "Go to dashboard" }).click();
   }

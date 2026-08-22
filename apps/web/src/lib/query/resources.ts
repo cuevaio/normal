@@ -537,7 +537,7 @@ export const revokeApiKey = async ({
   }
 };
 
-export const fetchConnectionsWithPolicies = async (
+export const fetchConnections = async (
   endpoint: string,
   token: string,
 ): Promise<ReadonlyArray<SafeWhatsAppConnection>> => {
@@ -557,6 +557,14 @@ export const fetchConnectionsWithPolicies = async (
     if (decoded === null) throw new Error("connections unavailable");
     parsed.push(decoded);
   }
+  return parsed;
+};
+
+export const fetchConnectionsWithPolicies = async (
+  endpoint: string,
+  token: string,
+): Promise<ReadonlyArray<SafeWhatsAppConnection>> => {
+  const parsed = await fetchConnections(endpoint, token);
   return Promise.all(
     parsed.map(async (connection) => {
       const policy = await authorizedJson({
