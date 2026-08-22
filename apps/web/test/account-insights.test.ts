@@ -25,8 +25,6 @@ const validBody = {
   messages: {
     inbound: 24,
     outbound: 8,
-    previous_inbound: 18,
-    previous_outbound: 6,
   },
   sends: { confirmed: 7, failed: 0, unknown: 1 },
   series,
@@ -42,8 +40,6 @@ describe("account insights decoder", () => {
       messages: {
         inbound: 24,
         outbound: 8,
-        previousInbound: 18,
-        previousOutbound: 6,
       },
       windowDays: 30,
     });
@@ -60,6 +56,12 @@ describe("account insights decoder", () => {
     expect(
       decodeAccountInsights({
         ...validBody,
+        messages: { ...validBody.messages, previous_inbound: 1 },
+      }),
+    ).toBeNull();
+    expect(
+      decodeAccountInsights({
+        ...validBody,
         series: validBody.series.slice(0, 7),
       }),
     ).toBeNull();
@@ -68,7 +70,7 @@ describe("account insights decoder", () => {
 });
 
 describe("account insights copy", () => {
-  test("writes non-technical headlines and period changes", () => {
+  test("writes non-technical headlines without a previous-window comparison", () => {
     const decoded = decodeAccountInsights(validBody);
     expect(decoded).not.toBeNull();
     if (decoded === null) throw new Error("expected insights");
@@ -77,13 +79,8 @@ describe("account insights copy", () => {
       "In the last 30 days, 24 messages arrived and 8 messages went out.",
     );
     expect(copy.connection).toBe("1 of 2 WhatsApp numbers connected");
-    expect(copy.conversation).toBe(
-      "3 chats were active this week, including 2 groups",
-    );
+    expect(copy.conversation).toBe("3 chats were active this week");
     expect(copy.apps).toBe("1 app can use WhatsApp");
-    expect(copy.inboundChange).toBe(
-      "33% more incoming than the previous 30 days.",
-    );
     expect(copy.sendNote).toBe("1 send is still unconfirmed.");
     expect(copy.headline).not.toMatch(/MCP|API|provider|payload/iu);
   });
@@ -96,8 +93,6 @@ describe("account insights copy", () => {
       messages: {
         inbound: 0,
         outbound: 0,
-        previous_inbound: 0,
-        previous_outbound: 0,
       },
       sends: { confirmed: 0, failed: 0, unknown: 0 },
       series: series.map((point) => ({ ...point, inbound: 0, outbound: 0 })),
@@ -111,5 +106,25 @@ describe("account insights copy", () => {
     expect(copy.connection).toBe("1 WhatsApp number connected");
     expect(copy.conversation).toBe("No chats observed yet");
     expect(copy.sendNote).toBeNull();
+  });
+
+  test("does not describe a disconnected account as connected", () => {
+    const disconnected = decodeAccountInsights({
+      ...validBody,
+      connections: { connected: 0, needs_attention: 1, total: 1 },
+      conversations: { active: 0, direct: 0, group: 0, total: 0 },
+      messages: {
+        inbound: 0,
+        outbound: 0,
+      },
+      sends: { confirmed: 0, failed: 0, unknown: 0 },
+      series: series.map((point) => ({ ...point, inbound: 0, outbound: 0 })),
+    });
+    expect(disconnected).not.toBeNull();
+    if (disconnected === null)
+      throw new Error("expected disconnected insights");
+    expect(describeAccountInsights(disconnected).headline).toBe(
+      "WhatsApp is not connected right now. Reconnect to see new chats here.",
+    );
   });
 });

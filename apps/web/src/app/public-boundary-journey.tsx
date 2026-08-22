@@ -1320,11 +1320,14 @@ export function PublicBoundaryJourney({
 
   useEffect(() => {
     if (view !== "overview") return;
+    if (!dashboardReady) return;
+    if (showFirstConnectionOnboarding) return;
+    if (insightsState !== "ok") return;
     captureProductAnalyticsEvent({
       event: "feature_used",
       feature: "account_insights_viewed",
     });
-  }, [view]);
+  }, [dashboardReady, insightsState, showFirstConnectionOnboarding, view]);
 
   const revokeAuthorization = async (authorization: McpAuthorization) => {
     setRevokingAuthorization(authorization.id);
@@ -1618,6 +1621,7 @@ export function PublicBoundaryJourney({
           {view === "overview" ? (
             <AccountOverview
               authorizations={authorizations}
+              authorizationState={authorizationState}
               connections={connections}
               insights={insights}
               insightsState={insightsState}

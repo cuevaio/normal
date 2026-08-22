@@ -150,11 +150,13 @@ function StatCard({
 
 export function AccountOverview({
   authorizations,
+  authorizationState,
   connections,
   insights,
   insightsState,
 }: {
   readonly authorizations: ReadonlyArray<OverviewAuthorization>;
+  readonly authorizationState: "idle" | "loading" | "ok" | "unavailable";
   readonly connections: ReadonlyArray<OverviewConnection>;
   readonly insights: AccountInsights | null;
   readonly insightsState: "idle" | "loading" | "ok" | "unavailable";
@@ -210,13 +212,6 @@ export function AccountOverview({
         <h2 className="mt-1 text-2xl font-semibold tracking-tight text-pretty">
           {copy.headline}
         </h2>
-        {copy.inboundChange || copy.outboundChange ? (
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            {[copy.inboundChange, copy.outboundChange]
-              .filter((value): value is string => value !== null)
-              .join(" ")}
-          </p>
-        ) : null}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -226,14 +221,12 @@ export function AccountOverview({
           value={`${formatNumber(insights.connections.connected)}/${formatNumber(insights.connections.total)}`}
         />
         <StatCard
-          detail={
-            copy.inboundChange ?? "Messages that arrived after you connected."
-          }
+          detail={`Messages that arrived in the last ${insights.windowDays} days.`}
           label="Messages arrived"
           value={formatNumber(insights.messages.inbound)}
         />
         <StatCard
-          detail={copy.outboundChange ?? "Messages you or your apps sent."}
+          detail={`Messages you or your apps sent in the last ${insights.windowDays} days.`}
           label="Messages sent"
           value={formatNumber(insights.messages.outbound)}
         />
@@ -248,7 +241,7 @@ export function AccountOverview({
         <CardHeader>
           <CardTitle>How messages moved</CardTitle>
           <CardDescription>
-            Arrivals and sends from the day you connected forward. Earlier
+            Arrivals and sends over the last {insights.windowDays} days. Earlier
             WhatsApp history is not imported.
           </CardDescription>
         </CardHeader>
@@ -323,7 +316,11 @@ export function AccountOverview({
             <CardDescription>{copy.apps}</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            {activeApps.length === 0 ? (
+            {authorizationState === "unavailable" ? (
+              <p aria-live="polite" className="text-sm text-muted-foreground">
+                Apps with access are temporarily unavailable.
+              </p>
+            ) : activeApps.length === 0 ? (
               <p className="text-sm leading-6 text-muted-foreground">
                 Connect Claude or ChatGPT so they can read or send on the
                 WhatsApp Connections you choose.
@@ -340,11 +337,15 @@ export function AccountOverview({
             <Link
               className={buttonVariants({
                 className: "self-start",
-                variant: activeApps.length === 0 ? "default" : "outline",
+                variant:
+                  authorizationState !== "unavailable" &&
+                  activeApps.length === 0
+                    ? "default"
+                    : "outline",
               })}
               href="/dashboard/authorizations"
             >
-              {activeApps.length === 0
+              {authorizationState !== "unavailable" && activeApps.length === 0
                 ? "Connect an MCP Client"
                 : "Review access"}
             </Link>

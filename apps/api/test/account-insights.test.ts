@@ -24,8 +24,6 @@ const safeInsights: AccountInsights = {
   messages: {
     inbound: 24,
     outbound: 8,
-    previousInbound: 18,
-    previousOutbound: 6,
   },
   sends: { confirmed: 7, failed: 0, unknown: 1 },
   series: [
@@ -85,8 +83,6 @@ describe("Account insights product boundary", () => {
       messages: {
         inbound: 24,
         outbound: 8,
-        previous_inbound: 18,
-        previous_outbound: 6,
       },
       sends: { confirmed: 7, failed: 0, unknown: 1 },
       series: [

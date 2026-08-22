@@ -82,8 +82,6 @@ export const encodeAccountInsights = (insights: AccountInsights) => ({
   messages: {
     inbound: insights.messages.inbound,
     outbound: insights.messages.outbound,
-    previous_inbound: insights.messages.previousInbound,
-    previous_outbound: insights.messages.previousOutbound,
   },
   sends: {
     confirmed: insights.sends.confirmed,

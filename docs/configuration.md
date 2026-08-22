@@ -412,12 +412,13 @@ Connection, send, network, or capability identifiers.
 
 The signed-in `GET /v1/personal-account/insights` overview returns a closed
 allowlist of aggregate counts for the last 30 UTC days: WhatsApp Connection
-state totals, retained inbound and outbound Stored Message totals with the
-previous window for comparison, conversation mix and weekly activity, Send
-Operation confirmed/failed/unknown totals, active MCP Authorization count, and
-a 30-point daily series. It never returns message content, media, conversation
-or recipient identity, phone numbers, credentials, public handles, tenant
-identifiers, or provider identifiers. Review telemetry is
+state totals, retained inbound and outbound Stored Message totals,
+conversation mix and weekly activity, Send Operation confirmed/failed/unknown
+totals, active MCP Authorization count, and a 30-point daily series. Counts
+exclude WhatsApp Connections in Connection Deletion. It never returns message
+content, media, conversation or recipient identity, phone numbers, credentials,
+public handles, tenant identifiers, or provider identifiers, and it does not
+compare against a prior retention window. Review telemetry is
 `account_insights.review.completed` with only inbound and outbound counts,
 window days, and the API service name.
 

@@ -32,8 +32,6 @@ export interface AccountInsights {
   readonly messages: {
     readonly inbound: number;
     readonly outbound: number;
-    readonly previousInbound: number;
-    readonly previousOutbound: number;
   };
   readonly sends: {
     readonly confirmed: number;
@@ -78,7 +76,6 @@ export const accountInsightsWindow = (observedAt: Date) => {
         ACCOUNT_INSIGHTS_ACTIVE_CONVERSATION_DAYS * 24 * 60 * 60 * 1000,
     ),
     currentStart,
-    previousStart: addUtcDays(currentStart, -ACCOUNT_INSIGHTS_WINDOW_DAYS),
     today,
   };
 };
@@ -153,8 +150,10 @@ export const makeAccountInsightsRepository = (
           );
         if (account.length !== 1) return null;
 
-        const { activeSince, currentStart, previousStart } =
-          accountInsightsWindow(observedAt);
+        const { activeSince, currentStart } = accountInsightsWindow(observedAt);
+        const visibleConnection = sql`whatsapp_connection_id IN (
+          SELECT id FROM public.whatsapp_connections WHERE state <> 'deleting'
+        )`;
 
         const [connectionCounts] = await db.execute<{
           connected: unknown;
@@ -173,35 +172,16 @@ export const makeAccountInsightsRepository = (
         const [messageCounts] = await db.execute<{
           inbound: unknown;
           outbound: unknown;
-          previous_inbound: unknown;
-          previous_outbound: unknown;
         }>(sql`
           SELECT
-            count(*) FILTER (
-              WHERE direction = 'inbound'
-                AND sent_at >= ${currentStart}
-                AND sent_at <= ${observedAt}
-            )::int AS inbound,
-            count(*) FILTER (
-              WHERE direction = 'outbound'
-                AND sent_at >= ${currentStart}
-                AND sent_at <= ${observedAt}
-            )::int AS outbound,
-            count(*) FILTER (
-              WHERE direction = 'inbound'
-                AND sent_at >= ${previousStart}
-                AND sent_at < ${currentStart}
-            )::int AS previous_inbound,
-            count(*) FILTER (
-              WHERE direction = 'outbound'
-                AND sent_at >= ${previousStart}
-                AND sent_at < ${currentStart}
-            )::int AS previous_outbound
+            count(*) FILTER (WHERE direction = 'inbound')::int AS inbound,
+            count(*) FILTER (WHERE direction = 'outbound')::int AS outbound
           FROM public.stored_messages
           WHERE deleted_at IS NULL
             AND content_expired_at IS NULL
-            AND sent_at >= ${previousStart}
+            AND sent_at >= ${currentStart}
             AND sent_at <= ${observedAt}
+            AND ${visibleConnection}
         `);
 
         const [conversationCounts] = await db.execute<{
@@ -217,6 +197,7 @@ export const makeAccountInsightsRepository = (
             count(*) FILTER (WHERE last_activity_at >= ${activeSince})::int
               AS active
           FROM public.whatsapp_conversations
+          WHERE ${visibleConnection}
         `);
 
         const [sendCounts] = await db.execute<{
@@ -233,6 +214,7 @@ export const makeAccountInsightsRepository = (
           FROM public.send_operations
           WHERE created_at >= ${currentStart}
             AND created_at <= ${observedAt}
+            AND ${visibleConnection}
         `);
 
         const [authorizationCounts] = await db.execute<{
@@ -259,6 +241,7 @@ export const makeAccountInsightsRepository = (
             AND content_expired_at IS NULL
             AND sent_at >= ${currentStart}
             AND sent_at <= ${observedAt}
+            AND ${visibleConnection}
           GROUP BY 1
           ORDER BY 1
         `);
@@ -282,8 +265,6 @@ export const makeAccountInsightsRepository = (
           messages: {
             inbound: asCount(messageCounts?.inbound),
             outbound: asCount(messageCounts?.outbound),
-            previousInbound: asCount(messageCounts?.previous_inbound),
-            previousOutbound: asCount(messageCounts?.previous_outbound),
           },
           sends: {
             confirmed: asCount(sendCounts?.confirmed),

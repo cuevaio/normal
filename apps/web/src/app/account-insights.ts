@@ -25,8 +25,6 @@ export interface AccountInsights {
   readonly messages: {
     readonly inbound: number;
     readonly outbound: number;
-    readonly previousInbound: number;
-    readonly previousOutbound: number;
   };
   readonly sends: {
     readonly confirmed: number;
@@ -42,8 +40,6 @@ export interface AccountInsightsCopy {
   readonly connection: string;
   readonly conversation: string;
   readonly headline: string;
-  readonly inboundChange: string | null;
-  readonly outboundChange: string | null;
   readonly sendNote: string | null;
 }
 
@@ -93,12 +89,7 @@ export const decodeAccountInsights = (
     "needs_attention",
     "total",
   ]);
-  const messages = decodeObjectCounts(record.messages, [
-    "inbound",
-    "outbound",
-    "previous_inbound",
-    "previous_outbound",
-  ]);
+  const messages = decodeObjectCounts(record.messages, ["inbound", "outbound"]);
   const conversations = decodeObjectCounts(record.conversations, [
     "active",
     "direct",
@@ -122,8 +113,6 @@ export const decodeAccountInsights = (
     !isCount(connections.total) ||
     !isCount(messages.inbound) ||
     !isCount(messages.outbound) ||
-    !isCount(messages.previous_inbound) ||
-    !isCount(messages.previous_outbound) ||
     !isCount(conversations.active) ||
     !isCount(conversations.direct) ||
     !isCount(conversations.group) ||
@@ -169,8 +158,6 @@ export const decodeAccountInsights = (
     messages: {
       inbound: messages.inbound,
       outbound: messages.outbound,
-      previousInbound: messages.previous_inbound,
-      previousOutbound: messages.previous_outbound,
     },
     sends: {
       confirmed: sends.confirmed,
@@ -185,24 +172,6 @@ export const decodeAccountInsights = (
 const formatCount = (value: number): string =>
   new Intl.NumberFormat("en", { maximumFractionDigits: 0 }).format(value);
 
-const changeCopy = (
-  current: number,
-  previous: number,
-  direction: "incoming" | "outgoing",
-): string | null => {
-  if (previous === 0) {
-    return current === 0 ? null : `First ${direction} messages in this window.`;
-  }
-  const delta = Math.round(((current - previous) / previous) * 100);
-  if (delta === 0) {
-    return `About the same ${direction} volume as the previous ${ACCOUNT_INSIGHTS_WINDOW_DAYS} days.`;
-  }
-  if (delta > 0) {
-    return `${formatCount(delta)}% more ${direction} than the previous ${ACCOUNT_INSIGHTS_WINDOW_DAYS} days.`;
-  }
-  return `${formatCount(Math.abs(delta))}% fewer ${direction} than the previous ${ACCOUNT_INSIGHTS_WINDOW_DAYS} days.`;
-};
-
 const plural = (count: number, singular: string, pluralForm: string): string =>
   `${formatCount(count)} ${count === 1 ? singular : pluralForm}`;
 
@@ -214,7 +183,9 @@ export const describeAccountInsights = (
     insights.connections.total === 0
       ? "Connect a WhatsApp number to start a living picture of your chats."
       : inbound + outbound === 0
-        ? "Your WhatsApp is connected. New chats will show up here as they arrive."
+        ? insights.connections.connected === 0
+          ? "WhatsApp is not connected right now. Reconnect to see new chats here."
+          : "Your WhatsApp is connected. New chats will show up here as they arrive."
         : `In the last ${insights.windowDays} days, ${plural(inbound, "message", "messages")} arrived and ${plural(outbound, "message", "messages")} went out.`;
 
   const connection =
@@ -233,9 +204,7 @@ export const describeAccountInsights = (
       ? "No chats observed yet"
       : insights.conversations.active === 0
         ? `${plural(insights.conversations.total, "chat", "chats")} in history, none active this week`
-        : insights.conversations.group === 0
-          ? `${plural(insights.conversations.active, "chat was", "chats were")} active this week`
-          : `${plural(insights.conversations.active, "chat was", "chats were")} active this week, including ${plural(insights.conversations.group, "group", "groups")}`;
+        : `${plural(insights.conversations.active, "chat was", "chats were")} active this week`;
 
   const apps =
     insights.authorizations.active === 0
@@ -258,16 +227,6 @@ export const describeAccountInsights = (
     connection,
     conversation,
     headline,
-    inboundChange: changeCopy(
-      inbound,
-      insights.messages.previousInbound,
-      "incoming",
-    ),
-    outboundChange: changeCopy(
-      outbound,
-      insights.messages.previousOutbound,
-      "outgoing",
-    ),
     sendNote,
   };
 };

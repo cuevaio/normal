@@ -308,8 +308,6 @@ describe("Account insights repository", () => {
     expect(insights.messages).toEqual({
       inbound: 2,
       outbound: 1,
-      previousInbound: 1,
-      previousOutbound: 0,
     });
     expect(insights.conversations).toEqual({
       active: 1,
@@ -353,8 +351,6 @@ describe("Account insights repository", () => {
     expect(other?.messages).toEqual({
       inbound: 1,
       outbound: 0,
-      previousInbound: 0,
-      previousOutbound: 0,
     });
     expect(other?.conversations).toEqual({
       active: 1,
@@ -368,5 +364,115 @@ describe("Account insights repository", () => {
     expect(
       await repository.readForUser("user_missing_insights", observedAt),
     ).toBeNull();
+  });
+
+  test("excludes deleting WhatsApp Connections from every aggregate", async () => {
+    const deletingId = "20000000-0000-4000-8000-000000000094";
+    const deletingConversationId = "70000000-0000-4000-8000-000000000094";
+    await database.query(
+      `INSERT INTO public.whatsapp_connections (
+         id, personal_account_id, webhook_ingress_id,
+         display_name_fallback, public_id, number_suffix, state,
+         state_changed_at, created_at
+       ) VALUES (
+         $1, $2, '30000000-0000-4000-8000-000000000094', 'Quiet Fox',
+         'con_123456789012345678994', '0000', 'deleting', $3, $4
+       )`,
+      [deletingId, accountId, observedAt, new Date("2026-07-01T00:00:00.000Z")],
+    );
+    await database.query(
+      `INSERT INTO public.whatsapp_conversations (
+         id, personal_account_id, whatsapp_connection_id, public_id, kind,
+         recipient_locator, recipient_public_id, last_activity_at,
+         last_activity_direction
+       ) VALUES (
+         $1, $2, $3, 'cvs_123456789012345678994', 'group', $4,
+         'grp_123456789012345678994', $5, 'inbound'
+       )`,
+      [
+        deletingConversationId,
+        accountId,
+        deletingId,
+        `wi1_${"d".repeat(43)}`,
+        activeConversationAt,
+      ],
+    );
+    await database.query(
+      `INSERT INTO public.stored_messages (
+         id, personal_account_id, whatsapp_connection_id, conversation_id,
+         public_id, message_identity, direction, sent_at, content_type,
+         content_ciphertext_version, content_key_version, content_nonce,
+         content_ciphertext, received_at, webhook_item_identity
+       ) VALUES (
+         '71000000-0000-4000-8000-000000000099', $1, $2, $3,
+         'msg_123456789012345678999', $4, 'inbound', $5, 'text',
+         1, 1, decode(repeat('11', 12), 'hex'), decode(repeat('12', 32), 'hex'),
+         $5, $4
+       )`,
+      [
+        accountId,
+        deletingId,
+        deletingConversationId,
+        `wi1_${"D".repeat(43)}`,
+        currentMessageAt,
+      ],
+    );
+    await database.query(
+      `INSERT INTO public.tool_call_logs (
+         id, personal_account_id, mcp_authorization_id, tool_name,
+         started_at, outcome, quota_reserved, expires_at
+       ) VALUES (
+         '50000000-0000-4000-8000-000000000091', $1, $2, 'send_text_message',
+         $3, 'started', true, $3::timestamptz + interval '90 days'
+       )`,
+      [accountId, authorizationId, currentMessageAt],
+    );
+    await database.query(
+      `INSERT INTO public.send_operations (
+         id, public_id, personal_account_id, mcp_authorization_id,
+         tool_call_log_id, whatsapp_connection_id, recipient_type,
+         recipient_public_id, status, created_at, status_changed_at,
+         attempt_claimed_at, lease_expires_at, expires_at
+       ) VALUES (
+         '60000000-0000-4000-8000-000000000091',
+         'snd_123456789012345678991', $1, $2,
+         '50000000-0000-4000-8000-000000000091', $3, 'contact',
+         'ctc_123456789012345678991', 'delivered', $4, $4, $4,
+         $4::timestamptz + interval '30 seconds',
+         $4::timestamptz + interval '90 days'
+       )`,
+      [accountId, authorizationId, deletingId, currentMessageAt],
+    );
+
+    const insights = await repository.readForUser(clerkUserId, observedAt);
+    expect(insights).not.toBeNull();
+    if (insights === null) throw new Error("expected insights");
+    expect(insights.connections).toEqual({
+      connected: 1,
+      needsAttention: 1,
+      total: 2,
+    });
+    expect(insights.messages).toEqual({
+      inbound: 2,
+      outbound: 1,
+    });
+    expect(insights.conversations).toEqual({
+      active: 1,
+      direct: 1,
+      group: 1,
+      total: 2,
+    });
+    expect(insights.sends).toEqual({
+      confirmed: 0,
+      failed: 0,
+      unknown: 0,
+    });
+    expect(
+      insights.series.find((point) => point.date === "2026-08-20"),
+    ).toEqual({
+      date: "2026-08-20",
+      inbound: 1,
+      outbound: 1,
+    });
   });
 });

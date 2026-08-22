@@ -310,8 +310,6 @@ const testAccountInsights = (observedAt: Date) => {
     messages: {
       inbound,
       outbound,
-      previousInbound: total > 0 ? 9 : 0,
-      previousOutbound: total > 0 ? 3 : 0,
     },
     sends: {
       confirmed: outbound,
