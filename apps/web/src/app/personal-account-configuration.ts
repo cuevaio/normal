@@ -24,6 +24,10 @@ export function getPersonalAccountConfiguration() {
     ).toString(),
     mcpServerUrl: new URL("/mcp", apiOrigin).toString(),
     activityLogsEndpoint: new URL("/v1/activity-logs", apiOrigin).toString(),
+    accountInsightsEndpoint: new URL(
+      "/v1/personal-account/insights",
+      apiOrigin,
+    ).toString(),
     connectionsEndpoint: new URL(
       "/v1/whatsapp-connections",
       apiOrigin,

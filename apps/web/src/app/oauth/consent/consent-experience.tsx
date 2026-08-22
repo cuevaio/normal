@@ -1,7 +1,8 @@
 "use client";
 
 import { useAuth, useClerk, useReverification } from "@clerk/nextjs";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/field";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { queryKeys } from "@/lib/query/keys";
 
 interface ConsentExperienceProps {
   readonly clerkJwtTemplate: string;
@@ -48,56 +50,53 @@ export function ConsentExperience({
 }: ConsentExperienceProps) {
   const { getToken, isLoaded } = useAuth();
   const clerk = useClerk();
-  const [inspection, setInspection] = useState<Inspection | null>(null);
   const [connections, setConnections] = useState<ReadonlyArray<string>>([]);
   const [scopes, setScopes] = useState<ReadonlyArray<string>>([]);
   const [readConfirmed, setReadConfirmed] = useState(false);
   const [sendConfirmed, setSendConfirmed] = useState(false);
-  const [state, setState] = useState<
-    "loading" | "ready" | "submitting" | "unavailable"
-  >("loading");
-
-  useEffect(() => {
-    let active = true;
-    const load = async () => {
-      try {
-        if (!isLoaded) return;
-        const token = await getToken({ template: clerkJwtTemplate });
-        if (!token) {
-          await clerk.openSignIn();
-          throw new Error("signed out");
-        }
-        const response = await fetch(inspectEndpoint, {
-          body: JSON.stringify({ request }),
-          headers: {
-            authorization: `Bearer ${token}`,
-            "content-type": "application/json",
-          },
-          method: "POST",
-        });
-        if (!response.ok) throw new Error("inspection unavailable");
-        const body = (await response.json()) as Inspection;
-        if (
-          typeof body.client?.name !== "string" ||
-          typeof body.presentation !== "string" ||
-          !Array.isArray(body.connections) ||
-          !Array.isArray(body.requested_scopes)
-        ) {
-          throw new Error("invalid inspection");
-        }
-        if (active) {
-          setInspection(body);
-          setState("ready");
-        }
-      } catch {
-        if (active) setState("unavailable");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitFailed, setSubmitFailed] = useState(false);
+  const inspectionQuery = useQuery({
+    enabled: isLoaded,
+    queryFn: async () => {
+      const token = await getToken({ template: clerkJwtTemplate });
+      if (!token) {
+        await clerk.openSignIn();
+        throw new Error("signed out");
       }
-    };
-    void load();
-    return () => {
-      active = false;
-    };
-  }, [clerk, clerkJwtTemplate, getToken, inspectEndpoint, isLoaded, request]);
+      const response = await fetch(inspectEndpoint, {
+        body: JSON.stringify({ request }),
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("inspection unavailable");
+      const body = (await response.json()) as Inspection;
+      if (
+        typeof body.client?.name !== "string" ||
+        typeof body.presentation !== "string" ||
+        !Array.isArray(body.connections) ||
+        !Array.isArray(body.requested_scopes)
+      ) {
+        throw new Error("invalid inspection");
+      }
+      return body;
+    },
+    queryKey: queryKeys.oauthInspection(request),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  const inspection = inspectionQuery.data ?? null;
+  const state = submitFailed
+    ? "unavailable"
+    : submitting
+      ? "submitting"
+      : !isLoaded || inspectionQuery.isPending
+        ? "loading"
+        : inspectionQuery.isError || inspection === null
+          ? "unavailable"
+          : "ready";
 
   const submitApproval = useReverification(async () => {
     const token = await getToken({ skipCache: true });
@@ -123,7 +122,7 @@ export function ConsentExperience({
 
   const submit = async (decision: "approve" | "deny") => {
     if (!inspection) return;
-    setState("submitting");
+    setSubmitting(true);
     try {
       const body =
         decision === "approve"
@@ -154,7 +153,8 @@ export function ConsentExperience({
       }
       window.location.assign(result.redirect_to);
     } catch {
-      setState("unavailable");
+      setSubmitFailed(true);
+      setSubmitting(false);
     }
   };
 

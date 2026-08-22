@@ -1,5 +1,11 @@
 import type { Layer } from "effect";
 import {
+  type AccountInsightsClockService,
+  type AccountInsightsPersistenceService,
+  createAccountInsightsHandler,
+  isAccountInsightsRequest,
+} from "./account-insights";
+import {
   type ActivityLogClockService,
   type ActivityLogPersistenceService,
   createActivityLogHandler,
@@ -114,6 +120,8 @@ type PublicBoundaryRequirements =
   | SafeTelemetryService
   | SendTextMessageService
   | StoredMediaContainer
+  | AccountInsightsClockService
+  | AccountInsightsPersistenceService
   | ActivityLogClockService
   | ActivityLogPersistenceService
   | WebhookIngressRequirements
@@ -246,6 +254,13 @@ export const createPublicBoundaryWorker = (
 
       if (isActivityLogRequest(request)) {
         return createActivityLogHandler(
+          options.layerFor(request, environment),
+          options.browserOrigin,
+        )(request);
+      }
+
+      if (isAccountInsightsRequest(request)) {
+        return createAccountInsightsHandler(
           options.layerFor(request, environment),
           options.browserOrigin,
         )(request);

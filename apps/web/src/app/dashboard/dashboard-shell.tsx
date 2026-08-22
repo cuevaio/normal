@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth, useClerk, useUser } from "@clerk/nextjs";
+import { useClerk, useUser } from "@clerk/nextjs";
 import {
   Activity,
   Cable,
@@ -13,10 +13,9 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { type ReactNode, useEffect, useState } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,11 +43,10 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ConfiguredPersonalAccountJourney } from "../configured-personal-account-journey";
 import type { getPersonalAccountConfiguration } from "../personal-account-configuration";
-import {
-  type PersonalAccountView,
-  PublicBoundaryJourney,
-} from "../public-boundary-journey";
+import type { PersonalAccountView } from "../public-boundary-journey";
+import { SignedInGate } from "../signed-in-gate";
 import { ApiKeysPanel } from "./api-keys/api-keys-panel";
 
 type PersonalAccountConfiguration = ReturnType<
@@ -200,6 +198,11 @@ const viewByPathname: Readonly<Record<string, PersonalAccountView>> = {
   "/dashboard/settings": "settings",
 };
 
+const firstConnectionOnboardingEntryPaths = new Set([
+  "/dashboard",
+  "/dashboard/connections",
+]);
+
 export function DashboardShell({
   children,
   configuration,
@@ -207,91 +210,58 @@ export function DashboardShell({
   readonly children: ReactNode;
   readonly configuration: PersonalAccountConfiguration;
 }) {
-  const { isLoaded, isSignedIn } = useAuth();
-  const clerk = useClerk();
   const pathname = usePathname();
+  const router = useRouter();
+  const isOnboardingEntry = firstConnectionOnboardingEntryPaths.has(pathname);
+  const [onboardingRequired, setOnboardingRequired] = useState<boolean | null>(
+    null,
+  );
 
-  if (!isLoaded) {
-    return (
-      <main className="grid min-h-screen place-items-center bg-muted/30 p-6">
-        <p className="text-sm text-muted-foreground">
-          Checking sign in status…
-        </p>
-      </main>
-    );
-  }
+  useEffect(() => {
+    if (isOnboardingEntry && onboardingRequired === true) {
+      router.replace("/onboarding");
+    }
+  }, [isOnboardingEntry, onboardingRequired, router]);
 
-  if (!isSignedIn) {
-    return (
-      <main className="grid min-h-screen place-items-center bg-muted/30 p-6">
-        <section className="w-full max-w-md rounded-2xl bg-background p-8 shadow-sm ring-1 ring-border">
-          <Link className="wordmark" href="/">
-            Normal<span aria-hidden="true">.</span>
-          </Link>
-          <h1 className="mt-10 text-3xl font-semibold tracking-tight">
-            Sign in to your dashboard
-          </h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Your dashboard is only available to authenticated Users.
-          </p>
-          <Button className="mt-8 w-full" onClick={() => clerk.openSignIn()}>
-            Sign in
-          </Button>
-        </section>
-      </main>
+  const journey =
+    pathname === "/dashboard/api-keys" && configuration !== null ? (
+      <ApiKeysPanel
+        apiKeysEndpoint={configuration.apiKeysEndpoint}
+        clerkJwtTemplate={configuration.clerkJwtTemplate}
+        connectionsEndpoint={configuration.connectionsEndpoint}
+      />
+    ) : (
+      <ConfiguredPersonalAccountJourney
+        configuration={configuration}
+        onFirstConnectionOnboardingChange={setOnboardingRequired}
+        view={viewByPathname[pathname] ?? "overview"}
+      />
     );
-  }
 
   return (
-    <TooltipProvider>
-      <SidebarProvider className="bg-muted/30">
-        <DashboardSidebar />
-        <SidebarInset className="bg-muted/30">
-          <div className="flex h-14 items-center border-b bg-background px-4 md:hidden">
-            <SidebarTrigger aria-label="Open dashboard navigation" />
-          </div>
+    <SignedInGate>
+      {isOnboardingEntry && onboardingRequired !== false ? (
+        <main className="min-h-screen bg-muted/30">
           <div className="dashboard-main">
-            {children}
-            <section className="dashboard-content">
-              {configuration === null ? (
-                <p className="text-sm text-muted-foreground">
-                  Your Personal Account is temporarily unavailable.
-                </p>
-              ) : pathname === "/dashboard/api-keys" ? (
-                <ApiKeysPanel
-                  apiKeysEndpoint={configuration.apiKeysEndpoint}
-                  clerkJwtTemplate={configuration.clerkJwtTemplate}
-                  connectionsEndpoint={configuration.connectionsEndpoint}
-                />
-              ) : (
-                <PublicBoundaryJourney
-                  autoInitialize
-                  clerkJwtTemplate={configuration.clerkJwtTemplate}
-                  connectionsEndpoint={configuration.connectionsEndpoint}
-                  connectionSetupEndpoint={
-                    configuration.connectionSetupEndpoint
-                  }
-                  mcpAuthorizationsEndpoint={
-                    configuration.mcpAuthorizationsEndpoint
-                  }
-                  mcpServerUrl={configuration.mcpServerUrl}
-                  onboardingProfileEndpoint={
-                    configuration.onboardingProfileEndpoint
-                  }
-                  personalAccountDeletionEndpoint={
-                    configuration.personalAccountDeletionEndpoint
-                  }
-                  personalAccountEndpoint={
-                    configuration.personalAccountEndpoint
-                  }
-                  activityLogsEndpoint={configuration.activityLogsEndpoint}
-                  view={viewByPathname[pathname] ?? "overview"}
-                />
-              )}
-            </section>
+            <section className="dashboard-content">{journey}</section>
           </div>
-        </SidebarInset>
-      </SidebarProvider>
-    </TooltipProvider>
+        </main>
+      ) : (
+        <TooltipProvider>
+          <SidebarProvider className="bg-muted/30">
+            <DashboardSidebar />
+            <SidebarInset className="bg-muted/30">
+              <div className="flex h-14 items-center border-b bg-background px-4 md:hidden">
+                <SidebarTrigger aria-label="Open dashboard navigation" />
+              </div>
+              <div className="dashboard-main">
+                {children}
+                <section className="dashboard-content">{journey}</section>
+              </div>
+            </SidebarInset>
+          </SidebarProvider>
+        </TooltipProvider>
+      )}
+    </SignedInGate>
   );
 }

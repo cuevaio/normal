@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: "MCP Authorizations | Normal" };
 export default function AuthorizationsPage() {
   return (
     <DashboardRoute
-      description="Review and revoke the MCP Clients that can access WhatsApp."
+      description="Connect Claude or ChatGPT, then review and revoke access."
       title="MCP Authorizations"
     />
   );
