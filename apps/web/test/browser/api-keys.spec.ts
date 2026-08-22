@@ -301,3 +301,63 @@ test("renders expired and revoked API Key dashboard states without recovery", as
     "normal_apk_123456789012345678901.abcdefghijklmnopqrstuvwxyz0123456789ABC",
   );
 });
+
+test("presents the API Key form as a dialog on desktop and a drawer on mobile", async ({
+  page,
+}) => {
+  await page.route("https://api.example.test/**", async (route) => {
+    const original = route.request();
+    const requestPath = new URL(original.url()).pathname;
+    if (
+      requestPath === "/v1/whatsapp-connections" &&
+      original.method() === "GET"
+    ) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          whatsapp_connections: [
+            {
+              display_name: "Personal WhatsApp",
+              id: connectionId,
+              number_suffix: "3456",
+              state: "connected",
+              state_changed_at: "2026-08-14T12:00:00.000Z",
+            },
+          ],
+        }),
+      });
+      return;
+    }
+    if (requestPath === "/v1/api-keys" && original.method() === "GET") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ api_keys: [] }),
+      });
+      return;
+    }
+    await route.fulfill({
+      body: JSON.stringify({ error: "not_found" }),
+      contentType: "application/json",
+      status: 404,
+    });
+  });
+  await installClerkBrowser(page, { signedIn: true });
+  await page.goto("/dashboard/api-keys");
+
+  const panel = page.getByRole("region", { name: "API Keys" });
+  await panel.getByRole("button", { name: "Create API Key" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Create an API Key" }),
+  ).toBeVisible();
+  await expect(page.locator("[data-slot=dialog-content]")).toBeVisible();
+  await expect(page.locator("[data-slot=drawer-popup]")).toHaveCount(0);
+  await page.getByRole("button", { name: "Close" }).click();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await panel.getByRole("button", { name: "Create API Key" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Create an API Key" }),
+  ).toBeVisible();
+  await expect(page.locator("[data-slot=drawer-popup]")).toBeVisible();
+  await expect(page.locator("[data-slot=dialog-content]")).toHaveCount(0);
+});

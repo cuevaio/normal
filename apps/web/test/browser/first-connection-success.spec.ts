@@ -2,8 +2,8 @@ import { expect, type Page, test } from "@playwright/test";
 import { installClerkBrowser } from "../support/clerk-browser";
 
 const choose = async (page: Page, label: string, option: string) => {
-  const onboarding = page.getByTestId("first-connection-onboarding");
-  await onboarding.getByLabel(label, { exact: true }).click();
+  const profile = page.getByRole("dialog", { name: "Onboarding profile" });
+  await profile.getByLabel(label, { exact: true }).click();
   await page.getByRole("option", { name: option, exact: true }).click();
 };
 
@@ -11,20 +11,26 @@ const reachActiveConnection = async (page: Page, client: string) => {
   const onboarding = page.getByTestId("first-connection-onboarding");
   await expect(onboarding).toBeVisible();
   await onboarding.getByRole("button", { name: "Start onboarding" }).click();
+  await onboarding.getByRole("button", { name: "Continue" }).click();
   await choose(page, "Primary use case", "Search WhatsApp Conversations");
   await choose(page, "WhatsApp usage context", "Personal");
   await choose(page, "Role", "Engineer");
   await choose(page, "Intended MCP Client", client);
   await choose(page, "Interested in a short research call?", "No");
-  await onboarding.getByRole("button", { name: "Save and continue" }).click();
+  await page
+    .getByRole("dialog", { name: "Onboarding profile" })
+    .getByRole("button", { name: "Save and continue" })
+    .click();
   await onboarding
     .getByRole("button", { name: "Review complete. Start Connection Setup" })
     .click();
-  await onboarding.getByLabel("Name", { exact: true }).fill("Setup draft name");
-  await onboarding.getByLabel("WhatsApp number").fill("+1 (555) 012-3456");
   await onboarding
     .getByRole("button", { name: "Continue", exact: true })
     .click();
+  const setup = page.getByRole("dialog", { name: "Connection Setup" });
+  await setup.getByLabel("Name", { exact: true }).fill("Setup draft name");
+  await setup.getByLabel("WhatsApp number").fill("+1 (555) 012-3456");
+  await setup.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Connect your MCP Client" }),
   ).toBeVisible({ timeout: 15_000 });

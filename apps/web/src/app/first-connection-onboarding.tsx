@@ -12,13 +12,23 @@ import {
   useState,
 } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { DialogBody, DialogFooter } from "@/components/ui/dialog";
 import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
+import {
+  FormOverlay,
+  FormOverlayBody,
+  FormOverlayClose,
+  FormOverlayContent,
+  FormOverlayDescription,
+  FormOverlayFooter,
+  FormOverlayHeader,
+  FormOverlayTitle,
+  FormOverlayTrigger,
+} from "@/components/ui/form-overlay";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -1068,8 +1078,10 @@ export function ConnectionSetupForm({
   if (layout === "dialog") {
     return (
       <form className="contents" onSubmit={onStartSetup}>
-        <DialogBody className="flex flex-col gap-5">{fields}</DialogBody>
-        <DialogFooter>{actions}</DialogFooter>
+        <FormOverlayBody className="flex flex-col gap-5">
+          {fields}
+        </FormOverlayBody>
+        <FormOverlayFooter>{actions}</FormOverlayFooter>
       </form>
     );
   }
@@ -1117,6 +1129,15 @@ export function FirstConnectionOnboarding({
       setupState: setupForm.setupState,
     }),
   );
+  const [setupOverlayOpen, setSetupOverlayOpen] = useState(
+    () => setupForm.setupId !== null,
+  );
+
+  useEffect(() => {
+    if (stage === "connection_setup" && setupForm.setupId !== null) {
+      setSetupOverlayOpen(true);
+    }
+  }, [setupForm.setupId, stage]);
   const viewedStages = useRef<Set<OnboardingStage>>(new Set());
   const completedStages = useRef<Set<OnboardingStage>>(new Set());
   const abandonedStages = useRef<Set<OnboardingStage>>(new Set());
@@ -1391,113 +1412,138 @@ export function FirstConnectionOnboarding({
       ) : null}
 
       {stage === "profile" ? (
-        <form
-          className="rounded-2xl bg-background p-5 ring-1 ring-border"
-          onSubmit={saveProfile}
-        >
+        <div className="rounded-2xl bg-background p-5 ring-1 ring-border">
           <p className="mb-5 max-w-2xl text-sm leading-6 text-muted-foreground">
             These fixed answers are stored on your Personal Account so the first
             Connection Setup can resume without repeating completed steps.
           </p>
-          <FieldGroup>
-            <SelectField
-              description="Pick the closest fit."
-              id="onboarding-primary-use-case"
-              label="Primary use case"
-              onChange={(value) => {
-                if (isPrimaryUseCase(value)) {
-                  setDraft((current) => ({
-                    ...current,
-                    primaryUseCase: value,
-                  }));
-                }
-              }}
-              options={primaryUseCaseOptions}
-              value={draft.primaryUseCase}
-            />
-            <SelectField
-              id="onboarding-whatsapp-usage-context"
-              label="WhatsApp usage context"
-              onChange={(value) => {
-                if (isWhatsAppUsageContext(value)) {
-                  setDraft((current) => ({
-                    ...current,
-                    whatsappUsageContext: value,
-                  }));
-                }
-              }}
-              options={whatsappUsageContextOptions}
-              value={draft.whatsappUsageContext}
-            />
-            <SelectField
-              id="onboarding-role"
-              label="Role"
-              onChange={(value) => {
-                if (isOnboardingRole(value)) {
-                  setDraft((current) => ({ ...current, role: value }));
-                }
-              }}
-              options={roleOptions}
-              value={draft.role}
-            />
-            <SelectField
-              id="onboarding-intended-mcp-client"
-              label="Intended MCP Client"
-              onChange={(value) => {
-                if (isIntendedMcpClient(value)) {
-                  setDraft((current) => ({
-                    ...current,
-                    intendedMcpClient: value,
-                  }));
-                }
-              }}
-              options={intendedMcpClientOptions}
-              value={draft.intendedMcpClient}
-            />
-          </FieldGroup>
-          <div className="mt-5 rounded-xl bg-muted/40 p-4">
-            <p className="text-sm font-medium">Optional research follow-up</p>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              This does not affect Connection Setup or MCP access. We only use
-              it to know whether we can ask about your onboarding later.
-            </p>
-            <div className="mt-4">
-              <SelectField
-                id="onboarding-research-call-interest"
-                label="Interested in a short research call?"
-                onChange={(value) => {
-                  if (isResearchCallInterest(value)) {
-                    setDraft((current) => ({
-                      ...current,
-                      researchCallInterest: value,
-                    }));
-                  }
-                }}
-                options={researchCallInterestOptions}
-                value={draft.researchCallInterest}
-              />
+          <FormOverlay>
+            <div className="flex justify-end">
+              <FormOverlayTrigger render={<Button />}>
+                Continue
+              </FormOverlayTrigger>
             </div>
-          </div>
-          {profileState === "unavailable" ? (
-            <p
-              aria-live="polite"
-              className="mt-4 rounded-lg bg-muted px-3 py-2.5 text-sm text-muted-foreground"
-            >
-              Onboarding profile could not be saved. Please try again.
-            </p>
-          ) : null}
-          <div className="mt-5 flex justify-end">
-            <Button
-              disabled={!isCompleteDraft(draft) || profileState === "saving"}
-              type="submit"
-            >
-              {profileState === "saving" ? (
-                <Spinner data-icon="inline-start" />
-              ) : null}
-              Save and continue
-            </Button>
-          </div>
-        </form>
+            <FormOverlayContent>
+              <FormOverlayHeader>
+                <FormOverlayTitle>Onboarding profile</FormOverlayTitle>
+                <FormOverlayDescription>
+                  Choose fixed options once so we can resume this journey and
+                  tailor the MCP client next step.
+                </FormOverlayDescription>
+              </FormOverlayHeader>
+              <form className="contents" onSubmit={saveProfile}>
+                <FormOverlayBody className="flex flex-col gap-5">
+                  <FieldGroup>
+                    <SelectField
+                      description="Pick the closest fit."
+                      id="onboarding-primary-use-case"
+                      label="Primary use case"
+                      onChange={(value) => {
+                        if (isPrimaryUseCase(value)) {
+                          setDraft((current) => ({
+                            ...current,
+                            primaryUseCase: value,
+                          }));
+                        }
+                      }}
+                      options={primaryUseCaseOptions}
+                      value={draft.primaryUseCase}
+                    />
+                    <SelectField
+                      id="onboarding-whatsapp-usage-context"
+                      label="WhatsApp usage context"
+                      onChange={(value) => {
+                        if (isWhatsAppUsageContext(value)) {
+                          setDraft((current) => ({
+                            ...current,
+                            whatsappUsageContext: value,
+                          }));
+                        }
+                      }}
+                      options={whatsappUsageContextOptions}
+                      value={draft.whatsappUsageContext}
+                    />
+                    <SelectField
+                      id="onboarding-role"
+                      label="Role"
+                      onChange={(value) => {
+                        if (isOnboardingRole(value)) {
+                          setDraft((current) => ({ ...current, role: value }));
+                        }
+                      }}
+                      options={roleOptions}
+                      value={draft.role}
+                    />
+                    <SelectField
+                      id="onboarding-intended-mcp-client"
+                      label="Intended MCP Client"
+                      onChange={(value) => {
+                        if (isIntendedMcpClient(value)) {
+                          setDraft((current) => ({
+                            ...current,
+                            intendedMcpClient: value,
+                          }));
+                        }
+                      }}
+                      options={intendedMcpClientOptions}
+                      value={draft.intendedMcpClient}
+                    />
+                  </FieldGroup>
+                  <div className="rounded-xl bg-muted/40 p-4">
+                    <p className="text-sm font-medium">
+                      Optional research follow-up
+                    </p>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                      This does not affect Connection Setup or MCP access. We
+                      only use it to know whether we can ask about your
+                      onboarding later.
+                    </p>
+                    <div className="mt-4">
+                      <SelectField
+                        id="onboarding-research-call-interest"
+                        label="Interested in a short research call?"
+                        onChange={(value) => {
+                          if (isResearchCallInterest(value)) {
+                            setDraft((current) => ({
+                              ...current,
+                              researchCallInterest: value,
+                            }));
+                          }
+                        }}
+                        options={researchCallInterestOptions}
+                        value={draft.researchCallInterest}
+                      />
+                    </div>
+                  </div>
+                  {profileState === "unavailable" ? (
+                    <p
+                      aria-live="polite"
+                      className="rounded-lg bg-muted px-3 py-2.5 text-sm text-muted-foreground"
+                    >
+                      Onboarding profile could not be saved. Please try again.
+                    </p>
+                  ) : null}
+                </FormOverlayBody>
+                <FormOverlayFooter>
+                  <FormOverlayClose render={<Button variant="outline" />}>
+                    Cancel
+                  </FormOverlayClose>
+                  <Button
+                    disabled={
+                      !isCompleteDraft(draft) || profileState === "saving"
+                    }
+                    type="submit"
+                  >
+                    {profileState === "saving" ? (
+                      <Spinner data-icon="inline-start" />
+                    ) : null}
+                    Save and continue
+                  </Button>
+                </FormOverlayFooter>
+              </form>
+            </FormOverlayContent>
+          </FormOverlay>
+        </div>
       ) : null}
 
       {stage === "security" ? (
@@ -1554,12 +1600,40 @@ export function FirstConnectionOnboarding({
             If this page refreshes after setup starts, Normal resumes the same
             Connection Setup instead of creating another one.
           </p>
-          <ConnectionSetupForm
-            {...setupForm}
-            idPrefix="first-connection"
-            layout="inline"
-            onStartSetup={startSetup}
-          />
+          <FormOverlay
+            onOpenChange={(open) => {
+              const durableActiveSetup =
+                setupForm.setupId !== null &&
+                setupForm.setupState !== "cancelled" &&
+                setupForm.setupState !== "expired" &&
+                setupForm.setupState !== "connected";
+              if (open || !durableActiveSetup) {
+                setSetupOverlayOpen(open);
+              }
+            }}
+            open={setupOverlayOpen}
+          >
+            <div className="flex justify-end">
+              <FormOverlayTrigger render={<Button />}>
+                Continue
+              </FormOverlayTrigger>
+            </div>
+            <FormOverlayContent>
+              <FormOverlayHeader>
+                <FormOverlayTitle>Connection Setup</FormOverlayTitle>
+                <FormOverlayDescription>
+                  Name the WhatsApp Connection, enter the number, then scan the
+                  QR code on your phone.
+                </FormOverlayDescription>
+              </FormOverlayHeader>
+              <ConnectionSetupForm
+                {...setupForm}
+                idPrefix="first-connection"
+                layout="dialog"
+                onStartSetup={startSetup}
+              />
+            </FormOverlayContent>
+          </FormOverlay>
         </div>
       ) : null}
 

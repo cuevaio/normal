@@ -6,23 +6,23 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Dialog,
-  DialogBody,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
   Field,
   FieldGroup,
   FieldLabel,
   FieldLegend,
   FieldSet,
 } from "@/components/ui/field";
+import {
+  FormOverlay,
+  FormOverlayBody,
+  FormOverlayClose,
+  FormOverlayContent,
+  FormOverlayDescription,
+  FormOverlayFooter,
+  FormOverlayHeader,
+  FormOverlayTitle,
+  FormOverlayTrigger,
+} from "@/components/ui/form-overlay";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -532,7 +532,7 @@ export function ApiKeysPanel({
                 Clients.
               </p>
             </div>
-            <Dialog
+            <FormOverlay
               onOpenChange={(open) => {
                 setCreateDialogOpen(open);
                 if (open) {
@@ -541,16 +541,18 @@ export function ApiKeysPanel({
               }}
               open={createDialogOpen}
             >
-              <DialogTrigger render={<Button />}>Create API Key</DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Create an API Key</DialogTitle>
-                  <DialogDescription>
+              <FormOverlayTrigger render={<Button />}>
+                Create API Key
+              </FormOverlayTrigger>
+              <FormOverlayContent>
+                <FormOverlayHeader>
+                  <FormOverlayTitle>Create an API Key</FormOverlayTitle>
+                  <FormOverlayDescription>
                     Choose a unique name, permissions, and the WhatsApp
                     Connections this credential may use. The plaintext is shown
                     once.
-                  </DialogDescription>
-                </DialogHeader>
+                  </FormOverlayDescription>
+                </FormOverlayHeader>
                 <form
                   className="contents"
                   onSubmit={(event) => {
@@ -558,7 +560,7 @@ export function ApiKeysPanel({
                     void create();
                   }}
                 >
-                  <DialogBody className="flex flex-col gap-5">
+                  <FormOverlayBody className="flex flex-col gap-5">
                     <Field>
                       <FieldLabel htmlFor="api-key-name">Name</FieldLabel>
                       <Input
@@ -653,19 +655,19 @@ export function ApiKeysPanel({
                         {createError}
                       </p>
                     )}
-                  </DialogBody>
-                  <DialogFooter>
-                    <DialogClose render={<Button variant="outline" />}>
+                  </FormOverlayBody>
+                  <FormOverlayFooter>
+                    <FormOverlayClose render={<Button variant="outline" />}>
                       Cancel
-                    </DialogClose>
+                    </FormOverlayClose>
                     <Button disabled={!canCreate} type="submit">
                       {creating ? <Spinner data-icon="inline-start" /> : null}
                       Create API Key
                     </Button>
-                  </DialogFooter>
+                  </FormOverlayFooter>
                 </form>
-              </DialogContent>
-            </Dialog>
+              </FormOverlayContent>
+            </FormOverlay>
           </div>
 
           {keys.length === 0 ? (
