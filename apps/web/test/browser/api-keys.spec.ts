@@ -138,6 +138,8 @@ test("creates, lists, and revokes an API Key across the browser-to-API boundary"
   expect(createRequests).toBe(1);
   expect(tokenRequests).toContainEqual({ skipCache: true });
   await expect(panel).not.toContainText("temporarily unavailable");
+  await expect(panel.getByRole("heading", { name: "CI" })).toBeVisible();
+  await expect(panel.getByTestId("api-key-state")).toHaveText("Active");
 
   const curlCommand = reveal.getByLabel("Send message curl command");
   await reveal.getByLabel("Recipient phone").fill("+12025550199");

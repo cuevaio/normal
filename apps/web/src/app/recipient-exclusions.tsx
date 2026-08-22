@@ -1,7 +1,11 @@
 "use client";
 
-import { makeIdempotencyKey } from "@whatsapp-mcp/contracts/handles";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -17,86 +21,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { queryKeys } from "@/lib/query/keys";
+import {
+  applyRecipientExclusion,
+  fetchRecipientPage,
+  flattenRecipientPages,
+  type Recipient,
+  type RecipientKind,
+  type RecipientPage,
+  setRecipientExclusion,
+} from "@/lib/query/resources";
 
 export interface RecipientConnection {
   readonly displayName: string | null;
   readonly id: string;
   readonly numberSuffix: string;
 }
-
-type RecipientKind = "contact" | "group";
-
-interface Recipient {
-  readonly displayName: string | null;
-  readonly excluded: boolean;
-  readonly id: string;
-  readonly kind: RecipientKind;
-  readonly phoneLastFour: string | null;
-}
-
-interface RecipientPage {
-  readonly directory: {
-    readonly asOf: string;
-    readonly partial: boolean;
-    readonly stale: boolean;
-  };
-  readonly nextCursor: string | null;
-  readonly recipients: ReadonlyArray<Recipient>;
-}
-
-type ListState = "idle" | "loading" | "ok" | "unavailable";
-
-const handlePattern = /^(?:ctc|grp)_[A-Za-z0-9_-]{21}$/u;
-
-const decodeRecipientPage = (value: unknown): RecipientPage | null => {
-  if (typeof value !== "object" || value === null) return null;
-  const body = value as Record<string, unknown>;
-  const directory = body.directory as Record<string, unknown> | undefined;
-  const nextCursor = body.next_cursor;
-  if (
-    typeof directory?.as_of !== "string" ||
-    typeof directory.partial !== "boolean" ||
-    typeof directory.stale !== "boolean" ||
-    !Array.isArray(body.recipients) ||
-    (nextCursor !== null &&
-      (typeof nextCursor !== "string" || !handlePattern.test(nextCursor)))
-  ) {
-    return null;
-  }
-  const recipients: Recipient[] = [];
-  for (const candidate of body.recipients) {
-    if (typeof candidate !== "object" || candidate === null) return null;
-    const recipient = candidate as Record<string, unknown>;
-    if (
-      typeof recipient.id !== "string" ||
-      !handlePattern.test(recipient.id) ||
-      (recipient.kind !== "contact" && recipient.kind !== "group") ||
-      typeof recipient.excluded !== "boolean" ||
-      (recipient.display_name !== null &&
-        typeof recipient.display_name !== "string") ||
-      (recipient.phone_last_four !== null &&
-        typeof recipient.phone_last_four !== "string")
-    ) {
-      return null;
-    }
-    recipients.push({
-      displayName: recipient.display_name as string | null,
-      excluded: recipient.excluded,
-      id: recipient.id,
-      kind: recipient.kind,
-      phoneLastFour: recipient.phone_last_four as string | null,
-    });
-  }
-  return {
-    directory: {
-      asOf: directory.as_of,
-      partial: directory.partial,
-      stale: directory.stale,
-    },
-    nextCursor: nextCursor as string | null,
-    recipients,
-  };
-};
 
 const recipientLabel = (recipient: Recipient) =>
   recipient.displayName ??
@@ -111,119 +51,89 @@ export function RecipientExclusions({
   readonly connectionsEndpoint: string;
   readonly getToken: () => Promise<string | null>;
 }) {
+  const queryClient = useQueryClient();
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [kind, setKind] = useState<RecipientKind>("contact");
   const [search, setSearch] = useState("");
-  const [page, setPage] = useState<RecipientPage | null>(null);
-  const [listState, setListState] = useState<ListState>("idle");
-  const [savingId, setSavingId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
-
   const selectedConnectionId = connectionId ?? connections[0]?.id ?? null;
-  // The caller recreates its token reader on every render, so reading through
-  // a ref keeps the load effect from restarting in a loop.
-  const tokenReader = useRef(getToken);
-  tokenReader.current = getToken;
-  // Changing the connection, kind, or search starts another request. Only the
-  // newest one may write state, so an out-of-order response cannot replace the
-  // current page or append recipients from a different selection.
-  const requestGeneration = useRef(0);
-
-  const load = useCallback(
-    async (cursor: string | null) => {
-      if (selectedConnectionId === null) return;
-      requestGeneration.current += 1;
-      const generation = requestGeneration.current;
-      setListState("loading");
-      try {
-        const token = await tokenReader.current();
-        if (token === null) throw new Error("signed out");
-        const url = new URL(
-          `${connectionsEndpoint}/${selectedConnectionId}/recipients`,
-        );
-        url.searchParams.set("kind", kind);
-        if (cursor !== null) url.searchParams.set("cursor", cursor);
-        // A safe display-name prefix needs at least three characters.
-        if (search.trim().length >= 3) {
-          url.searchParams.set("search", search.trim());
-        }
-        const response = await fetch(url, {
-          headers: { authorization: `Bearer ${token}` },
-        });
-        const decoded = decodeRecipientPage(await response.json());
-        if (!response.ok || decoded === null) {
-          throw new Error("recipients unavailable");
-        }
-        if (generation !== requestGeneration.current) return;
-        setPage((current) =>
-          cursor === null || current === null
-            ? decoded
-            : {
-                ...decoded,
-                recipients: [...current.recipients, ...decoded.recipients],
-              },
-        );
-        setListState("ok");
-      } catch {
-        if (generation !== requestGeneration.current) return;
-        setListState("unavailable");
-      }
+  const recipientsQuery = useInfiniteQuery({
+    enabled: selectedConnectionId !== null,
+    getNextPageParam: (page: RecipientPage) => page.nextCursor,
+    initialPageParam: null as string | null,
+    queryFn: async ({ pageParam }) => {
+      const token = await getToken();
+      if (token === null) throw new Error("signed out");
+      return fetchRecipientPage({
+        connectionId: selectedConnectionId as string,
+        cursor: pageParam,
+        endpoint: connectionsEndpoint,
+        kind,
+        search,
+        token,
+      });
     },
-    [connectionsEndpoint, kind, search, selectedConnectionId],
-  );
+    queryKey: queryKeys.recipients(
+      selectedConnectionId ?? "",
+      kind,
+      search.trim(),
+    ),
+  });
+  const exclusionMutation = useMutation({
+    mutationFn: async ({
+      excluded,
+      recipient,
+    }: {
+      readonly excluded: boolean;
+      readonly recipient: Recipient;
+    }) => {
+      if (selectedConnectionId === null) throw new Error("no connection");
+      const token = await getToken();
+      if (token === null) throw new Error("signed out");
+      return setRecipientExclusion({
+        connectionId: selectedConnectionId,
+        endpoint: connectionsEndpoint,
+        excluded,
+        expectedExcluded: recipient.excluded,
+        recipientId: recipient.id,
+        token,
+      });
+    },
+    onSuccess: (saved, { recipient }) => {
+      queryClient.setQueryData(
+        queryKeys.recipients(selectedConnectionId ?? "", kind, search.trim()),
+        (current: { pages: RecipientPage[] } | undefined) =>
+          current === undefined
+            ? current
+            : {
+                ...current,
+                pages: applyRecipientExclusion(
+                  current.pages,
+                  recipient.id,
+                  saved,
+                ),
+              },
+      );
+    },
+  });
 
-  useEffect(() => {
-    setPage(null);
-    void load(null);
-  }, [load]);
+  const page = flattenRecipientPages(recipientsQuery.data?.pages);
+  const listUnavailable =
+    recipientsQuery.isError && recipientsQuery.data === undefined;
+  const listLoading = recipientsQuery.isFetching;
 
   const setExcluded = async (recipient: Recipient, excluded: boolean) => {
-    if (selectedConnectionId === null || savingId !== null) return;
-    setSavingId(recipient.id);
+    if (selectedConnectionId === null || exclusionMutation.isPending) return;
     setStatus(
       excluded
         ? `Saving. Normal will stop tracking ${recipientLabel(recipient)}.`
         : `Saving. Normal may track ${recipientLabel(recipient)} again.`,
     );
     try {
-      const token = await tokenReader.current();
-      if (token === null) throw new Error("signed out");
-      const response = await fetch(
-        `${connectionsEndpoint}/${selectedConnectionId}/recipients/${recipient.id}/exclusion`,
-        {
-          body: JSON.stringify({
-            excluded,
-            expected_excluded: recipient.excluded,
-            // A retry reuses this key, so a network timeout cannot create
-            // conflicting transitions.
-            idempotency_key: makeIdempotencyKey(),
-          }),
-          headers: {
-            authorization: `Bearer ${token}`,
-            "content-type": "application/json",
-          },
-          method: "PUT",
-        },
-      );
-      const body = (await response.json()) as {
-        readonly exclusion?: { readonly excluded?: unknown };
-      };
-      if (!response.ok || typeof body.exclusion?.excluded !== "boolean") {
-        throw new Error("exclusion unavailable");
-      }
-      const saved = body.exclusion.excluded;
-      setPage((current) =>
-        current === null
-          ? current
-          : {
-              ...current,
-              recipients: current.recipients.map((entry) =>
-                entry.id === recipient.id
-                  ? { ...entry, excluded: saved }
-                  : entry,
-              ),
-            },
-      );
+      const saved = await exclusionMutation.mutateAsync({
+        excluded,
+        recipient,
+      });
       setStatus(
         saved
           ? `Normal no longer tracks ${recipientLabel(recipient)}.`
@@ -233,8 +143,6 @@ export function RecipientExclusions({
       setStatus(
         `Could not save ${recipientLabel(recipient)}. Other settings still work.`,
       );
-    } finally {
-      setSavingId(null);
     }
   };
 
@@ -262,7 +170,6 @@ export function RecipientExclusions({
             }))}
             onValueChange={(value) => {
               setConnectionId(String(value));
-              setPage(null);
             }}
             value={selectedConnectionId ?? ""}
           >
@@ -290,7 +197,6 @@ export function RecipientExclusions({
             ]}
             onValueChange={(value) => {
               setKind(value === "group" ? "group" : "contact");
-              setPage(null);
             }}
             value={kind}
           >
@@ -332,7 +238,7 @@ export function RecipientExclusions({
         </p>
       )}
 
-      {listState === "unavailable" ? (
+      {listUnavailable ? (
         <p className="text-sm text-muted-foreground">
           Your WhatsApp Directory is temporarily unavailable.
         </p>
@@ -361,12 +267,13 @@ export function RecipientExclusions({
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2 text-sm">
-              {savingId === recipient.id ? (
+              {exclusionMutation.isPending &&
+              exclusionMutation.variables?.recipient.id === recipient.id ? (
                 <Spinner data-icon="inline-start" />
               ) : null}
               <Checkbox
                 checked={recipient.excluded}
-                disabled={savingId !== null}
+                disabled={exclusionMutation.isPending}
                 id={`exclude-${recipient.id}`}
                 onCheckedChange={(checked) =>
                   void setExcluded(recipient, checked === true)
@@ -381,13 +288,13 @@ export function RecipientExclusions({
         ))}
       </ul>
 
-      {listState === "loading" ? (
+      {listLoading && page === null ? (
         <p className="text-sm text-muted-foreground">Loading recipients.</p>
       ) : null}
 
       {page?.nextCursor == null ? null : (
         <Button
-          onClick={() => void load(page.nextCursor)}
+          onClick={() => void recipientsQuery.fetchNextPage()}
           type="button"
           variant="outline"
         >

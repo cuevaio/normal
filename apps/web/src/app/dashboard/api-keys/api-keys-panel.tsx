@@ -1,7 +1,8 @@
 "use client";
 
 import { useAuth, useReverification } from "@clerk/nextjs";
-import { useCallback, useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -20,6 +21,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { queryKeys } from "@/lib/query/keys";
+import {
+  type ApiKeyRecord,
+  apiKeySummaryFromCreated,
+  applyApiKeyRevocation,
+  createApiKey,
+  fetchApiKeys,
+  fetchConnections,
+  revokeApiKey,
+  selectableConnections,
+  upsertApiKey,
+} from "@/lib/query/resources";
 
 const PERMISSIONS = [
   { id: "connections:read", label: "Connection metadata" },
@@ -27,28 +40,6 @@ const PERMISSIONS = [
   { id: "messages:read", label: "Stored Messages" },
   { id: "messages:send", label: "Send messages" },
 ] as const;
-
-type ApiKeyPermission = (typeof PERMISSIONS)[number]["id"];
-
-interface ApiKeySummary {
-  readonly connection_ids: ReadonlyArray<string>;
-  readonly created_at: string;
-  readonly credential_hint: string;
-  readonly expires_at: string | null;
-  readonly id: string;
-  readonly last_used_at: string | null;
-  readonly name: string;
-  readonly permissions: ReadonlyArray<ApiKeyPermission>;
-  readonly revoked_at: string | null;
-  readonly state: "active" | "expired" | "revoked";
-}
-
-interface SelectableConnection {
-  readonly displayName: string;
-  readonly id: string;
-  readonly numberSuffix: string;
-  readonly state: string;
-}
 
 interface RevealedApiKey {
   readonly connectionIds: ReadonlyArray<string>;
@@ -72,74 +63,6 @@ const toggle = (
 ): ReadonlyArray<string> =>
   checked ? [...selected, value] : selected.filter((item) => item !== value);
 
-const decodeKeys = (value: unknown): ReadonlyArray<ApiKeySummary> | null => {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !Array.isArray((value as { api_keys?: unknown }).api_keys)
-  ) {
-    return null;
-  }
-  const keys: ApiKeySummary[] = [];
-  for (const key of (value as { api_keys: ReadonlyArray<unknown> }).api_keys) {
-    if (
-      typeof key !== "object" ||
-      key === null ||
-      typeof (key as ApiKeySummary).id !== "string" ||
-      !/^apk_[A-Za-z0-9_-]{21}$/u.test((key as ApiKeySummary).id) ||
-      typeof (key as ApiKeySummary).name !== "string" ||
-      typeof (key as ApiKeySummary).credential_hint !== "string" ||
-      typeof (key as ApiKeySummary).created_at !== "string" ||
-      ((key as ApiKeySummary).state !== "active" &&
-        (key as ApiKeySummary).state !== "expired" &&
-        (key as ApiKeySummary).state !== "revoked") ||
-      !Array.isArray((key as ApiKeySummary).permissions) ||
-      !Array.isArray((key as ApiKeySummary).connection_ids)
-    ) {
-      return null;
-    }
-    keys.push(key as ApiKeySummary);
-  }
-  return keys;
-};
-
-const decodeConnections = (
-  value: unknown,
-): ReadonlyArray<SelectableConnection> | null => {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !Array.isArray(
-      (value as { whatsapp_connections?: unknown }).whatsapp_connections,
-    )
-  ) {
-    return null;
-  }
-  const connections: SelectableConnection[] = [];
-  for (const connection of (
-    value as {
-      whatsapp_connections: ReadonlyArray<Record<string, unknown>>;
-    }
-  ).whatsapp_connections) {
-    if (
-      typeof connection.display_name !== "string" ||
-      typeof connection.id !== "string" ||
-      !/^con_[A-Za-z0-9_-]{21}$/u.test(connection.id) ||
-      typeof connection.number_suffix !== "string" ||
-      connection.state === "deleting"
-    ) {
-      continue;
-    }
-    connections.push({
-      displayName: connection.display_name,
-      id: connection.id,
-      numberSuffix: connection.number_suffix,
-      state: String(connection.state),
-    });
-  }
-  return connections;
-};
-
 export function ApiKeysPanel({
   apiKeysEndpoint,
   clerkJwtTemplate,
@@ -152,13 +75,7 @@ export function ApiKeysPanel({
   const apiOrigin = new URL(apiKeysEndpoint).origin;
   const mcpEndpoint = `${apiOrigin}/mcp`;
   const { getToken, isLoaded } = useAuth();
-  const [keys, setKeys] = useState<ReadonlyArray<ApiKeySummary>>([]);
-  const [connections, setConnections] = useState<
-    ReadonlyArray<SelectableConnection>
-  >([]);
-  const [state, setState] = useState<"loading" | "ready" | "unavailable">(
-    "loading",
-  );
+  const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [permissions, setPermissions] = useState<ReadonlyArray<string>>([]);
   const [selectedConnections, setSelectedConnections] = useState<
@@ -166,7 +83,6 @@ export function ApiKeysPanel({
   >([]);
   const [expiresAt, setExpiresAt] = useState("");
   const [revealed, setRevealed] = useState<RevealedApiKey | null>(null);
-  const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [curlCopied, setCurlCopied] = useState(false);
   const [curlConnectionId, setCurlConnectionId] = useState("");
@@ -174,116 +90,107 @@ export function ApiKeysPanel({
   const [recipientPhone, setRecipientPhone] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const load = useCallback(
-    async (options?: { readonly preserveReveal?: boolean }) => {
-      const failClosed = () => {
-        if (options?.preserveReveal !== true) {
-          setState("unavailable");
-        }
-      };
-      try {
-        if (!isLoaded) return;
-        const token = await getToken({ template: clerkJwtTemplate });
-        if (!token) {
-          failClosed();
-          return;
-        }
-        const [keysResponse, connectionsResponse] = await Promise.all([
-          fetch(apiKeysEndpoint, {
-            headers: { authorization: `Bearer ${token}` },
-          }),
-          fetch(connectionsEndpoint, {
-            headers: { authorization: `Bearer ${token}` },
-          }),
-        ]);
-        const [keysBody, connectionsBody] = await Promise.all([
-          keysResponse.json(),
-          connectionsResponse.json(),
-        ]);
-        const decodedKeys = decodeKeys(keysBody);
-        const decodedConnections = decodeConnections(connectionsBody);
-        if (
-          !keysResponse.ok ||
-          decodedKeys === null ||
-          !connectionsResponse.ok ||
-          decodedConnections === null
-        ) {
-          failClosed();
-          return;
-        }
-        setKeys(decodedKeys);
-        setConnections(decodedConnections);
-        setState("ready");
-      } catch {
-        failClosed();
-      }
+  const readAccessToken = async () => {
+    if (!isLoaded) return null;
+    return getToken({ template: clerkJwtTemplate });
+  };
+
+  const keysQuery = useQuery({
+    enabled: isLoaded,
+    queryFn: async () => {
+      const token = await readAccessToken();
+      if (!token) throw new Error("signed out");
+      return fetchApiKeys(apiKeysEndpoint, token);
     },
-    [
-      apiKeysEndpoint,
-      clerkJwtTemplate,
-      connectionsEndpoint,
-      getToken,
-      isLoaded,
-    ],
-  );
+    queryKey: queryKeys.apiKeys(),
+  });
+  const connectionsQuery = useQuery({
+    enabled: isLoaded,
+    queryFn: async () => {
+      const token = await readAccessToken();
+      if (!token) throw new Error("signed out");
+      return fetchConnections(connectionsEndpoint, token);
+    },
+    queryKey: queryKeys.connections(),
+  });
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const submitCreate = useReverification(async () => {
-    const token = await getToken({ skipCache: true });
-    if (!token) throw new Error("token unavailable");
-    const response = await fetch(apiKeysEndpoint, {
-      body: JSON.stringify({
-        connection_ids: selectedConnections,
-        ...(expiresAt === ""
-          ? {}
-          : { expires_at: new Date(expiresAt).toISOString() }),
-        name,
-        permissions,
-      }),
-      headers: {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-      },
-      method: "POST",
-    });
-    return response.json();
+  const keys = keysQuery.data ?? [];
+  const connections = selectableConnections(connectionsQuery.data ?? []);
+  const creating = useMutation({
+    mutationFn: async () => {
+      const token = await getToken({ skipCache: true });
+      if (!token) throw new Error("token unavailable");
+      return createApiKey({
+        body: {
+          connection_ids: selectedConnections,
+          ...(expiresAt === ""
+            ? {}
+            : { expires_at: new Date(expiresAt).toISOString() }),
+          name,
+          permissions,
+        },
+        endpoint: apiKeysEndpoint,
+        token,
+      });
+    },
+    onSuccess: (result) => {
+      if (!result.ok) return;
+      queryClient.setQueryData(
+        queryKeys.apiKeys(),
+        (current: ReadonlyArray<ApiKeyRecord> | undefined) =>
+          upsertApiKey(current, apiKeySummaryFromCreated(result.created)),
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys() });
+    },
+  });
+  const submitCreate = useReverification(() => creating.mutateAsync());
+  const revokeMutation = useMutation({
+    mutationFn: async (key: ApiKeyRecord) => {
+      const token = await readAccessToken();
+      if (!token) throw new Error("signed out");
+      return revokeApiKey({
+        endpoint: apiKeysEndpoint,
+        id: key.id,
+        token,
+      });
+    },
+    onSuccess: (revoked) => {
+      queryClient.setQueryData(
+        queryKeys.apiKeys(),
+        (current: ReadonlyArray<ApiKeyRecord> | undefined) =>
+          applyApiKeyRevocation(current, revoked),
+      );
+    },
   });
 
   const create = async () => {
-    setCreating(true);
     setCopied(false);
     setCreateError(null);
     try {
-      const body = (await submitCreate()) as {
-        readonly credential?: unknown;
-        readonly error?: unknown;
-      };
-      if (typeof body.credential !== "string") {
-        if (body.error === "duplicate_name") {
+      const result = await submitCreate();
+      if (!result.ok) {
+        if (result.error === "duplicate_name") {
           setCreateError("An active API Key already uses this name.");
           return;
         }
-        if (body.error === "limit_reached") {
+        if (result.error === "limit_reached") {
           setCreateError(
             "This Personal Account already has ten active API Keys.",
           );
           return;
         }
-        if (body.error === "invalid") {
+        if (result.error === "invalid") {
           setCreateError(
             "Check the name, permissions, Connections, and expiry.",
           );
           return;
         }
-        setState("unavailable");
+        setCreateError("API Key creation was cancelled or failed. Try again.");
         return;
       }
       setRevealed({
         connectionIds: selectedConnections,
-        credential: body.credential,
+        credential: result.created.credential,
         permissions,
       });
       setCurlConnectionId(selectedConnections[0] ?? "");
@@ -294,32 +201,19 @@ export function ApiKeysPanel({
       setPermissions([]);
       setSelectedConnections([]);
       setExpiresAt("");
-      setState("ready");
-      await load({ preserveReveal: true });
     } catch {
       setCreateError("API Key creation was cancelled or failed. Try again.");
-    } finally {
-      setCreating(false);
     }
   };
 
-  const revoke = async (key: ApiKeySummary) => {
-    const token = await getToken({ template: clerkJwtTemplate });
-    if (!token) return;
-    const response = await fetch(
-      `${apiKeysEndpoint}/${encodeURIComponent(key.id)}`,
-      {
-        headers: { authorization: `Bearer ${token}` },
-        method: "DELETE",
-      },
-    );
-    if (!response.ok) {
-      if (revealed === null) {
-        setState("unavailable");
+  const revoke = async (key: ApiKeyRecord) => {
+    try {
+      await revokeMutation.mutateAsync(key);
+    } catch {
+      if (revealed === null && keysQuery.data === undefined) {
+        return;
       }
-      return;
     }
-    await load({ preserveReveal: true });
   };
 
   const copyCredential = async () => {
@@ -353,12 +247,17 @@ export function ApiKeysPanel({
     setCurlCopied(true);
   };
 
+  const initialUnavailable =
+    (keysQuery.isError && keysQuery.data === undefined) ||
+    (connectionsQuery.isError && connectionsQuery.data === undefined);
+  const ready =
+    keysQuery.data !== undefined && connectionsQuery.data !== undefined;
   const canCreate =
-    state === "ready" &&
+    ready &&
     name.trim().length > 0 &&
     permissions.length > 0 &&
     selectedConnections.length > 0 &&
-    !creating;
+    !creating.isPending;
 
   return (
     <section aria-label="API Keys" className="flex flex-col gap-8">
@@ -385,9 +284,12 @@ export function ApiKeysPanel({
         </pre>
       </section>
 
-      {state === "loading" ? (
+      {!isLoaded ||
+      (!ready &&
+        !initialUnavailable &&
+        (keysQuery.isPending || connectionsQuery.isPending)) ? (
         <p aria-live="polite">Loading API Keys…</p>
-      ) : state === "unavailable" ? (
+      ) : initialUnavailable ? (
         <p aria-live="polite">API Keys are temporarily unavailable.</p>
       ) : (
         <>
@@ -693,7 +595,9 @@ export function ApiKeysPanel({
                       {key.connection_ids.join(", ")}
                     </p>
                     <Button
-                      disabled={key.state !== "active"}
+                      disabled={
+                        key.state !== "active" || revokeMutation.isPending
+                      }
                       onClick={() => void revoke(key)}
                       type="button"
                       variant="outline"
