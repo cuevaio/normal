@@ -334,10 +334,12 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   await expect(
     page.getByRole("img", { name: "Scan this WhatsApp QR code" }),
   ).toHaveCount(0);
+  await setup.getByRole("button", { name: "Close" }).click();
   await page.getByRole("link", { name: "Activity Log" }).click();
   await page.getByRole("link", { name: "WhatsApp Connections" }).click();
+  await expect(page.getByTestId("first-connection-onboarding")).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Start Connection Setup" }),
+    page.getByRole("dialog", { name: "Connection Setup" }),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Review security before you scan" }),
@@ -942,7 +944,7 @@ test("starts irreversible Connection Deletion and keeps the deleted connection g
       page.getByRole("img", { name: "Scan this WhatsApp QR code" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "WhatsApp Connection active" }),
+      page.getByRole("heading", { name: "Connect your MCP Client" }),
     ).toBeVisible({ timeout: 15_000 });
     await onboarding.getByRole("button", { name: "Go to dashboard" }).click();
   }

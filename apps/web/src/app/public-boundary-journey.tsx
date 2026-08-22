@@ -2334,7 +2334,6 @@ export function PublicBoundaryJourney({
                 <ConnectionSetupForm
                   connectionName={connectionName}
                   idPrefix="additional-connection"
-                  layout="dialog"
                   onCancelSetup={cancelSetup}
                   onConnectionNameChange={updateConnectionName}
                   onResetSetup={clearSetupDraft}

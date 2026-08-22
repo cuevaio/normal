@@ -169,7 +169,6 @@ type ProfileSelectValue =
 export interface ConnectionSetupFormProps {
   readonly connectionName: string;
   readonly idPrefix: string;
-  readonly layout: "dialog" | "inline";
   readonly onCancelSetup: () => void;
   readonly onResetSetup: () => void;
   readonly onConnectionNameChange: (value: string) => void;
@@ -190,7 +189,7 @@ interface FirstConnectionOnboardingProps {
   readonly onboardingProfileEndpoint: string;
   readonly onComplete: () => void;
   readonly onProfileSaved: (profile: OnboardingProfile) => void;
-  readonly setupForm: Omit<ConnectionSetupFormProps, "idPrefix" | "layout">;
+  readonly setupForm: Omit<ConnectionSetupFormProps, "idPrefix">;
 }
 
 const primaryUseCaseOptions = [
@@ -907,7 +906,6 @@ function VerificationPromptCard({
 export function ConnectionSetupForm({
   connectionName,
   idPrefix,
-  layout,
   onCancelSetup,
   onResetSetup,
   onConnectionNameChange,
@@ -1075,23 +1073,12 @@ export function ConnectionSetupForm({
     </>
   );
 
-  if (layout === "dialog") {
-    return (
-      <form className="contents" onSubmit={onStartSetup}>
-        <FormOverlayBody className="flex flex-col gap-5">
-          {fields}
-        </FormOverlayBody>
-        <FormOverlayFooter>{actions}</FormOverlayFooter>
-      </form>
-    );
-  }
-
   return (
-    <form className="flex flex-col gap-5" onSubmit={onStartSetup}>
-      <div className="flex flex-col gap-5">{fields}</div>
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        {actions}
-      </div>
+    <form className="contents" onSubmit={onStartSetup}>
+      <FormOverlayBody className="flex flex-col gap-5">
+        {fields}
+      </FormOverlayBody>
+      <FormOverlayFooter>{actions}</FormOverlayFooter>
     </form>
   );
 }
@@ -1601,16 +1588,7 @@ export function FirstConnectionOnboarding({
             Connection Setup instead of creating another one.
           </p>
           <FormOverlay
-            onOpenChange={(open) => {
-              const durableActiveSetup =
-                setupForm.setupId !== null &&
-                setupForm.setupState !== "cancelled" &&
-                setupForm.setupState !== "expired" &&
-                setupForm.setupState !== "connected";
-              if (open || !durableActiveSetup) {
-                setSetupOverlayOpen(open);
-              }
-            }}
+            onOpenChange={setSetupOverlayOpen}
             open={setupOverlayOpen}
           >
             <div className="flex justify-end">
@@ -1629,7 +1607,6 @@ export function FirstConnectionOnboarding({
               <ConnectionSetupForm
                 {...setupForm}
                 idPrefix="first-connection"
-                layout="dialog"
                 onStartSetup={startSetup}
               />
             </FormOverlayContent>

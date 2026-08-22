@@ -1,12 +1,14 @@
 "use client";
 
-import { Drawer as DrawerPrimitive } from "@base-ui/react/drawer";
 import {
   type ComponentProps,
   createContext,
   type ReactNode,
   useContext,
+  useEffect,
+  useState,
 } from "react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogBody,
@@ -29,11 +31,12 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@/components/ui/drawer";
-import { useIsMobile } from "@/hooks/use-mobile";
 
-type FormOverlayMode = "dialog" | "drawer";
+const MOBILE_BREAKPOINT = 768;
 
-const FormOverlayModeContext = createContext<FormOverlayMode>("dialog");
+type FormOverlayMode = "dialog" | "drawer" | "pending";
+
+const FormOverlayModeContext = createContext<FormOverlayMode>("pending");
 
 function useFormOverlayMode() {
   return useContext(FormOverlayModeContext);
@@ -50,24 +53,34 @@ function FormOverlay({
   readonly onOpenChange?: (open: boolean) => void;
   readonly open?: boolean;
 }) {
-  const isMobile = useIsMobile();
-  const mode: FormOverlayMode = isMobile ? "drawer" : "dialog";
+  const [mode, setMode] = useState<Exclude<FormOverlayMode, "pending"> | null>(
+    null,
+  );
+
+  useEffect(() => {
+    setMode(window.innerWidth < MOBILE_BREAKPOINT ? "drawer" : "dialog");
+  }, []);
+
   const handleOpenChange = (next: boolean) => onOpenChange?.(next);
+
+  if (mode === null) {
+    return (
+      <FormOverlayModeContext.Provider value="pending">
+        {children}
+      </FormOverlayModeContext.Provider>
+    );
+  }
 
   return (
     <FormOverlayModeContext.Provider value={mode}>
       {mode === "drawer" ? (
-        <DrawerPrimitive.VirtualKeyboardProvider>
-          <Drawer
-            defaultOpen={defaultOpen}
-            onOpenChange={handleOpenChange}
-            open={open}
-            showSwipeHandle
-            swipeDirection="down"
-          >
-            {children}
-          </Drawer>
-        </DrawerPrimitive.VirtualKeyboardProvider>
+        <Drawer
+          defaultOpen={defaultOpen}
+          onOpenChange={handleOpenChange}
+          open={open}
+        >
+          {children}
+        </Drawer>
       ) : (
         <Dialog
           defaultOpen={defaultOpen}
@@ -83,6 +96,13 @@ function FormOverlay({
 
 function FormOverlayTrigger(props: ComponentProps<typeof DialogTrigger>) {
   const mode = useFormOverlayMode();
+  if (mode === "pending") {
+    return (
+      <Button disabled type="button">
+        {props.children}
+      </Button>
+    );
+  }
   return mode === "drawer" ? (
     <DrawerTrigger {...props} />
   ) : (
@@ -92,6 +112,9 @@ function FormOverlayTrigger(props: ComponentProps<typeof DialogTrigger>) {
 
 function FormOverlayClose(props: ComponentProps<typeof DialogClose>) {
   const mode = useFormOverlayMode();
+  if (mode === "pending") {
+    return null;
+  }
   return mode === "drawer" ? (
     <DrawerClose {...props} />
   ) : (
@@ -109,6 +132,9 @@ function FormOverlayContent({
   readonly showCloseButton?: boolean;
 }) {
   const mode = useFormOverlayMode();
+  if (mode === "pending") {
+    return null;
+  }
   return mode === "drawer" ? (
     <DrawerContent
       className={className}

@@ -1,49 +1,13 @@
 "use client";
 
-import { Drawer as DrawerPrimitive } from "@base-ui/react/drawer";
+import { Dialog as DrawerPrimitive } from "@base-ui/react/dialog";
 import { XIcon } from "lucide-react";
-import * as React from "react";
+import type * as React from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-type DrawerContextValue = {
-  readonly modal: DrawerPrimitive.Root.Props["modal"];
-  readonly showSwipeHandle: boolean;
-};
-
-const DrawerContext = React.createContext<DrawerContextValue | null>(null);
-
-function useDrawer() {
-  const context = React.useContext(DrawerContext);
-  if (context === null) {
-    throw new Error("useDrawer must be used within a Drawer.");
-  }
-  return context;
-}
-
-function Drawer({
-  modal = true,
-  showSwipeHandle = true,
-  swipeDirection = "down",
-  ...props
-}: DrawerPrimitive.Root.Props & {
-  showSwipeHandle?: boolean;
-}) {
-  const contextValue = React.useMemo(
-    () => ({ modal, showSwipeHandle }),
-    [modal, showSwipeHandle],
-  );
-
-  return (
-    <DrawerContext.Provider value={contextValue}>
-      <DrawerPrimitive.Root
-        data-slot="drawer"
-        modal={modal}
-        swipeDirection={swipeDirection}
-        {...props}
-      />
-    </DrawerContext.Provider>
-  );
+function Drawer({ ...props }: DrawerPrimitive.Root.Props) {
+  return <DrawerPrimitive.Root data-slot="drawer" {...props} />;
 }
 
 function DrawerTrigger({ ...props }: DrawerPrimitive.Trigger.Props) {
@@ -80,73 +44,49 @@ function DrawerOverlay({
   );
 }
 
-function DrawerSwipeHandle({
-  className,
-  ...props
-}: React.ComponentProps<"div">) {
-  return (
-    <div
-      aria-hidden="true"
-      className={cn(
-        "flex h-5 shrink-0 items-end justify-center pt-2",
-        className,
-      )}
-      data-slot="drawer-swipe-handle"
-      {...props}
-    >
-      <span className="h-1 w-12 rounded-full bg-muted-foreground/30" />
-    </div>
-  );
-}
-
 function DrawerContent({
   className,
   children,
   showCloseButton = true,
   ...props
 }: DrawerPrimitive.Popup.Props & { showCloseButton?: boolean }) {
-  const { modal, showSwipeHandle } = useDrawer();
-
   return (
     <DrawerPortal>
-      {modal === true ? <DrawerOverlay /> : null}
-      <DrawerPrimitive.Viewport
-        className="pointer-events-none fixed inset-0 z-50"
-        data-modal={modal}
-        data-slot="drawer-viewport"
-      >
+      <DrawerOverlay />
+      <div className="pointer-events-none fixed inset-0 z-50 flex items-end justify-center">
         <DrawerPrimitive.Popup
           className={cn(
-            "pointer-events-auto group/drawer-popup fixed inset-x-0 bottom-0 z-50 flex max-h-[90dvh] w-full origin-bottom flex-col overflow-hidden rounded-t-xl bg-popover text-sm text-popover-foreground shadow-[0_-24px_80px_-24px_rgb(0_0_0/0.35),0_-8px_24px_-12px_rgb(0_0_0/0.18)] ring-1 ring-foreground/10 outline-none transition-[opacity,transform] duration-200 ease-[var(--ease-out)] data-ending-style:translate-y-4 data-ending-style:opacity-0 data-starting-style:translate-y-4 data-starting-style:opacity-0",
+            "pointer-events-auto relative flex max-h-[90dvh] w-full origin-bottom flex-col overflow-hidden rounded-t-xl bg-popover text-sm text-popover-foreground shadow-[0_-24px_80px_-24px_rgb(0_0_0/0.35),0_-8px_24px_-12px_rgb(0_0_0/0.18)] ring-1 ring-foreground/10 outline-none transition-[opacity,transform] duration-200 ease-[var(--ease-out)] data-ending-style:translate-y-4 data-ending-style:opacity-0 data-starting-style:translate-y-4 data-starting-style:opacity-0",
             className,
           )}
           data-slot="drawer-popup"
           {...props}
         >
-          {showSwipeHandle ? <DrawerSwipeHandle /> : null}
-          <DrawerPrimitive.Content
-            className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
-            data-slot="drawer-content"
+          <div
+            aria-hidden="true"
+            className="flex h-5 shrink-0 items-end justify-center pt-2"
+            data-slot="drawer-swipe-handle"
           >
-            {children}
-            {showCloseButton ? (
-              <DrawerPrimitive.Close
-                data-slot="drawer-close"
-                render={
-                  <Button
-                    className="absolute top-4 right-4 text-muted-foreground hover:text-foreground"
-                    size="icon-sm"
-                    variant="ghost"
-                  />
-                }
-              >
-                <XIcon />
-                <span className="sr-only">Close</span>
-              </DrawerPrimitive.Close>
-            ) : null}
-          </DrawerPrimitive.Content>
+            <span className="h-1 w-12 rounded-full bg-muted-foreground/30" />
+          </div>
+          {children}
+          {showCloseButton ? (
+            <DrawerPrimitive.Close
+              data-slot="drawer-close"
+              render={
+                <Button
+                  className="absolute top-4 right-4 text-muted-foreground hover:text-foreground"
+                  size="icon-sm"
+                  variant="ghost"
+                />
+              }
+            >
+              <XIcon />
+              <span className="sr-only">Close</span>
+            </DrawerPrimitive.Close>
+          ) : null}
         </DrawerPrimitive.Popup>
-      </DrawerPrimitive.Viewport>
+      </div>
     </DrawerPortal>
   );
 }
@@ -226,7 +166,6 @@ export {
   DrawerHeader,
   DrawerOverlay,
   DrawerPortal,
-  DrawerSwipeHandle,
   DrawerTitle,
   DrawerTrigger,
 };

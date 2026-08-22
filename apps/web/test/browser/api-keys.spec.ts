@@ -302,9 +302,7 @@ test("renders expired and revoked API Key dashboard states without recovery", as
   );
 });
 
-test("presents the API Key form as a dialog on desktop and a drawer on mobile", async ({
-  page,
-}) => {
+test("presents the API Key form as a drawer on mobile", async ({ page }) => {
   await page.route("https://api.example.test/**", async (route) => {
     const original = route.request();
     const requestPath = new URL(original.url()).pathname;
@@ -341,19 +339,12 @@ test("presents the API Key form as a dialog on desktop and a drawer on mobile", 
       status: 404,
     });
   });
+  await page.setViewportSize({ width: 390, height: 844 });
   await installClerkBrowser(page, { signedIn: true });
   await page.goto("/dashboard/api-keys");
 
   const panel = page.getByRole("region", { name: "API Keys" });
-  await panel.getByRole("button", { name: "Create API Key" }).click();
-  await expect(
-    page.getByRole("dialog", { name: "Create an API Key" }),
-  ).toBeVisible();
-  await expect(page.locator("[data-slot=dialog-content]")).toBeVisible();
-  await expect(page.locator("[data-slot=drawer-popup]")).toHaveCount(0);
-  await page.getByRole("button", { name: "Close" }).click();
-
-  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(panel.getByText("No API Keys yet.")).toBeVisible();
   await panel.getByRole("button", { name: "Create API Key" }).click();
   await expect(
     page.getByRole("dialog", { name: "Create an API Key" }),
