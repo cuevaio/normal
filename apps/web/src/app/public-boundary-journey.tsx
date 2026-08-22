@@ -1302,9 +1302,13 @@ export function PublicBoundaryJourney({
   }, [view]);
 
   useEffect(() => {
-    if (state !== "ok") return;
+    if (!dashboardReady) return;
     onFirstConnectionOnboardingChange?.(showFirstConnectionOnboarding);
-  }, [onFirstConnectionOnboardingChange, showFirstConnectionOnboarding, state]);
+  }, [
+    dashboardReady,
+    onFirstConnectionOnboardingChange,
+    showFirstConnectionOnboarding,
+  ]);
 
   useEffect(() => {
     if (view !== "overview") return;
