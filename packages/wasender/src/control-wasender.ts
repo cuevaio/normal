@@ -34,11 +34,9 @@ const webhookEvents = [
   "groups.upsert",
   "message-receipt.update",
   "message.sent",
-  "messages-group.received",
-  "messages-personal.received",
   "messages.delete",
-  "messages.received",
   "messages.update",
+  // Received variants overlap this complete stream and can race media-bearing deliveries.
   "messages.upsert",
   "session.status",
 ] as const;

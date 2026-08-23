@@ -26,13 +26,16 @@ const webhookEvents = [
   "groups.upsert",
   "message-receipt.update",
   "message.sent",
-  "messages-group.received",
-  "messages-personal.received",
   "messages.delete",
-  "messages.received",
   "messages.update",
   "messages.upsert",
   "session.status",
+];
+const overlappingWebhookEvents = [
+  ...webhookEvents,
+  "messages-group.received",
+  "messages-personal.received",
+  "messages.received",
 ];
 
 const providerSession = (overrides: Record<string, unknown> = {}) => ({
@@ -145,16 +148,25 @@ describe("real Wasender lifecycle adapter", () => {
     );
   });
 
-  test("repairs group webhook delivery on an existing provider session", async () => {
+  test("repairs overlapping inbound message subscriptions", async () => {
     const requests: Request[] = [];
     const responses = [
       json({
         success: true,
-        data: [providerSession({ api_key: undefined, ignore_groups: true })],
+        data: [
+          providerSession({
+            api_key: undefined,
+            ignore_groups: true,
+            webhook_events: overlappingWebhookEvents,
+          }),
+        ],
       }),
       json({
         success: true,
-        data: providerSession({ ignore_groups: true }),
+        data: providerSession({
+          ignore_groups: true,
+          webhook_events: overlappingWebhookEvents,
+        }),
       }),
       json({ success: true, data: providerSession() }),
       json({ success: true, data: providerSession() }),
@@ -181,7 +193,7 @@ describe("real Wasender lifecycle adapter", () => {
     ]);
     expect(await requests[2]?.json()).toMatchObject({
       ignore_groups: false,
-      webhook_events: expect.arrayContaining(["messages-group.received"]),
+      webhook_events: webhookEvents,
     });
     expect(result.connectionState).toBe("connecting");
   });
