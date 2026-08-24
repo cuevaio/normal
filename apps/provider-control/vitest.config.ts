@@ -9,6 +9,7 @@ export default defineConfig({
           WASENDER_API_CREDENTIAL: "pat_0123456789abcdef0123456789abcdef",
           WASENDER_REFERENCE_SECRET:
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          WEBSHARE_API_KEY: "webshare_api_key_fixture",
         },
       },
       wrangler: {

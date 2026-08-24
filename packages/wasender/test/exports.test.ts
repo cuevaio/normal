@@ -17,6 +17,7 @@ describe("@whatsapp-mcp/wasender boundaries", () => {
       "./media",
       "./session",
       "./webhook",
+      "./webshare",
     ]);
     expect(packageManifest.exports).not.toHaveProperty(".");
     expect(sessionExports).toHaveProperty("makeWasenderTextSending");

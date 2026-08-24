@@ -3,6 +3,7 @@ import {
   SessionLifecycle,
   type WasenderLifecycleTelemetryEvent,
 } from "@whatsapp-mcp/wasender/control";
+import { makeWebshareProxySelector } from "@whatsapp-mcp/wasender/webshare";
 import { Config, ConfigProvider, Effect, Layer, Redacted } from "effect";
 import { createCanaryHandler } from "./canary";
 import { makeProviderControlRpc } from "./rpc";
@@ -14,6 +15,7 @@ import {
 
 export interface ProviderControlEnvironment {
   readonly DEPLOYMENT_ENVIRONMENT?: string | undefined;
+  readonly WEBSHARE_API_KEY?: string | undefined;
   readonly WASENDER_API_CREDENTIAL?: string | undefined;
   readonly WASENDER_REFERENCE_SECRET?: string | undefined;
 }
@@ -43,6 +45,13 @@ const providerReferenceSecret = Config.redacted(
   Config.validate({
     message: "WASENDER_REFERENCE_SECRET must be a 32-byte hex secret",
     validation: (value) => /^[0-9a-f]{64}$/iu.test(Redacted.value(value)),
+  }),
+);
+
+const webshareApiKey = Config.redacted("WEBSHARE_API_KEY").pipe(
+  Config.validate({
+    message: "WEBSHARE_API_KEY must be a non-placeholder API key",
+    validation: (value) => isProviderApiCredential(Redacted.value(value)),
   }),
 );
 
@@ -83,9 +92,11 @@ const sessionLifecycleEffect = (environment: ProviderControlEnvironment) =>
   Config.all({
     credential: providerApiCredential,
     referenceSecret: providerReferenceSecret,
+    webshareApiKey,
   }).pipe(
-    Effect.map((config) =>
+    Effect.map(({ webshareApiKey: apiKey, ...config }) =>
       makeWasenderSessionLifecycle(config, {
+        proxySelector: makeWebshareProxySelector({ apiKey }),
         telemetry: providerTelemetry,
       }),
     ),

@@ -61,6 +61,43 @@ describe("provider-control Worker entrypoint", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  test("serializes provider allocation operations through one gate", async () => {
+    const requests: Request[] = [];
+    let releaseFirst: () => void = () => undefined;
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let markFirstStarted: () => void = () => undefined;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      requests.push(request);
+      if (requests.length === 1) {
+        markFirstStarted();
+        await firstRelease;
+      }
+      return new Response(JSON.stringify({ data: [], success: true }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const first = exports.default.reconcileSession({
+      setupMarker: "cst_0123456789abcdefghijk",
+    });
+    await firstStarted;
+    const second = exports.default.reconcileSession({
+      setupMarker: "cst_0123456789abcdefghijl",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(requests).toHaveLength(1);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(requests).toHaveLength(2);
+  });
+
   test("does not expose lifecycle operations over HTTP", async () => {
     const response = await exports.default.fetch(
       new Request("https://provider-control.invalid/lifecycle/reconcile", {

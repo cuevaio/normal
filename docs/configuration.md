@@ -88,6 +88,7 @@ Secret examples never contain usable key material.
 | `AWS_SESSION_TOKEN` | Secret | API and deletion coordinator | Required role-session token. Its absence prevents the owning production composition root from running. |
 | `WASENDER_API_CREDENTIAL` | Secret | Provider-control | Account-level Wasender Personal Access Token used only for lifecycle endpoints. Store it as a Worker secret and rotate it in Wasender and Cloudflare together. |
 | `WASENDER_REFERENCE_SECRET` | Secret | Provider-control | Stable 32-byte hex HMAC key used to turn raw provider session IDs into opaque adapter locators. Generate with `openssl rand -hex 32`; rotate only through the reconciliation procedure below. |
+| `WEBSHARE_API_KEY` | Secret | Provider-control | Webshare account API key used only to read the assigned proxy list. The plan must contain static shared ISP proxies allocated exclusively to Colombia with Auto-Refresh disabled. Store it as a Worker secret and rotate it in Webshare and Cloudflare together. |
 
 Wasender Directory reads do not add a platform-wide environment secret. The
 owning API workflow decrypts the selected WhatsApp Connection's envelope-
@@ -434,17 +435,32 @@ client, redirect, metadata-document origin, or client-class source change as an
 authorization-policy change. Authorization requires exact string equality, and KV never acts as the
 client registry.
 
-Provider-control startup also validates both Wasender secrets before serving
+Provider-control startup validates the two Wasender secrets and the Webshare API
+key before serving
 even its private health route or an RPC method. The Wrangler manifest declares
-both names as required secrets, so deployment fails before serving when either
-secret has not been configured. Its adapter always calls the fixed
+all three names as required secrets, so deployment fails before serving when any
+secret has not been configured. Its lifecycle adapter calls only the fixed
 `https://www.wasenderapi.com` origin with the account-level credential, forces
 provider message logging and automatic incoming-message reads off during
-creation, and emits only operation class, normalized outcome, attempt, duration,
+creation, and assigns one unused static Colombian SOCKS5 proxy through
+`p.webshare.io`. Proxy selection reads only the fixed
+`https://proxy.webshare.io/api/v2/subscription/plan/` and
+`https://proxy.webshare.io/api/v2/proxy/list/` endpoints, accepts only one
+active shared ISP plan with exactly 20 `CO` proxies and Auto-Refresh disabled,
+then requires its complete Backbone list, preserves an existing listed assignment, and
+fails closed when no valid unused proxy remains. The Webshare plan keeps
+Auto-Refresh disabled; proxy credential or inventory changes require a reviewed
+configuration reconciliation. One named provider-control Durable Object
+represents the environment's proxy pool and serializes create, reconcile, repair,
+and reconnect validation across Worker isolates. It persists no assignment,
+credential, provider, or tenant data; Wasender's current session configuration
+is reread inside every operation. Disconnect and deletion do not depend on the
+gate's Webshare validation. The adapter emits only operation class,
+normalized outcome, attempt, duration,
 bounded response size, RPC method, and normalized result code. No telemetry
 field contains a Connection Setup marker, WhatsApp Number, provider locator,
-per-session authority, Provider API Credential, or raw result. No runtime value
-can select a fake provider or an alternate origin.
+per-session authority, Provider API Credential, proxy URL, proxy credential, or
+raw result. No runtime value can select a fake provider or an alternate origin.
 
 `WASENDER_REFERENCE_SECRET` must remain stable because persisted adapter
 locators are keyed by it. To rotate it, stop provisioning, retain the old value,

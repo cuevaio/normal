@@ -309,9 +309,11 @@ run "development_topology" {
       ]) == toset([
       "inherit:WASENDER_API_CREDENTIAL",
       "inherit:WASENDER_REFERENCE_SECRET",
+      "inherit:WEBSHARE_API_KEY",
+      "durable_object_namespace:PROVIDER_ALLOCATION_GATE",
       "plain_text:DEPLOYMENT_ENVIRONMENT",
     ])
-    error_message = "Provider-control must receive only its environment and inherited Wasender secrets."
+    error_message = "Provider-control must receive only its environment, lifecycle secrets, and allocation gate."
   }
 
   assert {

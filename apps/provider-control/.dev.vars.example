@@ -1,2 +1,3 @@
 WASENDER_API_CREDENTIAL=replace-with-provider-api-credential
 WASENDER_REFERENCE_SECRET=replace-with-64-lowercase-hex-characters
+WEBSHARE_API_KEY=replace-with-webshare-api-key

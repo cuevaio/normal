@@ -19,6 +19,8 @@
   AWS credentials for exactly the environment being changed
 - A Wasender account with approved session capacity and an account-level
   Personal Access Token for each environment
+- A Webshare static ISP plan for each environment, allocated exclusively to
+  Colombia with Auto-Refresh disabled, and an account API key
 
 No Clerk tenant or Wasender account is required to build and verify the
 source-controlled platform. A real Directory smoke check additionally requires
@@ -186,30 +188,33 @@ tofu -chdir=infra/compute apply \
 ```
 
 Generate the 32-byte locator key inside the approved recovery inventory, where
-it can remain stable for the environment. Load that value and the account-level
-Personal Access Token without echoing either one, then create both required
-bindings atomically. The pipe does not put either plaintext value in a file,
-saved plan, or OpenTofu state:
+it can remain stable for the environment. Load that value, the account-level
+Personal Access Token, and the Webshare API key without echoing them, then create
+all three required bindings atomically. The pipe does not put any plaintext
+value in a file, saved plan, or OpenTofu state:
 
 ```sh
 read -rsp "WASENDER_REFERENCE_SECRET: " WASENDER_REFERENCE_SECRET
 echo
 read -rsp "WASENDER_API_CREDENTIAL: " WASENDER_API_CREDENTIAL
 echo
-export WASENDER_REFERENCE_SECRET WASENDER_API_CREDENTIAL
+read -rsp "WEBSHARE_API_KEY: " WEBSHARE_API_KEY
+echo
+export WASENDER_REFERENCE_SECRET WASENDER_API_CREDENTIAL WEBSHARE_API_KEY
 bun -e 'process.stdout.write(JSON.stringify({
   WASENDER_API_CREDENTIAL: process.env.WASENDER_API_CREDENTIAL,
   WASENDER_REFERENCE_SECRET: process.env.WASENDER_REFERENCE_SECRET,
+  WEBSHARE_API_KEY: process.env.WEBSHARE_API_KEY,
 }))' | wrangler secret bulk \
   --cwd apps/provider-control \
   --env "$DEPLOYMENT_ENVIRONMENT"
 wrangler secret list \
   --cwd apps/provider-control \
   --env "$DEPLOYMENT_ENVIRONMENT"
-unset WASENDER_REFERENCE_SECRET WASENDER_API_CREDENTIAL
+unset WASENDER_REFERENCE_SECRET WASENDER_API_CREDENTIAL WEBSHARE_API_KEY
 ```
 
-The secret list must contain exactly the two names; it never returns their
+The secret list must contain exactly the three names; it never returns their
 values. A new Cloudflare Worker namespace does not accept secret upload until
 it has a version. After the recovery Worker namespaces exist and all protected
 recovery values are populated in the `production` GitHub environment, dispatch
@@ -712,11 +717,15 @@ capacity and approved MCP minute and hour request quotas are valid.
 
 Provider-control authority is populated during the first-deployment bootstrap
 above, directly in Cloudflare's secret store. The Wrangler manifest declares
-both names under `secrets.required`, so a subsequent Wrangler upload or deploy
+all three names under `secrets.required`, so a subsequent Wrangler upload or deploy
 fails before publishing code if the selected environment does not already have
-both secrets. OpenTofu represents both names as `inherit` bindings, so every
+all three secrets. OpenTofu represents all three names as `inherit` bindings, so every
 subsequent provider-control version preserves the already stored ciphertext
-without putting either plaintext value in input, a saved plan, or state. Run
+without putting either plaintext value in input, a saved plan, or state. The
+provider-control Wrangler deployment also creates the SQLite-backed
+`ProviderAllocationGate` class and binds the one named object used to serialize
+the environment's proxy-pool operations; the object stores no assignment or
+credential data. Run
 the bootstrap against `development`, `preview`, and `production` independently;
 never rely on one environment's secrets for another.
 
@@ -728,7 +737,10 @@ account-level credential with `wrangler secret put WASENDER_API_CREDENTIAL`
 against the exact target environment, deploy provider-control, and verify its
 private service-binding health before deploying the API. Never rotate
 `WASENDER_REFERENCE_SECRET` directly; use the reconciliation procedure in
-`docs/configuration.md` so retained provider sessions remain addressable.
+`docs/configuration.md` so retained provider sessions remain addressable. Rotate
+`WEBSHARE_API_KEY` with `wrangler secret put WEBSHARE_API_KEY`; if Webshare proxy
+credentials or inventory also change, run provider configuration reconciliation
+before reconnecting affected WhatsApp Connections.
 
 ## Smoke check
 

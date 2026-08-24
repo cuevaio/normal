@@ -1,4 +1,4 @@
-import { WorkerEntrypoint } from "cloudflare:workers";
+import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import type {
   CreateSessionRequest,
   ListSessionsRequest,
@@ -13,19 +13,67 @@ import {
   type ProviderControlEnvironment,
 } from "./production";
 
-type Env = ProviderControlEnvironment;
+type Env = ProviderControlEnvironment & {
+  readonly PROVIDER_ALLOCATION_GATE: DurableObjectNamespace<ProviderAllocationGate>;
+};
+
+export class ProviderAllocationGate extends DurableObject<Env> {
+  private serial = Promise.resolve();
+
+  private async serialized<Value>(operation: () => Promise<Value>) {
+    const previous = this.serial;
+    let release: () => void = () => undefined;
+    this.serial = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
+  connectSession(request: SessionRequest) {
+    return this.serialized(() =>
+      createProductionRpc(this.env).connectSession(request),
+    );
+  }
+
+  createSession(request: CreateSessionRequest) {
+    return this.serialized(() =>
+      createProductionRpc(this.env).createSession(request),
+    );
+  }
+
+  reconcileSession(request: ReconcileSessionRequest) {
+    return this.serialized(() =>
+      createProductionRpc(this.env).reconcileSession(request),
+    );
+  }
+
+  repairSessionConfiguration(request: RepairSessionConfigurationRequest) {
+    return this.serialized(() =>
+      createProductionRpc(this.env).repairSessionConfiguration(request),
+    );
+  }
+}
 
 export default class ProviderControl extends WorkerEntrypoint<Env> {
+  private allocationGate() {
+    return this.env.PROVIDER_ALLOCATION_GATE.getByName("webshare-proxy-pool");
+  }
+
   fetch(request: Request) {
     return createProductionHandler(this.env)(request);
   }
 
   connectSession(request: SessionRequest) {
-    return createProductionRpc(this.env).connectSession(request);
+    return this.allocationGate().connectSession(request);
   }
 
   createSession(request: CreateSessionRequest) {
-    return createProductionRpc(this.env).createSession(request);
+    return this.allocationGate().createSession(request);
   }
 
   deleteSession(request: SessionRequest) {
@@ -45,11 +93,11 @@ export default class ProviderControl extends WorkerEntrypoint<Env> {
   }
 
   reconcileSession(request: ReconcileSessionRequest) {
-    return createProductionRpc(this.env).reconcileSession(request);
+    return this.allocationGate().reconcileSession(request);
   }
 
   repairSessionConfiguration(request: RepairSessionConfigurationRequest) {
-    return createProductionRpc(this.env).repairSessionConfiguration(request);
+    return this.allocationGate().repairSessionConfiguration(request);
   }
 
   verifySessionNumber(request: VerifySessionNumberRequest) {

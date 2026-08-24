@@ -11,6 +11,7 @@ describe("provider-control production root", () => {
       WASENDER_API_CREDENTIAL: "12|opaque+provider/credential=value",
       WASENDER_REFERENCE_SECRET:
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      WEBSHARE_API_KEY: "webshare_api_key_fixture",
     })(new Request("https://provider-control.internal/health"));
 
     expect(response.status).toBe(200);
@@ -21,6 +22,7 @@ describe("provider-control production root", () => {
       DEPLOYMENT_ENVIRONMENT: "production",
       WASENDER_REFERENCE_SECRET:
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      WEBSHARE_API_KEY: "webshare_api_key_fixture",
     })(new Request("https://provider-control.internal/health"));
 
     expect(response.status).toBe(503);
@@ -30,6 +32,18 @@ describe("provider-control production root", () => {
     const response = await createProductionHandler({
       DEPLOYMENT_ENVIRONMENT: "production",
       WASENDER_API_CREDENTIAL: "replace-with-wasender-credential-value",
+      WASENDER_REFERENCE_SECRET:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      WEBSHARE_API_KEY: "webshare_api_key_fixture",
+    })(new Request("https://provider-control.internal/health"));
+
+    expect(response.status).toBe(503);
+  });
+
+  test("fails closed without the Webshare API key", async () => {
+    const response = await createProductionHandler({
+      DEPLOYMENT_ENVIRONMENT: "production",
+      WASENDER_API_CREDENTIAL: "12|opaque+provider/credential=value",
       WASENDER_REFERENCE_SECRET:
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     })(new Request("https://provider-control.internal/health"));
@@ -56,6 +70,7 @@ describe("provider-control production root", () => {
       WASENDER_API_CREDENTIAL: "12|opaque+provider/credential=value",
       WASENDER_REFERENCE_SECRET:
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      WEBSHARE_API_KEY: "webshare_api_key_fixture",
     });
 
     const result = await rpc.reconcileSession({

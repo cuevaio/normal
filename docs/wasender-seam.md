@@ -21,13 +21,20 @@ implementation is exported as
 production implementations are exposed through their capability-specific
 modules. The seam does not add runtime provider selection or a selectable fake.
 The lifecycle implementation closes over the account-level Provider API
-Credential and a stable locator HMAC key in provider-control; neither is a
-capability input or output, and no runtime setting can select a fake or
-alternate provider origin.
+Credential, a stable locator HMAC key, and a Webshare proxy selector in
+provider-control; none is a capability input or output, and no runtime setting
+can select a fake or alternate provider origin. The selector accepts only the
+complete Colombian Backbone inventory and returns a redacted SOCKS5 URL for one
+unused static ISP proxy.
 Provider-control publishes that capability only as closed Cloudflare RPC
 methods on its service-binding entrypoint. Each input is validated before the
 credential-backed Layer is loaded, adapter failures cross as content-free
-provider-control results, and lifecycle methods are not HTTP routes. The
+provider-control results, and lifecycle methods are not HTTP routes. Create,
+proxy-aware reconcile, repair, and reconnect validation run through the one
+named Durable Object representing the deployment's proxy pool so their
+read-then-write allocation cannot race across Worker isolates. The gate stores
+no assignment or credential data. Disconnect, deletion, QR reads, and number
+verification remain direct provider-control RPC methods. The
 account-level credential never crosses the binding. Because Effect `Redacted`
 instances intentionally do not serialize their hidden values, provider-control
 unwraps only the newly issued per-session authority into the RPC value; the API

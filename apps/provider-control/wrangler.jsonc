@@ -6,7 +6,11 @@
   "workers_dev": false,
   "preview_urls": false,
   "secrets": {
-    "required": ["WASENDER_API_CREDENTIAL", "WASENDER_REFERENCE_SECRET"]
+    "required": [
+      "WASENDER_API_CREDENTIAL",
+      "WASENDER_REFERENCE_SECRET",
+      "WEBSHARE_API_KEY"
+    ]
   },
   "observability": {
     "enabled": true,
@@ -15,32 +19,79 @@
   "vars": {
     "DEPLOYMENT_ENVIRONMENT": "production"
   },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PROVIDER_ALLOCATION_GATE",
+        "class_name": "ProviderAllocationGate"
+      }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ProviderAllocationGate"] }
+  ],
   "env": {
     "development": {
       "name": "whatsapp-mcp-provider-control-development",
       "secrets": {
-        "required": ["WASENDER_API_CREDENTIAL", "WASENDER_REFERENCE_SECRET"]
+        "required": [
+          "WASENDER_API_CREDENTIAL",
+          "WASENDER_REFERENCE_SECRET",
+          "WEBSHARE_API_KEY"
+        ]
       },
       "vars": {
         "DEPLOYMENT_ENVIRONMENT": "development"
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "PROVIDER_ALLOCATION_GATE",
+            "class_name": "ProviderAllocationGate"
+          }
+        ]
       }
     },
     "preview": {
       "name": "whatsapp-mcp-provider-control-preview",
       "secrets": {
-        "required": ["WASENDER_API_CREDENTIAL", "WASENDER_REFERENCE_SECRET"]
+        "required": [
+          "WASENDER_API_CREDENTIAL",
+          "WASENDER_REFERENCE_SECRET",
+          "WEBSHARE_API_KEY"
+        ]
       },
       "vars": {
         "DEPLOYMENT_ENVIRONMENT": "preview"
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "PROVIDER_ALLOCATION_GATE",
+            "class_name": "ProviderAllocationGate"
+          }
+        ]
       }
     },
     "production": {
       "name": "whatsapp-mcp-provider-control",
       "secrets": {
-        "required": ["WASENDER_API_CREDENTIAL", "WASENDER_REFERENCE_SECRET"]
+        "required": [
+          "WASENDER_API_CREDENTIAL",
+          "WASENDER_REFERENCE_SECRET",
+          "WEBSHARE_API_KEY"
+        ]
       },
       "vars": {
         "DEPLOYMENT_ENVIRONMENT": "production"
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "PROVIDER_ALLOCATION_GATE",
+            "class_name": "ProviderAllocationGate"
+          }
+        ]
       }
     }
   }

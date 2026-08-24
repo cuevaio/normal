@@ -71,10 +71,10 @@ for (const deployable of deployables) {
     const requiredSecretNames = [
       "WASENDER_API_CREDENTIAL",
       "WASENDER_REFERENCE_SECRET",
+      "WEBSHARE_API_KEY",
     ].sort();
     const forbiddenAuthority = [
       "d1_databases",
-      "durable_objects",
       "hyperdrive",
       "kv_namespaces",
       "queues",
@@ -93,7 +93,20 @@ for (const deployable of deployables) {
         !hasSameStrings(requiredSecrets(configuration), requiredSecretNames)
       ) {
         throw new Error(
-          `Provider-control ${configurationName} configuration must require both lifecycle secrets.`,
+          `Provider-control ${configurationName} configuration must require all lifecycle secrets.`,
+        );
+      }
+      const durableObjects = configuration.durable_objects as
+        | { readonly bindings?: ReadonlyArray<Record<string, unknown>> }
+        | undefined;
+      const bindings = durableObjects?.bindings ?? [];
+      if (
+        bindings.length !== 1 ||
+        bindings[0]?.name !== "PROVIDER_ALLOCATION_GATE" ||
+        bindings[0]?.class_name !== "ProviderAllocationGate"
+      ) {
+        throw new Error(
+          `Provider-control ${configurationName} configuration must declare only its provider allocation gate.`,
         );
       }
     }
@@ -420,6 +433,18 @@ for (const deployable of deployables) {
       if (!hasSameStrings(configuredCrons(configuration), requiredApiCrons)) {
         throw new Error(
           `API ${configurationName} configuration must schedule minute recovery, five-minute reconciliation, and hourly retention.`,
+        );
+      }
+      const provisioning = findQueueConsumer(
+        configuration,
+        `whatsapp-mcp-connection-setup-provisioning${environmentSuffix}`,
+      );
+      if (
+        provisioning?.max_batch_size !== 1 ||
+        provisioning.max_concurrency !== 1
+      ) {
+        throw new Error(
+          `API ${configurationName} configuration must serialize provider provisioning so proxy assignment remains unique.`,
         );
       }
       const ingestion = findQueueConsumer(

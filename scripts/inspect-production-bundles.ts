@@ -97,6 +97,7 @@ const inspectProductionBundles = async (): Promise<void> => {
     inspectForForbiddenAuthority("apps/api/dist", [
       "WASENDER_API_CREDENTIAL",
       "WASENDER_REFERENCE_SECRET",
+      "WEBSHARE_API_KEY",
     ]),
     inspectForForbiddenAuthority("apps/web/.next/server", [
       "API_KEY_HMAC_SECRET",
@@ -104,8 +105,10 @@ const inspectProductionBundles = async (): Promise<void> => {
       "SEND_FINGERPRINT_HMAC_SECRET",
       "WASENDER_API_CREDENTIAL",
       "WASENDER_REFERENCE_SECRET",
+      "WEBSHARE_API_KEY",
       "WHATSAPP_NUMBER_RESERVATION_HMAC_SECRET",
     ]),
+    inspectForForbiddenAuthority("apps/web/.next/static", ["WEBSHARE_API_KEY"]),
     inspectForForbiddenAuthority("apps/provider-control/dist", [
       "AWS_ACCESS_KEY_ID",
       "AWS_SECRET_ACCESS_KEY",
@@ -126,6 +129,7 @@ const inspectProductionBundles = async (): Promise<void> => {
       "WHATSAPP_NUMBER_RESERVATION_HMAC_SECRET",
       "STORED_MEDIA",
       "WEBHOOK_INGRESS",
+      "WEBSHARE_API_KEY",
     ]),
     inspectForForbiddenAuthority("apps/operations-control/dist", [
       "AWS_ACCESS_KEY_ID",
@@ -140,6 +144,7 @@ const inspectProductionBundles = async (): Promise<void> => {
       "PROVIDER_CONTROL",
       "STORED_MEDIA",
       "WASENDER_API_CREDENTIAL",
+      "WEBSHARE_API_KEY",
       "WEBHOOK_INGRESS",
     ]),
     inspectForForbiddenAuthority("apps/recovery-control/dist", [
@@ -150,6 +155,7 @@ const inspectProductionBundles = async (): Promise<void> => {
       "PROVIDER_CONTROL",
       "STORED_MEDIA",
       "WASENDER_API_CREDENTIAL",
+      "WEBSHARE_API_KEY",
       "WEBHOOK_INGRESS",
       "WHATSAPP_NUMBER_RESERVATION_HMAC_SECRET",
     ]),
@@ -160,6 +166,7 @@ const inspectProductionBundles = async (): Promise<void> => {
       "MIGRATION_DATABASE_URL",
       "STORED_MEDIA",
       "WEBHOOK_INGRESS",
+      "WEBSHARE_API_KEY",
     ]),
     inspectForForbiddenAuthority("apps/recovery-game-day/dist", [
       "CLERK_SECRET_KEY",
@@ -169,6 +176,10 @@ const inspectProductionBundles = async (): Promise<void> => {
       "PROVIDER_CONTROL",
       "STORED_MEDIA",
       "WEBHOOK_INGRESS",
+      "WEBSHARE_API_KEY",
+    ]),
+    inspectForForbiddenAuthority("apps/restore-coordinator/dist", [
+      "WEBSHARE_API_KEY",
     ]),
     inspectForForbiddenAuthority("apps/docs/dist", [
       "API_KEY_HMAC_SECRET",
@@ -178,6 +189,7 @@ const inspectProductionBundles = async (): Promise<void> => {
       "SEND_FINGERPRINT_HMAC_SECRET",
       "WASENDER_API_CREDENTIAL",
       "WASENDER_REFERENCE_SECRET",
+      "WEBSHARE_API_KEY",
     ]),
   ]);
   console.info(
