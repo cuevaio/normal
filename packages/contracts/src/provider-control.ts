@@ -28,6 +28,7 @@ const WebhookUrl = Schema.String.pipe(
 );
 
 const ReconcileSessionRequest = Schema.Struct({
+  requireConnectReady: Schema.optional(Schema.Literal(true)),
   setupMarker: SetupMarker,
   webhookUrl: Schema.optional(WebhookUrl),
 });
@@ -71,6 +72,7 @@ export const decodeVerifySessionNumberRequest = strictDecode(
 );
 
 export interface ReconcileSessionRequest {
+  readonly requireConnectReady?: true | undefined;
   readonly setupMarker: string;
   readonly webhookUrl?: string | undefined;
 }

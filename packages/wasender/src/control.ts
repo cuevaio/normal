@@ -119,6 +119,7 @@ export interface SessionLifecycle {
     readonly session: LifecycleSessionLocator;
   }) => AdapterEffect<SessionNumberVerification>;
   readonly reconcileSession: (request: {
+    readonly requireConnectReady?: true | undefined;
     readonly setupMarker: SetupMarker;
     readonly webhookEndpoint?: WebhookEndpoint | undefined;
   }) => AdapterEffect<SessionReconciliation>;

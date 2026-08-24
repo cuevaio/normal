@@ -173,6 +173,7 @@ export interface WhatsAppConnectionProviderService {
     readonly session: string;
   }) => Effect.Effect<ProviderControlResult<QrCodeObservation>>;
   readonly reconcile: (input: {
+    readonly requireConnectReady?: true | undefined;
     readonly setupMarker: string;
   }) => Effect.Effect<ProviderControlResult<SessionReconciliation>>;
   readonly verifyNumber: (input: {
@@ -744,6 +745,7 @@ export const reconcileWhatsAppConnectionLifecycle = (
     let providerSession: LifecycleSession | null = null;
     let state: Exclude<WhatsAppConnectionState, "deleting"> = "degraded";
     const reconciled = yield* provider.reconcile({
+      ...(action === "reconnect" ? { requireConnectReady: true as const } : {}),
       setupMarker: claim.setupMarker,
     });
     if (reconciled.ok) {
@@ -775,6 +777,9 @@ export const reconcileWhatsAppConnectionLifecycle = (
             : written.value.connectionState;
       } else {
         const afterAmbiguousWrite = yield* provider.reconcile({
+          ...(action === "reconnect"
+            ? { requireConnectReady: true as const }
+            : {}),
           setupMarker: claim.setupMarker,
         });
         if (afterAmbiguousWrite.ok) {

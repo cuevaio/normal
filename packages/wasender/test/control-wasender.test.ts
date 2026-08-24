@@ -289,7 +289,7 @@ describe("real Wasender lifecycle adapter", () => {
     );
 
     const failure = await runFailure(
-      lifecycle.reconcileSession({ setupMarker, webhookEndpoint }),
+      lifecycle.reconcileSession({ requireConnectReady: true, setupMarker }),
     );
 
     expect(failure.code).toBe("integrity_failed");

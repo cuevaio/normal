@@ -455,6 +455,9 @@ export const makeProviderControlRpc = (
         "safe-read",
         (lifecycle, request) =>
           lifecycle.reconcileSession({
+            ...(request.requireConnectReady === true
+              ? { requireConnectReady: true as const }
+              : {}),
             setupMarker: request.setupMarker as SetupMarker,
             ...(request.webhookUrl === undefined
               ? {}

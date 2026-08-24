@@ -84,12 +84,14 @@ describe("provider-control RPC authority", () => {
     expect(JSON.stringify(events)).not.toContain(setupMarker);
   });
 
-  test("passes the expected webhook endpoint into reconciliation as a protected value", async () => {
+  test("passes protected webhook and connect-readiness reconciliation requirements", async () => {
     let reconciledWebhookEndpoint: string | null = null;
+    let reconciledConnectReadiness = false;
     const rpc = makeProviderControlRpc({
       loadLifecycle: async () =>
         makeLifecycle({
-          reconcileSession: ({ webhookEndpoint }) => {
+          reconcileSession: ({ requireConnectReady, webhookEndpoint }) => {
+            reconciledConnectReadiness = requireConnectReady === true;
             reconciledWebhookEndpoint =
               webhookEndpoint === undefined
                 ? null
@@ -102,9 +104,14 @@ describe("provider-control RPC authority", () => {
         }),
     });
 
-    const result = await rpc.reconcileSession({ setupMarker, webhookUrl });
+    const result = await rpc.reconcileSession({
+      requireConnectReady: true,
+      setupMarker,
+      webhookUrl,
+    });
 
     expect(result.ok).toBe(true);
+    expect(reconciledConnectReadiness).toBe(true);
     expect(reconciledWebhookEndpoint).toBe(webhookUrl);
   });
 

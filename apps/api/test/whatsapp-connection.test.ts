@@ -63,6 +63,7 @@ const qrBytes = new TextEncoder().encode(
 
 const makeHarness = (
   options: {
+    readonly connectReadinessFailure?: boolean;
     readonly disconnectFailureState?: "connected" | "degraded" | "disconnected";
     readonly identityValid?: boolean;
     readonly initialFailureCode?: string;
@@ -77,6 +78,10 @@ const makeHarness = (
 ) => {
   const events: SafeTelemetryEvent[] = [];
   const providerCalls: string[] = [];
+  const reconciliationInputs: Array<{
+    readonly requireConnectReady?: true | undefined;
+    readonly setupMarker: string;
+  }> = [];
   const cleanupEnqueues: string[] = [];
   const encryptedPurposes: string[] = [];
   const connections: Array<{
@@ -335,9 +340,25 @@ const makeHarness = (
           },
         };
       }),
-    reconcile: () =>
+    reconcile: (input) =>
       Effect.sync(() => {
         providerCalls.push("reconcileSession");
+        reconciliationInputs.push(input);
+        if (
+          input.requireConnectReady === true &&
+          options.connectReadinessFailure === true
+        ) {
+          return {
+            error: {
+              _tag: "ProviderControlFailure" as const,
+              code: "integrity_failed" as const,
+              operation: "safe-read" as const,
+              retryAfterMs: null,
+              retryDecision: "do_not_retry" as const,
+            },
+            ok: false as const,
+          };
+        }
         return {
           ok: true as const,
           value: {
@@ -473,6 +494,7 @@ const makeHarness = (
     events,
     handler: createWhatsAppConnectionHandler(layer, browserOrigin),
     providerCalls,
+    reconciliationInputs,
     scanQr: () => {
       providerConnected = true;
     },
@@ -747,6 +769,28 @@ describe("WhatsApp Connection HTTP boundary", () => {
     ]);
     expect(JSON.stringify(harness.events)).not.toContain(setupId);
     expect(JSON.stringify(harness.events)).not.toContain("session-authority");
+  });
+
+  test("fails reconnect closed when an already-connected provider session is not connect-ready", async () => {
+    const harness = makeHarness({ connectReadinessFailure: true });
+    harness.scanQr();
+    await harness.handler(request(qrEndpoint));
+    await harness.handler(request(disconnectEndpoint, "POST"));
+    harness.providerCalls.length = 0;
+    harness.reconciliationInputs.length = 0;
+    harness.scanQr();
+
+    const response = await harness.handler(request(reconnectEndpoint, "POST"));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      lifecycle: { action: "reconnect", outcome: "recovery_required" },
+      whatsapp_connection: { id: connectionId, state: "degraded" },
+    });
+    expect(harness.providerCalls).toEqual(["reconcileSession"]);
+    expect(harness.reconciliationInputs).toEqual([
+      { requireConnectReady: true, setupMarker: setupId },
+    ]);
   });
 
   test("fails lifecycle requests closed for another User and unknown Connection", async () => {

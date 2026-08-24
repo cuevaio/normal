@@ -952,25 +952,28 @@ export const makeWasenderSessionLifecycle = (
         };
       }),
     listSessions: ({ setupMarker }) => effect(() => listSessions(setupMarker)),
-    reconcileSession: ({ setupMarker, webhookEndpoint }) =>
+    reconcileSession: ({ requireConnectReady, setupMarker, webhookEndpoint }) =>
       effect(async (): Promise<SessionReconciliation> => {
         const providerSessions = await loadSessionsForMarker(setupMarker);
         if (providerSessions.length === 0) return { outcome: "absent" };
         if (providerSessions.length === 1) {
           const providerSession = providerSessions[0];
           if (!providerSession) throw safeFailure("invalid_response");
-          const selectedProxyUrl =
-            webhookEndpoint === undefined
-              ? undefined
-              : await selectProxyUrl(setupMarker, providerSession, "safe-read");
+          const validateProxy =
+            requireConnectReady === true || webhookEndpoint !== undefined;
+          const selectedProxyUrl = validateProxy
+            ? await selectProxyUrl(setupMarker, providerSession, "safe-read")
+            : undefined;
           if (
-            webhookEndpoint !== undefined &&
-            (!hasSessionConfiguration(
-              providerSession,
-              Redacted.value(webhookEndpoint),
-            ) ||
-              (selectedProxyUrl !== undefined &&
-                providerSession.proxyUrl !== selectedProxyUrl))
+            (webhookEndpoint !== undefined &&
+              !hasSessionConfiguration(
+                providerSession,
+                Redacted.value(webhookEndpoint),
+              )) ||
+            (validateProxy &&
+              (!hasProxyConfiguration(providerSession) ||
+                (selectedProxyUrl !== undefined &&
+                  providerSession.proxyUrl !== selectedProxyUrl)))
           ) {
             throw safeFailure("integrity_failed");
           }
