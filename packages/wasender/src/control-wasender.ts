@@ -749,17 +749,19 @@ export const makeWasenderSessionLifecycle = (
     if (proxySelector === undefined) return undefined;
     try {
       const providerSessions = await loadProviderSessions();
+      const occupiedProxyUrls: Redacted.Redacted<string>[] = [];
+      for (const candidate of providerSessions) {
+        if (candidate.id === session?.id) continue;
+        const detail = await loadDetail(candidate.id);
+        if (detail.proxyUrl !== null) {
+          occupiedProxyUrls.push(Redacted.make(detail.proxyUrl));
+        }
+      }
       const selected = await proxySelector.select({
         ...(session?.proxyUrl === null || session?.proxyUrl === undefined
           ? {}
           : { currentProxyUrl: Redacted.make(session.proxyUrl) }),
-        occupiedProxyUrls: providerSessions
-          .filter((candidate) => candidate.id !== session?.id)
-          .flatMap((candidate) =>
-            candidate.proxyUrl === null
-              ? []
-              : [Redacted.make(candidate.proxyUrl)],
-          ),
+        occupiedProxyUrls,
         setupMarker,
       });
       return Redacted.value(selected);

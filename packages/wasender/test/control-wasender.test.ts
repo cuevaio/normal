@@ -198,6 +198,52 @@ describe("real Wasender lifecycle adapter", () => {
     expect(releases).toEqual([setupMarker]);
   });
 
+  test("loads session details before treating proxies as unoccupied", async () => {
+    const assignedProxy = new URL(proxyUrl);
+    assignedProxy.port = "10001";
+    const assignedProxyUrl = assignedProxy.href;
+    const otherSummary = providerSession({
+      api_key: undefined,
+      id: 42,
+      name: "other",
+      proxy_url: undefined,
+    });
+    const otherDetail = providerSession({
+      id: 42,
+      name: "other",
+      proxy_url: assignedProxyUrl,
+    });
+    const responses = [
+      json({ success: true, data: [otherSummary] }),
+      json({ success: true, data: [otherSummary] }),
+      json({ success: true, data: otherDetail }),
+      json({
+        success: true,
+        data: providerSession({ proxy_url: proxyUrl }),
+      }),
+    ];
+    const lifecycle = makeWasenderSessionLifecycle(
+      { credential, referenceSecret },
+      {
+        fetch: async () => responses.shift() ?? json({}, { status: 500 }),
+        proxySelector: {
+          select: async (input) => {
+            expect(input.occupiedProxyUrls.map(Redacted.value)).toEqual([
+              assignedProxyUrl,
+            ]);
+            return Redacted.make(proxyUrl);
+          },
+        },
+      },
+    );
+
+    await Effect.runPromise(
+      lifecycle.createSession({ phoneNumber, setupMarker, webhookEndpoint }),
+    );
+
+    expect(responses).toEqual([]);
+  });
+
   test("reconciles before retrying a transient proxy-list failure", async () => {
     const lifecycle = makeWasenderSessionLifecycle(
       { credential, referenceSecret },
@@ -298,6 +344,10 @@ describe("real Wasender lifecycle adapter", () => {
       json({ success: true, data: [targetWithoutProxy, other] }),
       json({
         success: true,
+        data: { ...other, api_key: "session_credential" },
+      }),
+      json({
+        success: true,
         data: providerSession({ proxy_url: proxyUrl }),
       }),
       json({
@@ -332,10 +382,11 @@ describe("real Wasender lifecycle adapter", () => {
       "GET",
       "GET",
       "GET",
+      "GET",
       "PUT",
       "GET",
     ]);
-    expect(await requests[3]?.json()).toMatchObject({ proxy_url: proxyUrl });
+    expect(await requests[4]?.json()).toMatchObject({ proxy_url: proxyUrl });
   });
 
   test("reports a missing proxy as configuration drift", async () => {
@@ -386,6 +437,10 @@ describe("real Wasender lifecycle adapter", () => {
             proxy_url: proxyUrl,
           }),
         ],
+      }),
+      json({
+        success: true,
+        data: providerSession({ id: 42, name: "other", proxy_url: proxyUrl }),
       }),
     ];
     const lifecycle = makeWasenderSessionLifecycle(
