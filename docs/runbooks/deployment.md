@@ -60,12 +60,14 @@ set.
 4. Populate every value in [deployment configuration](../configuration.md)
    through its named secret store and validate secret names, bindings, and
    least-privilege roles. Production has no selectable test Layer or fake.
-5. Dispatch `Migrate production database` from `main`, which runs
-   `bun run db:migrate` followed by `bun run db:check` with the protected direct
-   migration-owner connection. For an audited operator session, run those same
-   commands locally and then remove the connection from the shell.
-6. Deploy in dependency order: **provider-control → deletion coordinator → restore
-   coordinator → operations control → recovery game day → recovery verifier → recovery control → API → web → docs**. Keep public
+5. Dispatch `Deploy production` with the `deploy` operation from `main`. This is
+   the only routine production migration entry point: it runs `bun run
+   db:migrate` and `bun run db:check` with the protected migration-owner
+   connection, then promotes the matching application versions in the same
+   serialized operation.
+6. The workflow deploys in dependency order: **provider-control → deletion
+   coordinator → restore coordinator → operations control → recovery game day →
+   recovery verifier → recovery control → API → web → docs**. Keep public
    traffic closed if migration readiness or any private service binding fails.
 7. Run the non-interactive `bun run deploy:smoke` boundary and retain only its
    normalized results, reviewed commit, deployment versions, plan digest, and

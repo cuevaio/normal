@@ -29,6 +29,28 @@ describe("production deployment order", () => {
     ).toHaveLength(1);
   });
 
+  test("keeps migration and matching API promotion in one workflow", async () => {
+    const workflows = new Bun.Glob("*.yml");
+    const migrationOwners: string[] = [];
+
+    for await (const workflow of workflows.scan(
+      new URL("../.github/workflows", import.meta.url).pathname,
+    )) {
+      const source = await Bun.file(
+        new URL(`../.github/workflows/${workflow}`, import.meta.url),
+      ).text();
+      if (source.includes("bun run db:migrate")) migrationOwners.push(workflow);
+    }
+
+    expect(migrationOwners).toEqual(["deploy-production.yml"]);
+    const deployment = await Bun.file(
+      new URL("../.github/workflows/deploy-production.yml", import.meta.url),
+    ).text();
+    expect(deployment.indexOf("bun run db:migrate")).toBeLessThan(
+      deployment.indexOf("Deploy API"),
+    );
+  });
+
   test("bootstraps exact recovery secrets without deploying the bootstrap versions", async () => {
     const workflow = await Bun.file(
       new URL("../.github/workflows/deploy-production.yml", import.meta.url),
@@ -103,7 +125,6 @@ describe("production deployment order", () => {
     for (const workflow of [
       "deploy-production.yml",
       "launch-gate.yml",
-      "migrate-production.yml",
       "observability-canary.yml",
       "public-api-release-gate.yml",
       "recovery-drills.yml",
