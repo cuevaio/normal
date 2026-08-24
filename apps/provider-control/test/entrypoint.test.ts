@@ -1,6 +1,45 @@
 import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+const json = (body: unknown) =>
+  new Response(JSON.stringify(body), {
+    headers: { "content-type": "application/json" },
+  });
+
+const websharePlan = () =>
+  json({
+    count: 1,
+    next: null,
+    results: [
+      {
+        automatic_refresh_frequency: 0,
+        id: 14_141_301,
+        proxy_count: 20,
+        proxy_countries: { CO: 20 },
+        proxy_subtype: "isp",
+        proxy_type: "shared",
+        status: "active",
+      },
+    ],
+  });
+
+const proxyCredential = (kind: "pass" | "user", index: number) =>
+  `${kind}_${index}_fixture`;
+
+const webshareProxies = () =>
+  json({
+    count: 20,
+    next: null,
+    results: Array.from({ length: 20 }, (_, index) => ({
+      country_code: "CO",
+      id: `b-${index + 1}`,
+      password: proxyCredential("pass", index + 1),
+      port: 10_000 + index,
+      username: proxyCredential("user", index + 1),
+      valid: true,
+    })),
+  });
+
 describe("provider-control Worker entrypoint", () => {
   test("serves the health canary through its service-binding entrypoint", async () => {
     const response = await exports.default.fetch(
@@ -96,6 +135,53 @@ describe("provider-control Worker entrypoint", () => {
     releaseFirst();
     await Promise.all([first, second]);
     expect(requests).toHaveLength(2);
+  });
+
+  test("quarantines the pool after an ambiguous proxy allocation write", async () => {
+    let providerWrites = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      if (request.url.includes("/subscription/plan/")) return websharePlan();
+      if (request.url.includes("/proxy/list/")) return webshareProxies();
+      if (request.method === "POST") {
+        providerWrites += 1;
+        throw new DOMException("timed out", "AbortError");
+      }
+      return json({ data: [], success: true });
+    });
+
+    const first = await exports.default.createSession({
+      phoneNumber: "+15550123456",
+      setupMarker: "cst_0123456789abcdefghijk",
+      webhookUrl:
+        "https://api.example.test/webhooks/wasender/30000000-0000-4000-8000-000000000041",
+    });
+    const second = await exports.default.createSession({
+      phoneNumber: "+15550123457",
+      setupMarker: "cst_0123456789abcdefghijl",
+      webhookUrl:
+        "https://api.example.test/webhooks/wasender/30000000-0000-4000-8000-000000000042",
+    });
+
+    expect(first).toMatchObject({
+      error: {
+        code: "timed_out",
+        operation: "lifecycle-write",
+        retryDecision: "reconcile_before_repeat",
+      },
+      ok: false,
+    });
+    expect(second).toEqual({
+      error: {
+        _tag: "ProviderControlFailure",
+        code: "unavailable",
+        operation: "lifecycle-write",
+        retryAfterMs: null,
+        retryDecision: "reconcile_before_repeat",
+      },
+      ok: false,
+    });
+    expect(providerWrites).toBe(1);
   });
 
   test("does not expose lifecycle operations over HTTP", async () => {

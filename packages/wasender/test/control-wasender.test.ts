@@ -149,6 +149,8 @@ describe("real Wasender lifecycle adapter", () => {
 
   test("assigns an unused proxy while creating a provider session", async () => {
     const requests: Request[] = [];
+    const reservations: string[] = [];
+    const releases: string[] = [];
     const responses = [
       json({ success: true, data: [] }),
       json({ success: true, data: [] }),
@@ -171,6 +173,14 @@ describe("real Wasender lifecycle adapter", () => {
             return Redacted.make(proxyUrl);
           },
         },
+        proxyAllocationCoordinator: {
+          release: async (marker) => {
+            releases.push(String(marker));
+          },
+          reserve: async (marker) => {
+            reservations.push(String(marker));
+          },
+        },
       },
     );
 
@@ -184,6 +194,8 @@ describe("real Wasender lifecycle adapter", () => {
       "POST",
     ]);
     expect(await requests[2]?.json()).toMatchObject({ proxy_url: proxyUrl });
+    expect(reservations).toEqual([setupMarker]);
+    expect(releases).toEqual([setupMarker]);
   });
 
   test("reconciles before retrying a transient proxy-list failure", async () => {
@@ -207,6 +219,66 @@ describe("real Wasender lifecycle adapter", () => {
       code: "unavailable",
       operation: "lifecycle-write",
       retryDecision: "reconcile_before_repeat",
+    });
+  });
+
+  test("maps an unavailable allocation snapshot to a retryable lifecycle write", async () => {
+    let calls = 0;
+    const lifecycle = makeWasenderSessionLifecycle(
+      { credential, referenceSecret },
+      {
+        fetch: async () => {
+          calls += 1;
+          return calls === 1
+            ? json({ success: true, data: [] })
+            : json({}, { status: 503 });
+        },
+        random: () => 0,
+        sleep: async () => undefined,
+        proxySelector: {
+          select: async () => Redacted.make(proxyUrl),
+        },
+      },
+    );
+
+    const failure = await runFailure(
+      lifecycle.createSession({ phoneNumber, setupMarker, webhookEndpoint }),
+    );
+
+    expect(calls).toBe(4);
+    expect(failure).toMatchObject({
+      code: "unavailable",
+      operation: "lifecycle-write",
+      retryDecision: "reconcile_before_repeat",
+    });
+  });
+
+  test("preserves a permanent allocation snapshot failure", async () => {
+    let calls = 0;
+    const lifecycle = makeWasenderSessionLifecycle(
+      { credential, referenceSecret },
+      {
+        fetch: async () => {
+          calls += 1;
+          return calls === 1
+            ? json({ success: true, data: [] })
+            : json({ success: true, data: { malformed: true } });
+        },
+        proxySelector: {
+          select: async () => Redacted.make(proxyUrl),
+        },
+      },
+    );
+
+    const failure = await runFailure(
+      lifecycle.createSession({ phoneNumber, setupMarker, webhookEndpoint }),
+    );
+
+    expect(calls).toBe(2);
+    expect(failure).toMatchObject({
+      code: "invalid_response",
+      operation: "lifecycle-write",
+      retryDecision: "do_not_retry",
     });
   });
 
@@ -703,13 +775,26 @@ describe("real Wasender lifecycle adapter", () => {
 
   test("does not repeat an ambiguous create timeout", async () => {
     let calls = 0;
+    const reservations: string[] = [];
+    const releases: string[] = [];
     const lifecycle = makeWasenderSessionLifecycle(
       { credential, referenceSecret },
       {
         fetch: async () => {
           calls += 1;
-          if (calls === 1) return json({ success: true, data: [] });
+          if (calls <= 2) return json({ success: true, data: [] });
           throw new DOMException("timed out", "AbortError");
+        },
+        proxyAllocationCoordinator: {
+          release: async (marker) => {
+            releases.push(String(marker));
+          },
+          reserve: async (marker) => {
+            reservations.push(String(marker));
+          },
+        },
+        proxySelector: {
+          select: async () => Redacted.make(proxyUrl),
         },
       },
     );
@@ -718,7 +803,9 @@ describe("real Wasender lifecycle adapter", () => {
       lifecycle.createSession({ phoneNumber, setupMarker, webhookEndpoint }),
     );
 
-    expect(calls).toBe(2);
+    expect(calls).toBe(3);
+    expect(reservations).toEqual([setupMarker]);
+    expect(releases).toEqual([]);
     expect(failure).toEqual({
       _tag: "ProviderNeutralFailure",
       code: "timed_out",

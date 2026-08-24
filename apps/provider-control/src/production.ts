@@ -2,6 +2,7 @@ import {
   makeWasenderSessionLifecycle,
   SessionLifecycle,
   type WasenderLifecycleTelemetryEvent,
+  type WasenderProxyAllocationCoordinator,
 } from "@whatsapp-mcp/wasender/control";
 import { makeWebshareProxySelector } from "@whatsapp-mcp/wasender/webshare";
 import { Config, ConfigProvider, Effect, Layer, Redacted } from "effect";
@@ -88,7 +89,10 @@ const providerTelemetry = (event: WasenderLifecycleTelemetryEvent) =>
 const sessionLifecycleLayer = (environment: ProviderControlEnvironment) =>
   Layer.effect(SessionLifecycle, sessionLifecycleEffect(environment));
 
-const sessionLifecycleEffect = (environment: ProviderControlEnvironment) =>
+const sessionLifecycleEffect = (
+  environment: ProviderControlEnvironment,
+  proxyAllocationCoordinator?: WasenderProxyAllocationCoordinator,
+) =>
   Config.all({
     credential: providerApiCredential,
     referenceSecret: providerReferenceSecret,
@@ -96,6 +100,9 @@ const sessionLifecycleEffect = (environment: ProviderControlEnvironment) =>
   }).pipe(
     Effect.map(({ webshareApiKey: apiKey, ...config }) =>
       makeWasenderSessionLifecycle(config, {
+        ...(proxyAllocationCoordinator === undefined
+          ? {}
+          : { proxyAllocationCoordinator }),
         proxySelector: makeWebshareProxySelector({ apiKey }),
         telemetry: providerTelemetry,
       }),
@@ -151,12 +158,17 @@ export const createProductionHandler = (
   };
 };
 
-export const createProductionRpc = (environment: ProviderControlEnvironment) =>
+export const createProductionRpc = (
+  environment: ProviderControlEnvironment,
+  proxyAllocationCoordinator?: WasenderProxyAllocationCoordinator,
+) =>
   makeProviderControlRpc({
     loadLifecycle: () =>
       Effect.runPromise(
         applicationConfigEffect(environment).pipe(
-          Effect.flatMap(() => sessionLifecycleEffect(environment)),
+          Effect.flatMap(() =>
+            sessionLifecycleEffect(environment, proxyAllocationCoordinator),
+          ),
         ),
       ),
     telemetry: (event) => console.info(JSON.stringify(event)),

@@ -452,10 +452,14 @@ fails closed when no valid unused proxy remains. The Webshare plan keeps
 Auto-Refresh disabled; proxy credential or inventory changes require a reviewed
 configuration reconciliation. One named provider-control Durable Object
 represents the environment's proxy pool and serializes create, reconcile, repair,
-and reconnect validation across Worker isolates. It persists no assignment,
-credential, provider, or tenant data; Wasender's current session configuration
-is reread inside every operation. Disconnect and deletion do not depend on the
-gate's Webshare validation. The adapter emits only operation class,
+and reconnect validation across Worker isolates. Before a proxy-changing write,
+it persists only the opaque Connection Setup marker and a settlement deadline;
+definitive completion deletes that reservation, while ambiguous completion keeps
+the pool quarantined until alarm-driven or caller-driven safe reconciliation.
+It never persists a proxy assignment, proxy credential, provider identifier, or
+tenant identifier. Wasender's current session configuration is reread inside
+every operation. Disconnect and deletion do not depend on the gate's Webshare
+validation. The adapter emits only operation class,
 normalized outcome, attempt, duration,
 bounded response size, RPC method, and normalized result code. No telemetry
 field contains a Connection Setup marker, WhatsApp Number, provider locator,

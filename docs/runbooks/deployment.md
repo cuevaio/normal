@@ -724,8 +724,10 @@ subsequent provider-control version preserves the already stored ciphertext
 without putting either plaintext value in input, a saved plan, or state. The
 provider-control Wrangler deployment also creates the SQLite-backed
 `ProviderAllocationGate` class and binds the one named object used to serialize
-the environment's proxy-pool operations; the object stores no assignment or
-credential data. Run
+the environment's proxy-pool operations. During a proxy-changing write, the
+object may retain only the opaque setup marker and settlement deadline until
+alarm-driven safe reconciliation settles an ambiguous result; it stores no
+assignment or credential data. Run
 the bootstrap against `development`, `preview`, and `production` independently;
 never rely on one environment's secrets for another.
 

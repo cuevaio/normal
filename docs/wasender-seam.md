@@ -33,7 +33,8 @@ provider-control results, and lifecycle methods are not HTTP routes. Create,
 proxy-aware reconcile, repair, and reconnect validation run through the one
 named Durable Object representing the deployment's proxy pool so their
 read-then-write allocation cannot race across Worker isolates. The gate stores
-no assignment or credential data. Disconnect, deletion, QR reads, and number
+only an opaque setup marker and settlement deadline while a proxy-changing write
+is unresolved; it stores no assignment or credential data. Disconnect, deletion, QR reads, and number
 verification remain direct provider-control RPC methods. The
 account-level credential never crosses the binding. Because Effect `Redacted`
 instances intentionally do not serialize their hidden values, provider-control

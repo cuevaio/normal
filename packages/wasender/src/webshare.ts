@@ -64,7 +64,11 @@ const readBoundedJson = async (response: Response): Promise<unknown> => {
     if (result.done) break;
     size += result.value.byteLength;
     if (size > maximumJsonResponseBytes) {
-      await reader.cancel();
+      try {
+        await reader.cancel();
+      } catch {
+        // The size violation remains authoritative if stream cleanup fails.
+      }
       throw new WebshareProxySelectionError(false);
     }
     chunks.push(result.value);
@@ -184,13 +188,30 @@ export const makeWebshareProxySelector = (
       }
       if (response.ok) {
         try {
-          return await readBoundedJson(response);
-        } finally {
+          const body = await readBoundedJson(response);
           clearTimeout(timer);
+          return body;
+        } catch (cause) {
+          clearTimeout(timer);
+          if (
+            cause instanceof WebshareProxySelectionError &&
+            !cause.retryable
+          ) {
+            throw cause;
+          }
+          if (attempt === maximumAttempts) break;
+          const delay = 250 * 2 ** (attempt - 1);
+          if (Date.now() - startedAt + delay >= requestTotalTimeoutMs) break;
+          await sleep(delay);
+          continue;
         }
       }
       clearTimeout(timer);
-      await response.body?.cancel();
+      try {
+        await response.body?.cancel();
+      } catch {
+        // The HTTP status remains authoritative if stream cleanup fails.
+      }
       const retryable =
         response.status === 408 ||
         response.status === 429 ||
@@ -298,7 +319,7 @@ export const makeWebshareProxySelector = (
           return Redacted.make(proxy.url);
         }
       }
-      throw new WebshareProxySelectionError(false);
+      throw new WebshareProxySelectionError(true);
     },
   };
 };

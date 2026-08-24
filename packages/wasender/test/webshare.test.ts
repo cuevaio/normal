@@ -165,6 +165,103 @@ describe("Webshare proxy selector", () => {
     expect(delays).toEqual([250]);
   });
 
+  test("retries a transient response when body cancellation fails", async () => {
+    let calls = 0;
+    const selector = makeWebshareProxySelector(
+      { apiKey },
+      {
+        fetch: async () => {
+          calls += 1;
+          if (calls === 1) {
+            return new Response(
+              new ReadableStream({
+                start: (controller) =>
+                  controller.error(new Error("stream already failed")),
+              }),
+              { status: 503 },
+            );
+          }
+          return calls === 2 ? planResponse() : response(proxies());
+        },
+        sleep: async () => undefined,
+      },
+    );
+
+    await selector.select({ occupiedProxyUrls: [], setupMarker });
+
+    expect(calls).toBe(3);
+  });
+
+  test("retries a failed successful-response stream", async () => {
+    let calls = 0;
+    const selector = makeWebshareProxySelector(
+      { apiKey },
+      {
+        fetch: async () => {
+          calls += 1;
+          if (calls === 1) return planResponse();
+          if (calls === 2) {
+            return new Response(
+              new ReadableStream({
+                start: (controller) =>
+                  controller.error(new Error("stream interrupted")),
+              }),
+            );
+          }
+          return response(proxies());
+        },
+        sleep: async () => undefined,
+      },
+    );
+
+    await selector.select({ occupiedProxyUrls: [], setupMarker });
+
+    expect(calls).toBe(3);
+  });
+
+  test("does not retry an oversized successful response", async () => {
+    let calls = 0;
+    const selector = makeWebshareProxySelector(
+      { apiKey },
+      {
+        fetch: async () => {
+          calls += 1;
+          return calls === 1
+            ? planResponse()
+            : new Response(new Uint8Array(1_048_577));
+        },
+        sleep: async () => undefined,
+      },
+    );
+
+    const failure = await selector
+      .select({ occupiedProxyUrls: [], setupMarker })
+      .catch((cause) => cause);
+
+    expect(failure).toBeInstanceOf(WebshareProxySelectionError);
+    expect((failure as WebshareProxySelectionError).retryable).toBe(false);
+    expect(calls).toBe(2);
+  });
+
+  test("classifies a fully occupied valid pool as retryable", async () => {
+    const selector = makeWebshareProxySelector(
+      { apiKey },
+      { fetch: fetchList(proxies()) },
+    );
+
+    const failure = await selector
+      .select({
+        occupiedProxyUrls: proxies().map((_, index) =>
+          Redacted.make(proxyUrl(index + 1, 10_000 + index)),
+        ),
+        setupMarker,
+      })
+      .catch((cause) => cause);
+
+    expect(failure).toBeInstanceOf(WebshareProxySelectionError);
+    expect((failure as WebshareProxySelectionError).retryable).toBe(true);
+  });
+
   test("fails closed when Auto-Refresh is enabled", async () => {
     const selector = makeWebshareProxySelector(
       { apiKey },

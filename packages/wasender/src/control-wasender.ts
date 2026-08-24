@@ -63,6 +63,11 @@ export interface WasenderLifecycleTelemetryEvent {
   readonly responseBytes: number;
 }
 
+export interface WasenderProxyAllocationCoordinator {
+  readonly release: (setupMarker: SetupMarker) => Promise<void>;
+  readonly reserve: (setupMarker: SetupMarker) => Promise<void>;
+}
+
 export interface WasenderLifecycleDependencies {
   readonly fetch?: Fetch;
   readonly now?: () => number;
@@ -70,6 +75,7 @@ export interface WasenderLifecycleDependencies {
   readonly renderQr?: (payload: string) => string;
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly telemetry?: (event: WasenderLifecycleTelemetryEvent) => void;
+  readonly proxyAllocationCoordinator?: WasenderProxyAllocationCoordinator;
   readonly proxySelector?: WebshareProxySelector;
 }
 
@@ -380,6 +386,7 @@ export const makeWasenderSessionLifecycle = (
     ((milliseconds: number) =>
       new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   const telemetry = dependencies.telemetry ?? (() => undefined);
+  const proxyAllocationCoordinator = dependencies.proxyAllocationCoordinator;
   const proxySelector = dependencies.proxySelector;
   const keyPromise = crypto.subtle.importKey(
     "raw",
@@ -740,8 +747,8 @@ export const makeWasenderSessionLifecycle = (
     operation: "lifecycle-write" | "safe-read" = "lifecycle-write",
   ): Promise<string | undefined> => {
     if (proxySelector === undefined) return undefined;
-    const providerSessions = await loadProviderSessions();
     try {
+      const providerSessions = await loadProviderSessions();
       const selected = await proxySelector.select({
         ...(session?.proxyUrl === null || session?.proxyUrl === undefined
           ? {}
@@ -757,6 +764,14 @@ export const makeWasenderSessionLifecycle = (
       });
       return Redacted.value(selected);
     } catch (cause) {
+      if (isProviderFailure(cause)) {
+        if (operation === "safe-read") throw cause;
+        const transient =
+          cause.code === "throttled" ||
+          cause.code === "timed_out" ||
+          cause.code === "unavailable";
+        throw writeFailure(cause.code, transient);
+      }
       if (operation === "safe-read") {
         throw safeFailure(
           cause instanceof WebshareProxySelectionError && !cause.retryable
@@ -768,6 +783,44 @@ export const makeWasenderSessionLifecycle = (
         throw writeFailure("integrity_failed", false);
       }
       throw writeFailure("unavailable", true);
+    }
+  };
+
+  const withProxyAllocationReservation = async <Value>(
+    setupMarker: SetupMarker,
+    required: boolean,
+    task: () => Promise<Value>,
+  ): Promise<Value> => {
+    if (!required || proxyAllocationCoordinator === undefined) return task();
+    try {
+      await proxyAllocationCoordinator.reserve(setupMarker);
+    } catch {
+      throw writeFailure("unavailable", true);
+    }
+    try {
+      const value = await task();
+      try {
+        await proxyAllocationCoordinator.release(setupMarker);
+      } catch {
+        throw writeFailure("unavailable", true);
+      }
+      return value;
+    } catch (cause) {
+      if (!isProviderFailure(cause)) {
+        throw writeFailure("unavailable", true);
+      }
+      if (
+        cause.operation === "lifecycle-write" &&
+        cause.retryDecision === "reconcile_before_repeat"
+      ) {
+        throw cause;
+      }
+      try {
+        await proxyAllocationCoordinator.release(setupMarker);
+      } catch {
+        throw writeFailure("unavailable", true);
+      }
+      throw cause;
     }
   };
 
@@ -864,33 +917,39 @@ export const makeWasenderSessionLifecycle = (
           throw writeFailure("integrity_failed", false);
         }
         const proxyUrl = await selectProxyUrl(setupMarker);
-        const body = await writeJson("/api/whatsapp-sessions", {
-          body: {
-            account_protection: true,
-            ignore_groups: false,
-            log_messages: false,
-            name: marker,
-            phone_number: number,
-            ...(proxyUrl === undefined ? {} : { proxy_url: proxyUrl }),
-            read_incoming_messages: false,
-            webhook_enabled: true,
-            webhook_events: webhookEvents,
-            webhook_url: webhookUrl,
+        return withProxyAllocationReservation(
+          setupMarker,
+          proxyUrl !== undefined,
+          async () => {
+            const body = await writeJson("/api/whatsapp-sessions", {
+              body: {
+                account_protection: true,
+                ignore_groups: false,
+                log_messages: false,
+                name: marker,
+                phone_number: number,
+                ...(proxyUrl === undefined ? {} : { proxy_url: proxyUrl }),
+                read_incoming_messages: false,
+                webhook_enabled: true,
+                webhook_events: webhookEvents,
+                webhook_url: webhookUrl,
+              },
+              method: "POST",
+            });
+            return completeLifecycleWrite(async () => {
+              const created = parseProviderSession(parseData(body.value), true);
+              if (
+                !created ||
+                created.name !== marker ||
+                !hasSessionConfiguration(created, webhookUrl) ||
+                (proxyUrl !== undefined && created.proxyUrl !== proxyUrl)
+              ) {
+                throw writeFailure("invalid_response", true);
+              }
+              return toLifecycleSession(created);
+            });
           },
-          method: "POST",
-        });
-        return completeLifecycleWrite(async () => {
-          const created = parseProviderSession(parseData(body.value), true);
-          if (
-            !created ||
-            created.name !== marker ||
-            !hasSessionConfiguration(created, webhookUrl) ||
-            (proxyUrl !== undefined && created.proxyUrl !== proxyUrl)
-          ) {
-            throw writeFailure("invalid_response", true);
-          }
-          return toLifecycleSession(created);
-        });
+        );
       }),
     deleteSession: ({ session }) =>
       effect(async (): Promise<SessionDeletionObservation> => {
@@ -1005,29 +1064,35 @@ export const makeWasenderSessionLifecycle = (
         const providerSession = providerSessions[0];
         if (!providerSession) throw writeFailure("integrity_failed", false);
         const proxyUrl = await selectProxyUrl(setupMarker, providerSession);
-        await writeJson(`/api/whatsapp-sessions/${providerSession.id}`, {
-          body: {
-            account_protection: true,
-            ignore_groups: false,
-            log_messages: false,
-            ...(proxyUrl === undefined ? {} : { proxy_url: proxyUrl }),
-            read_incoming_messages: false,
-            webhook_enabled: true,
-            webhook_events: webhookEvents,
-            webhook_url: webhookUrl,
+        return withProxyAllocationReservation(
+          setupMarker,
+          proxyUrl !== undefined && providerSession.proxyUrl !== proxyUrl,
+          async () => {
+            await writeJson(`/api/whatsapp-sessions/${providerSession.id}`, {
+              body: {
+                account_protection: true,
+                ignore_groups: false,
+                log_messages: false,
+                ...(proxyUrl === undefined ? {} : { proxy_url: proxyUrl }),
+                read_incoming_messages: false,
+                webhook_enabled: true,
+                webhook_events: webhookEvents,
+                webhook_url: webhookUrl,
+              },
+              method: "PUT",
+            });
+            return completeLifecycleWrite(async () => {
+              const repaired = await loadDetail(providerSession.id);
+              if (
+                !hasSessionConfiguration(repaired, webhookUrl) ||
+                (proxyUrl !== undefined && repaired.proxyUrl !== proxyUrl)
+              ) {
+                throw writeFailure("integrity_failed", true);
+              }
+              return toLifecycleSession(repaired);
+            });
           },
-          method: "PUT",
-        });
-        return completeLifecycleWrite(async () => {
-          const repaired = await loadDetail(providerSession.id);
-          if (
-            !hasSessionConfiguration(repaired, webhookUrl) ||
-            (proxyUrl !== undefined && repaired.proxyUrl !== proxyUrl)
-          ) {
-            throw writeFailure("integrity_failed", true);
-          }
-          return toLifecycleSession(repaired);
-        });
+        );
       }),
   };
 };

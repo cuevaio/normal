@@ -152,4 +152,5 @@ export {
   type WasenderLifecycleConfig,
   type WasenderLifecycleDependencies,
   type WasenderLifecycleTelemetryEvent,
+  type WasenderProxyAllocationCoordinator,
 } from "./control-wasender";
