@@ -345,12 +345,12 @@ export function RecipientExclusions({
         </button>
       )}
 
+      <p aria-live="polite" className="sr-only">
+        {status.startsWith("Saving.") || status.startsWith("Could not save")
+          ? status
+          : ""}
+      </p>
       <p
-        aria-live={
-          status.startsWith("Saving.") || status.startsWith("Could not save")
-            ? "polite"
-            : undefined
-        }
         className="min-h-5 text-sm text-muted-foreground"
         data-testid="recipient-exclusion-status"
       >

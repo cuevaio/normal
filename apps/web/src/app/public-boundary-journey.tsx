@@ -2312,17 +2312,15 @@ export function PublicBoundaryJourney({
                               connection.displayName
                             }
                           />
+                          <p aria-live="polite" className="sr-only">
+                            {nameStatus[connection.id] === "Saving name…" ||
+                            nameStatus[connection.id] ===
+                              "Name could not be saved."
+                              ? nameStatus[connection.id]
+                              : ""}
+                          </p>
                           {nameStatus[connection.id] ? (
-                            <p
-                              aria-live={
-                                nameStatus[connection.id] === "Saving name…" ||
-                                nameStatus[connection.id] ===
-                                  "Name could not be saved."
-                                  ? "polite"
-                                  : undefined
-                              }
-                              className="text-sm text-muted-foreground"
-                            >
+                            <p className="text-sm text-muted-foreground">
                               {nameStatus[connection.id]}
                             </p>
                           ) : null}
@@ -2422,17 +2420,15 @@ export function PublicBoundaryJourney({
                               </Field>
                             ) : null;
                           })()}
-                          <p
-                            aria-live={
-                              retentionStatus[connection.id] ===
-                                "Saving Message Retention Policy…" ||
-                              retentionStatus[connection.id] ===
-                                "Message Retention Policy could not be saved."
-                                ? "polite"
-                                : undefined
-                            }
-                            className="text-sm text-muted-foreground"
-                          >
+                          <p aria-live="polite" className="sr-only">
+                            {retentionStatus[connection.id] ===
+                              "Saving Message Retention Policy…" ||
+                            retentionStatus[connection.id] ===
+                              "Message Retention Policy could not be saved."
+                              ? retentionStatus[connection.id]
+                              : ""}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
                             {retentionStatus[connection.id] ??
                               `Current policy: ${connection.retentionDays === null ? "retain until Connection Deletion" : `${connection.retentionDays} days`}.`}
                           </p>
