@@ -2314,7 +2314,13 @@ export function PublicBoundaryJourney({
                           />
                           {nameStatus[connection.id] ? (
                             <p
-                              aria-live="polite"
+                              aria-live={
+                                nameStatus[connection.id] === "Saving name…" ||
+                                nameStatus[connection.id] ===
+                                  "Name could not be saved."
+                                  ? "polite"
+                                  : undefined
+                              }
                               className="text-sm text-muted-foreground"
                             >
                               {nameStatus[connection.id]}
@@ -2417,7 +2423,14 @@ export function PublicBoundaryJourney({
                             ) : null;
                           })()}
                           <p
-                            aria-live="polite"
+                            aria-live={
+                              retentionStatus[connection.id] ===
+                                "Saving Message Retention Policy…" ||
+                              retentionStatus[connection.id] ===
+                                "Message Retention Policy could not be saved."
+                                ? "polite"
+                                : undefined
+                            }
                             className="text-sm text-muted-foreground"
                           >
                             {retentionStatus[connection.id] ??

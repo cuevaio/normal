@@ -504,6 +504,9 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   await expect(saveConfiguration).toBeEnabled();
   await saveConfiguration.click();
   await expect(configuration).toContainText("Name saved.");
+  await expect(
+    configuration.locator("p", { hasText: "Name saved." }),
+  ).not.toHaveAttribute("aria-live");
   await expectSuccessToast(page, "Name saved.");
   expect(renameRequests).toBe(1);
   expect(retentionUpdateRequests).toBe(0);
@@ -513,6 +516,9 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   await page.getByRole("option", { name: "7 days" }).click();
   await saveConfiguration.click();
   await expect(configuration).toContainText("Current policy: 7 days");
+  await expect(
+    configuration.locator("p", { hasText: "Message Retention Policy saved" }),
+  ).not.toHaveAttribute("aria-live");
   await expectSuccessToast(page, "Message Retention Policy saved");
   expect(renameRequests).toBe(1);
   expect(retentionUpdateRequests).toBe(1);
@@ -610,6 +616,9 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   await expect(page.getByTestId("recipient-exclusion-status")).toContainText(
     "Normal no longer tracks Ada Lovelace.",
   );
+  await expect(
+    page.getByTestId("recipient-exclusion-status"),
+  ).not.toHaveAttribute("aria-live");
   await expectSuccessToast(page, "Normal no longer tracks Ada Lovelace.");
   await expect(
     exclusions.getByRole("button", { name: "Track again Ada Lovelace" }),

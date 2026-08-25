@@ -346,7 +346,11 @@ export function RecipientExclusions({
       )}
 
       <p
-        aria-live="polite"
+        aria-live={
+          status.startsWith("Saving.") || status.startsWith("Could not save")
+            ? "polite"
+            : undefined
+        }
         className="min-h-5 text-sm text-muted-foreground"
         data-testid="recipient-exclusion-status"
       >
