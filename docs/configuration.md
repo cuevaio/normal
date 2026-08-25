@@ -418,7 +418,10 @@ totals, active MCP Authorization count, and a 30-point daily series. Counts
 exclude WhatsApp Connections in Connection Deletion. It never returns message
 content, media, conversation or recipient identity, phone numbers, credentials,
 public handles, tenant identifiers, or provider identifiers, and it does not
-compare against a prior retention window. Review telemetry is
+compare against a prior retention window. The encoder still emits
+`previous_inbound` and `previous_outbound` as zeros so older dashboard
+bundles keep decoding while production deploys the API Worker before web.
+Review telemetry is
 `account_insights.review.completed` with only inbound and outbound counts,
 window days, and the API service name.
 

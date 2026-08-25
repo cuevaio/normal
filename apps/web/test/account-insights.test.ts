@@ -56,7 +56,19 @@ describe("account insights decoder", () => {
     expect(
       decodeAccountInsights({
         ...validBody,
-        messages: { ...validBody.messages, previous_inbound: 1 },
+        messages: {
+          ...validBody.messages,
+          previous_inbound: 0,
+          previous_outbound: 0,
+        },
+      }),
+    ).toMatchObject({
+      messages: { inbound: 24, outbound: 8 },
+    });
+    expect(
+      decodeAccountInsights({
+        ...validBody,
+        messages: { ...validBody.messages, previous_inbound: "1" },
       }),
     ).toBeNull();
     expect(

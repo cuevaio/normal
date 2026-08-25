@@ -43,9 +43,11 @@ and outbound Stored Message totals, conversation mix, confirmed or unknown Send
 Operations, active MCP Authorizations, and a 30-day UTC series. The response
 never includes message content, media, conversation names, phone numbers,
 credentials, tenant identifiers, or provider identifiers, and it does not
-compare against a prior retention window. Database coverage proves RLS
-isolation and that tombstones, expired content, deleting WhatsApp Connections,
-and other Personal Accounts are excluded.
+compare against a prior retention window. The HTTP encoder still emits zero
+`previous_inbound` and `previous_outbound` fields so the pre-#165 dashboard
+decoder remains compatible while production deploys the API Worker before web.
+Database coverage proves RLS isolation and that tombstones, expired content,
+deleting WhatsApp Connections, and other Personal Accounts are excluded.
 
 The signed-in Activity Log review uses `GET /v1/activity-logs` and the
 canonical Activity Log contracts. The persisted table remains `tool_call_logs`

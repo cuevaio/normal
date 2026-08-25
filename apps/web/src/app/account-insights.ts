@@ -62,13 +62,17 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const decodeObjectCounts = (
   value: unknown,
   expectedKeys: ReadonlyArray<string>,
+  optionalKeys: ReadonlyArray<string> = [],
 ): Record<string, unknown> | null => {
   const record = asRecord(value);
-  if (record === null || Object.keys(record).length !== expectedKeys.length) {
-    return null;
-  }
+  if (record === null) return null;
+  const allowed = new Set([...expectedKeys, ...optionalKeys]);
+  if (Object.keys(record).some((key) => !allowed.has(key))) return null;
   for (const key of expectedKeys) {
     if (!isCount(record[key])) return null;
+  }
+  for (const key of optionalKeys) {
+    if (record[key] !== undefined && !isCount(record[key])) return null;
   }
   return record;
 };
@@ -89,7 +93,11 @@ export const decodeAccountInsights = (
     "needs_attention",
     "total",
   ]);
-  const messages = decodeObjectCounts(record.messages, ["inbound", "outbound"]);
+  const messages = decodeObjectCounts(
+    record.messages,
+    ["inbound", "outbound"],
+    ["previous_inbound", "previous_outbound"],
+  );
   const conversations = decodeObjectCounts(record.conversations, [
     "active",
     "direct",

@@ -83,6 +83,8 @@ describe("Account insights product boundary", () => {
       messages: {
         inbound: 24,
         outbound: 8,
+        previous_inbound: 0,
+        previous_outbound: 0,
       },
       sends: { confirmed: 7, failed: 0, unknown: 1 },
       series: [
