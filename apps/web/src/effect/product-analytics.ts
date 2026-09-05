@@ -1,33 +1,4 @@
 export type ProductAnalyticsEvent =
-  | {
-      event: "onboarding_stage_viewed";
-      stage:
-        | "welcome"
-        | "profile"
-        | "security"
-        | "connection_setup"
-        | "success";
-    }
-  | {
-      event: "onboarding_stage_completed";
-      stage:
-        | "welcome"
-        | "profile"
-        | "security"
-        | "connection_setup"
-        | "success";
-    }
-  | {
-      event: "onboarding_stage_abandoned";
-      stage:
-        | "welcome"
-        | "profile"
-        | "security"
-        | "connection_setup"
-        | "success";
-    }
-  | { event: "onboarding_profile_completed" }
-  | { event: "onboarding_security_reached" }
   | { event: "connection_setup_started" }
   | {
       event: "connection_setup_completed";
@@ -38,12 +9,10 @@ export type ProductAnalyticsEvent =
       event: "connection_setup_timing_recorded";
       phase: "code_observed_to_active_observed" | "start_to_code_observed";
     }
-  | { event: "onboarding_completed" }
   | {
       event: "feature_used";
       feature:
-        | "additional_connection_setup"
-        | "onboarding_chatgpt_opened"
+        | "connection_setup_opened"
         | "mcp_guide_opened"
         | "activity_logs_viewed"
         | "account_insights_viewed";
@@ -59,25 +28,12 @@ export interface ProductAnalyticsConfiguration {
 }
 
 const allowedEventNames = new Set<ProductAnalyticsEvent["event"]>([
-  "onboarding_stage_viewed",
-  "onboarding_stage_completed",
-  "onboarding_stage_abandoned",
-  "onboarding_profile_completed",
-  "onboarding_security_reached",
   "connection_setup_started",
   "connection_setup_completed",
   "connection_setup_timing_recorded",
-  "onboarding_completed",
   "feature_used",
 ]);
 
-const onboardingStages = new Set([
-  "welcome",
-  "profile",
-  "security",
-  "connection_setup",
-  "success",
-]);
 const connectionSetupOutcomes = new Set([
   "success",
   "failed",
@@ -89,8 +45,7 @@ const connectionSetupTimingPhases = new Set([
   "start_to_code_observed",
 ]);
 const features = new Set([
-  "additional_connection_setup",
-  "onboarding_chatgpt_opened",
+  "connection_setup_opened",
   "mcp_guide_opened",
   "activity_logs_viewed",
   "account_insights_viewed",
@@ -118,17 +73,6 @@ const decodeEvent = (value: unknown): ProductAnalyticsEvent | null => {
     !allowedEventNames.has(event.event as ProductAnalyticsEvent["event"])
   ) {
     return null;
-  }
-  if (
-    event.event === "onboarding_stage_viewed" ||
-    event.event === "onboarding_stage_completed" ||
-    event.event === "onboarding_stage_abandoned"
-  ) {
-    return hasExactKeys(event, ["event", "stage"]) &&
-      typeof event.stage === "string" &&
-      onboardingStages.has(event.stage)
-      ? (event as unknown as ProductAnalyticsEvent)
-      : null;
   }
   if (event.event === "connection_setup_completed") {
     return hasExactKeys(event, ["event", "outcome"]) &&

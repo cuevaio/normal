@@ -87,17 +87,14 @@ import {
   WHATSAPP_CONNECTION_LIMIT,
 } from "./connection-capacity";
 import {
-  nextConnectionSetupPollDelayMs,
-  observationMetricDurationMs,
-} from "./connection-setup-observation";
-import {
   type ConnectionSetupCleanupState,
   ConnectionSetupForm,
   type ConnectionSetupState,
-  decodeOnboardingProfileResponse,
-  FirstConnectionOnboarding,
-  type OnboardingProfile,
-} from "./first-connection-onboarding";
+} from "./connection-setup";
+import {
+  nextConnectionSetupPollDelayMs,
+  observationMetricDurationMs,
+} from "./connection-setup-observation";
 import { McpConnectionGuides } from "./mcp-connection-guides";
 import { RecipientExclusions } from "./recipient-exclusions";
 
@@ -108,12 +105,10 @@ interface PublicBoundaryJourneyProps {
   readonly connectionSetupEndpoint: string;
   readonly mcpAuthorizationsEndpoint: string;
   readonly mcpServerUrl: string;
-  readonly onboardingProfileEndpoint: string;
   readonly personalAccountEndpoint: string;
   readonly personalAccountDeletionEndpoint: string;
   readonly activityLogsEndpoint: string;
   readonly accountInsightsEndpoint: string;
-  readonly onFirstConnectionOnboardingChange?: (required: boolean) => void;
   readonly view?: PersonalAccountView;
 }
 
@@ -122,8 +117,7 @@ export type PersonalAccountView =
   | "connections"
   | "authorizations"
   | "activity"
-  | "settings"
-  | "onboarding";
+  | "settings";
 
 type JourneyState = "idle" | "loading" | "signed_out" | "unavailable" | "ok";
 
@@ -173,6 +167,27 @@ const displayTime = (value: string): string =>
 
 type SetupCleanupState = ConnectionSetupCleanupState;
 
+const setupCompletionOutcomes: Partial<
+  Record<
+    ConnectionSetupState,
+    "success" | "failed" | "cancelled" | "capacity_unavailable"
+  >
+> = {
+  cancelled: "cancelled",
+  connected: "success",
+  connection_limit_reached: "failed",
+  expired: "cancelled",
+  invalid: "failed",
+  number_cleanup_in_progress: "failed",
+  number_confirmation_failed: "failed",
+  number_deletion_in_progress: "failed",
+  number_unavailable: "failed",
+  provider_capacity_unavailable: "capacity_unavailable",
+  provisioning_failed: "failed",
+  provisioning_quarantined: "failed",
+  unavailable: "failed",
+};
+
 export function PublicBoundaryJourney({
   autoInitialize = false,
   clerkJwtTemplate,
@@ -180,12 +195,10 @@ export function PublicBoundaryJourney({
   connectionSetupEndpoint,
   mcpAuthorizationsEndpoint,
   mcpServerUrl,
-  onboardingProfileEndpoint,
   personalAccountEndpoint,
   personalAccountDeletionEndpoint,
   activityLogsEndpoint,
   accountInsightsEndpoint,
-  onFirstConnectionOnboardingChange,
   view = "overview",
 }: PublicBoundaryJourneyProps) {
   const { getToken: getClerkToken, isLoaded, isSignedIn } = useAuth();
@@ -250,10 +263,6 @@ export function PublicBoundaryJourney({
     new Set(),
   );
   const [setupDialogOpen, setSetupDialogOpen] = useState(false);
-  const [showFirstConnectionOnboarding, setShowFirstConnectionOnboarding] =
-    useState(false);
-  const [onboardingProfile, setOnboardingProfile] =
-    useState<OnboardingProfile | null>(null);
   const [reconnectQr, setReconnectQr] = useState<{
     readonly connectionId: string;
     readonly url: string;
@@ -273,6 +282,7 @@ export function PublicBoundaryJourney({
     readonly name: string;
     readonly whatsappNumber: string;
   } | null>(null);
+  const setupAttemptPending = useRef(false);
   const activeQrImageUrl = useRef<string | null>(null);
   const activeReconnectQrUrl = useRef<string | null>(null);
   const lifecycleGeneration = useRef(0);
@@ -292,7 +302,6 @@ export function PublicBoundaryJourney({
   });
   const observationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const automaticallyInitialized = useRef(false);
-  const sawInitialConnections = useRef(false);
 
   const connectionsQuery = useQuery({
     enabled: state === "ok" && isLoaded && isSignedIn === true,
@@ -336,24 +345,6 @@ export function PublicBoundaryJourney({
       });
     },
     queryKey: queryKeys.activityLogs(),
-  });
-  const onboardingQuery = useQuery({
-    enabled:
-      state === "ok" &&
-      connectionsQuery.isSuccess &&
-      connectionsQuery.data.length === 0,
-    queryFn: async () => {
-      const token = await getToken();
-      if (token === null) throw new Error("signed out");
-      const response = await fetch(onboardingProfileEndpoint, {
-        headers: { authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error("onboarding unavailable");
-      const profile = decodeOnboardingProfileResponse(await response.json());
-      if (profile === undefined) throw new Error("onboarding unavailable");
-      return profile;
-    },
-    queryKey: queryKeys.onboardingProfile(),
   });
   const revokeAuthorizationMutation = useMutation({
     mutationFn: async (authorization: McpAuthorization) => {
@@ -405,24 +396,13 @@ export function PublicBoundaryJourney({
     state === "unavailable" ||
     (state === "ok" &&
       connectionsQuery.isError &&
-      connectionsQuery.data === undefined) ||
-    (state === "ok" &&
-      connectionsQuery.isSuccess &&
-      connectionsQuery.data.length === 0 &&
-      onboardingQuery.isError &&
-      onboardingQuery.data === undefined);
+      connectionsQuery.data === undefined);
   const dashboardLoading =
     state === "idle" ||
     state === "loading" ||
     (state === "ok" &&
       connectionsQuery.data === undefined &&
-      !connectionsQuery.isError) ||
-    (state === "ok" &&
-      connectionsQuery.isSuccess &&
-      connectionsQuery.data.length === 0 &&
-      !sawInitialConnections.current &&
-      !showFirstConnectionOnboarding &&
-      !onboardingQuery.isError);
+      !connectionsQuery.isError);
   const dashboardReady =
     state === "ok" && !dashboardLoading && !dashboardUnavailable;
 
@@ -450,31 +430,6 @@ export function PublicBoundaryJourney({
       return next;
     });
   }, [connectionsQuery.data, connectionsQuery.isSuccess]);
-
-  useEffect(() => {
-    if (state !== "ok" || !connectionsQuery.isSuccess) return;
-    if (connectionsQuery.data.length > 0) {
-      if (!sawInitialConnections.current) {
-        sawInitialConnections.current = true;
-        setOnboardingProfile(null);
-        setShowFirstConnectionOnboarding(false);
-      }
-      return;
-    }
-    if (!onboardingQuery.isSuccess || sawInitialConnections.current) return;
-    sawInitialConnections.current = true;
-    setOnboardingProfile(onboardingQuery.data);
-    setShowFirstConnectionOnboarding(
-      onboardingQuery.data === null ||
-        onboardingQuery.data.firstConnectionCompletedAt === null,
-    );
-  }, [
-    connectionsQuery.data,
-    connectionsQuery.isSuccess,
-    onboardingQuery.data,
-    onboardingQuery.isSuccess,
-    state,
-  ]);
 
   const normalizedActivityLogSearch = activityLogSearch.trim().toLowerCase();
   const filteredActivityLogs = activityLogs.filter((log) => {
@@ -1275,7 +1230,6 @@ export function PublicBoundaryJourney({
         setState("unavailable");
         return;
       }
-      sawInitialConnections.current = false;
       setState("ok");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.connections() }),
@@ -1284,9 +1238,6 @@ export function PublicBoundaryJourney({
           queryKey: queryKeys.accountInsights(),
         }),
         queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs() }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.onboardingProfile(),
-        }),
       ]);
     } catch {
       setState("unavailable");
@@ -1319,24 +1270,25 @@ export function PublicBoundaryJourney({
   }, [view]);
 
   useEffect(() => {
-    if (!dashboardReady) return;
-    onFirstConnectionOnboardingChange?.(showFirstConnectionOnboarding);
-  }, [
-    dashboardReady,
-    onFirstConnectionOnboardingChange,
-    showFirstConnectionOnboarding,
-  ]);
-
-  useEffect(() => {
     if (view !== "overview") return;
     if (!dashboardReady) return;
-    if (showFirstConnectionOnboarding) return;
     if (insightsState !== "ok") return;
     captureProductAnalyticsEvent({
       event: "feature_used",
       feature: "account_insights_viewed",
     });
-  }, [dashboardReady, insightsState, showFirstConnectionOnboarding, view]);
+  }, [dashboardReady, insightsState, view]);
+
+  useEffect(() => {
+    if (!setupAttemptPending.current) return;
+    const outcome = setupCompletionOutcomes[setupState];
+    if (outcome === undefined) return;
+    setupAttemptPending.current = false;
+    captureProductAnalyticsEvent({
+      event: "connection_setup_completed",
+      outcome,
+    });
+  }, [setupState]);
 
   const revokeAuthorization = async (authorization: McpAuthorization) => {
     setRevokingAuthorization(authorization.id);
@@ -1349,6 +1301,8 @@ export function PublicBoundaryJourney({
 
   const startSetup = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setupAttemptPending.current = true;
+    captureProductAnalyticsEvent({ event: "connection_setup_started" });
     stopObserving();
     const requestGeneration = observationGeneration.current;
     setupObservationMetrics.current = {
@@ -1597,45 +1551,7 @@ export function PublicBoundaryJourney({
           Your Personal Account is temporarily unavailable. Please try again.
         </p>
       ) : null}
-      {dashboardReady &&
-      showFirstConnectionOnboarding &&
-      (view === "onboarding" ||
-        view === "overview" ||
-        view === "connections") ? (
-        <FirstConnectionOnboarding
-          connectedConnection={connections[0] ?? null}
-          getToken={getToken}
-          initialProfile={onboardingProfile}
-          mcpServerUrl={mcpServerUrl}
-          onboardingProfileEndpoint={onboardingProfileEndpoint}
-          onComplete={() => {
-            clearSetupDraft();
-            setShowFirstConnectionOnboarding(false);
-          }}
-          onProfileSaved={(profile) => {
-            setOnboardingProfile(profile);
-            queryClient.setQueryData(queryKeys.onboardingProfile(), profile);
-          }}
-          setupForm={{
-            connectionName,
-            onCancelSetup: cancelSetup,
-            onConnectionNameChange: updateConnectionName,
-            onResetSetup: clearSetupDraft,
-            onStartSetup: startSetup,
-            onWhatsappNumberChange: updateWhatsappNumber,
-            qrImageUrl,
-            setupCleanupState,
-            setupId,
-            setupState,
-            whatsappNumber,
-          }}
-        />
-      ) : null}
-      {dashboardReady &&
-      !(
-        showFirstConnectionOnboarding &&
-        (view === "onboarding" || view === "overview" || view === "connections")
-      ) ? (
+      {dashboardReady ? (
         <>
           {view === "overview" ? (
             <AccountOverview
@@ -2106,9 +2022,7 @@ export function PublicBoundaryJourney({
           ) : null}
         </>
       ) : null}
-      {dashboardReady &&
-      !showFirstConnectionOnboarding &&
-      view === "connections" ? (
+      {dashboardReady && view === "connections" ? (
         <section
           aria-label="WhatsApp Connections"
           className="flex flex-col gap-5"
@@ -2137,7 +2051,7 @@ export function PublicBoundaryJourney({
                 if (open) {
                   captureProductAnalyticsEvent({
                     event: "feature_used",
-                    feature: "additional_connection_setup",
+                    feature: "connection_setup_opened",
                   });
                 }
                 if (!open && !durableActiveSetup && setupId !== null) {
@@ -2165,7 +2079,7 @@ export function PublicBoundaryJourney({
                 </FormOverlayHeader>
                 <ConnectionSetupForm
                   connectionName={connectionName}
-                  idPrefix="additional-connection"
+                  idPrefix="connection-setup"
                   onCancelSetup={cancelSetup}
                   onConnectionNameChange={updateConnectionName}
                   onResetSetup={clearSetupDraft}
@@ -2569,9 +2483,7 @@ export function PublicBoundaryJourney({
           )}
         </section>
       ) : null}
-      {dashboardReady &&
-      !showFirstConnectionOnboarding &&
-      view === "settings" ? (
+      {dashboardReady && view === "settings" ? (
         <section
           aria-label="WhatsApp Recipient Exclusions"
           className="flex flex-col items-start gap-3"

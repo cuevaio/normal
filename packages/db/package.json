@@ -17,7 +17,6 @@
     "./mcp-tool": "./src/mcp-tool.ts",
     "./message-retention": "./src/message-retention.ts",
     "./message-search": "./src/message-search.ts",
-    "./onboarding-profile": "./src/onboarding-profile.ts",
     "./personal-account": "./src/personal-account.ts",
     "./readiness": "./src/readiness.ts",
     "./recovery-migrations": "./src/recovery-migrations.ts",
@@ -38,7 +37,7 @@
     "./whatsapp-connection": "./src/whatsapp-connection.ts"
   },
   "scripts": {
-    "build": "bun build src/api-key.ts src/config.ts src/connection-health.ts src/connection-setup.ts src/connectivity.ts src/database.ts src/directory.ts src/group.ts src/mcp-authorization.ts src/mcp-tool.ts src/message-retention.ts src/message-search.ts src/migrations.ts src/onboarding-profile.ts src/personal-account.ts src/readiness.ts src/recovery-migrations.ts src/recovery-source-point.ts src/recovery-verifier.ts src/recipient-exclusion.ts src/request-connection.ts src/restricted-runtime-config.ts src/restore.ts src/schema.ts src/send.ts src/stored-media.ts src/account-insights.ts src/activity-log.ts src/record-ingestion-gap-cli.ts src/schema-version.ts src/webhook-event.ts src/webhook-ingress.ts src/webhook-replay.ts src/whatsapp-connection.ts --outdir dist --target bun",
+    "build": "bun build src/api-key.ts src/config.ts src/connection-health.ts src/connection-setup.ts src/connectivity.ts src/database.ts src/directory.ts src/group.ts src/mcp-authorization.ts src/mcp-tool.ts src/message-retention.ts src/message-search.ts src/migrations.ts src/personal-account.ts src/readiness.ts src/recovery-migrations.ts src/recovery-source-point.ts src/recovery-verifier.ts src/recipient-exclusion.ts src/request-connection.ts src/restricted-runtime-config.ts src/restore.ts src/schema.ts src/send.ts src/stored-media.ts src/account-insights.ts src/activity-log.ts src/record-ingestion-gap-cli.ts src/schema-version.ts src/webhook-event.ts src/webhook-ingress.ts src/webhook-replay.ts src/whatsapp-connection.ts --outdir dist --target bun",
     "db:check": "bun src/check-cli.ts",
     "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts",
     "db:migrate-public-data": "bun src/migrate-public-data-cli.ts",

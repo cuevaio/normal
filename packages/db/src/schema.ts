@@ -7,7 +7,6 @@ export * from "./schema/connections";
 export * from "./schema/directory";
 export * from "./schema/mcp-authorizations";
 export * from "./schema/messages";
-export * from "./schema/onboarding-profiles";
 export * from "./schema/operations";
 export * from "./schema/recipient-exclusions";
 export * from "./schema/sends";

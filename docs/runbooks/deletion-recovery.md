@@ -77,8 +77,8 @@ its locked marker is durable and every WhatsApp Connection row has completed
 Connection Deletion. The restricted purge function transforms each ordinary
 Activity Log into a Security Record containing only category, allowlisted
 client class, outcome, counts, timing, and latency, then deletes the Personal
-Account row so its Clerk identity mapping, onboarding profile, API Keys, and
-all remaining tenant rows cascade away. MCP events keep their allowlisted
+Account row so its Clerk identity mapping, API Keys, and all remaining tenant
+rows cascade away. MCP events keep their allowlisted
 client class; API events use `api_key`. Security Records keep the source log's
 original 90-day expiry and must not retain an API Key, User, Personal Account,
 Connection, network, message, contact, provider, credential, or content

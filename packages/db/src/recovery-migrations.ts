@@ -30,6 +30,7 @@ import migration0028 from "../drizzle/0028_bind_send_request_shapes.sql";
 import migration0029 from "../drizzle/0029_persist_first_connection_completion.sql";
 import migration0030 from "../drizzle/0030_stop_serving_branch_restore_replay.sql";
 import migration0031 from "../drizzle/0031_record_account_envelope_recovery.sql";
+import migration0032 from "../drizzle/0032_remove_first_connection_onboarding.sql";
 import { type QueryConnection, withPgQueryConnection } from "./database";
 import { restrictedMigrationOwnerConnectionString } from "./restricted-runtime-config";
 
@@ -66,6 +67,7 @@ const migrations = [
   [1787678308000, migration0029],
   [1787689711458, migration0030],
   [1787707546000, migration0031],
+  [1788570000000, migration0032],
 ] as const;
 export const recoveryMigrationCreatedAts: ReadonlyArray<number> =
   migrations.map(([createdAt]) => createdAt);

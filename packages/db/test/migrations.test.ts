@@ -50,7 +50,52 @@ describe("production migrations", () => {
         (SELECT count(*)::int FROM public.schema_migrations) AS legacy,
         (SELECT count(*)::int FROM public.drizzle_migrations) AS standard
     `);
-    expect(ledgers.rows).toEqual([{ legacy: 40, standard: 32 }]);
+    expect(ledgers.rows).toEqual([{ legacy: 40, standard: 33 }]);
+  });
+
+  test("removes every first-connection onboarding database object", async () => {
+    await runMigrations(database);
+
+    const objects = await database.query<{ name: string; type: string }>(`
+      SELECT relname AS name, relkind::text AS type
+      FROM pg_catalog.pg_class
+      JOIN pg_catalog.pg_namespace
+        ON pg_namespace.oid = pg_class.relnamespace
+      WHERE pg_namespace.nspname = 'public'
+        AND relname IN (
+          'personal_account_onboarding_profiles',
+          'personal_account_onboarding_profiles_completed_at'
+        )
+      UNION ALL
+      SELECT proname AS name, 'function' AS type
+      FROM pg_catalog.pg_proc
+      JOIN pg_catalog.pg_namespace
+        ON pg_namespace.oid = pg_proc.pronamespace
+      WHERE pg_namespace.nspname = 'public'
+        AND proname IN (
+          'complete_onboarding_security',
+          'first_connection_setup_eligible',
+          'get_onboarding_profile',
+          'record_first_connection_completion',
+          'restore_first_connection_completion_on_profile_insert',
+          'upsert_onboarding_profile'
+        )
+      UNION ALL
+      SELECT tgname AS name, 'trigger' AS type
+      FROM pg_catalog.pg_trigger
+      WHERE NOT tgisinternal
+        AND tgname IN (
+          'record_first_connection_completion',
+          'restore_first_connection_completion_on_profile_insert'
+        )
+      UNION ALL
+      SELECT polname AS name, 'policy' AS type
+      FROM pg_catalog.pg_policy
+      WHERE polname = 'personal_account_onboarding_profiles_tenant'
+      ORDER BY type, name
+    `);
+
+    expect(objects.rows).toEqual([]);
   });
 
   test("keeps account-envelope recovery evidence private and account-bound", async () => {

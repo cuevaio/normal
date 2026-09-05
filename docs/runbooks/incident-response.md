@@ -16,7 +16,7 @@ passes.
 
 ## Provider outage
 
-- Contain: pause new onboarding when lifecycle reconciliation is impaired.
+- Contain: pause new Connection Setup when lifecycle reconciliation is impaired.
   Connected-state reads may continue, but block new sends when evidence changes
   a WhatsApp Connection to disconnected, reconnect-required, or degraded.
 - Preserve: reservations, encrypted provider references, Pending Send Content,
@@ -46,7 +46,7 @@ passes.
 
 ## Queue backlog
 
-- Contain: pause new onboarding and nonessential replay before saturation.
+- Contain: pause new Connection Setup and nonessential replay before saturation.
   Do not purge, manually acknowledge, increase consumers past reviewed quotas,
   or create replacement messages.
 - Recover: restore the downstream dependency and let configured consumers drain
@@ -96,9 +96,9 @@ Neon is authoritative. Do not raise limits in Durable Objects, clear ledger
 rows, refund a post-attempt send, or bypass capacity with provider-account
 sharding. If configuration drifted, restore the last reviewed positive values;
 if demand is genuine, keep deterministic `quota_exceeded` responses and pause
-onboarding at approved capacity. Reconcile retained-media bytes only through
-the audited owning workflow. Exit when ledger invariants pass and configured,
-observed, and vendor-approved limits agree.
+new Connection Setup at approved capacity. Reconcile retained-media bytes only
+through the audited owning workflow. Exit when ledger invariants pass and
+configured, observed, and vendor-approved limits agree.
 
 ## Partial deployment
 

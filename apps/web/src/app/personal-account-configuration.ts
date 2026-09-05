@@ -40,10 +40,6 @@ export function getPersonalAccountConfiguration() {
       "/v1/personal-account/bootstrap",
       apiOrigin,
     ).toString(),
-    onboardingProfileEndpoint: new URL(
-      "/v1/personal-account/onboarding-profile",
-      apiOrigin,
-    ).toString(),
     personalAccountDeletionEndpoint: new URL(
       "/v1/personal-account",
       apiOrigin,

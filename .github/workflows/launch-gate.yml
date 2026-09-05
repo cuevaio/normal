@@ -1,4 +1,4 @@
-name: External onboarding launch gate
+name: External product launch gate
 
 on:
   workflow_dispatch:

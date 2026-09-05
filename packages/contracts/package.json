@@ -11,7 +11,6 @@
     "./mcp-error": "./src/mcp-error.ts",
     "./mcp-result": "./src/mcp-result.ts",
     "./mcp-schema": "./src/mcp-schema.ts",
-    "./onboarding-profile": "./src/onboarding-profile.ts",
     "./openapi": "./src/openapi.ts",
     "./openapi-artifact": "./src/write-openapi.ts",
     "./openapi-guides": "./src/openapi-guides.ts",

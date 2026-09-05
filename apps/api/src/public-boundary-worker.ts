@@ -40,12 +40,6 @@ import {
   type McpAuthorizationPersistenceService,
 } from "./mcp-authorization";
 import {
-  createOnboardingProfileHandler,
-  isOnboardingProfileRequest,
-  type OnboardingProfileClockService,
-  type OnboardingProfilePersistenceService,
-} from "./onboarding-profile";
-import {
   createPersonalAccountHandler,
   isPersonalAccountRequest,
   type PersonalAccountRequirements,
@@ -110,8 +104,6 @@ type PublicBoundaryRequirements =
   | EnvelopeEncryption
   | McpAuthorizationClockService
   | McpAuthorizationPersistenceService
-  | OnboardingProfileClockService
-  | OnboardingProfilePersistenceService
   | PersonalAccountRequirements
   | RestClockService
   | RestCursorCodecService
@@ -209,13 +201,6 @@ export const createPublicBoundaryWorker = (
 
       if (isPersonalAccountRequest(request)) {
         return createPersonalAccountHandler(
-          options.layerFor(request, environment),
-          options.browserOrigin,
-        )(request);
-      }
-
-      if (isOnboardingProfileRequest(request)) {
-        return createOnboardingProfileHandler(
           options.layerFor(request, environment),
           options.browserOrigin,
         )(request);
