@@ -39,7 +39,6 @@ type PersistedSetupState =
 const makeHarness = (
   options: {
     readonly identityValid?: boolean;
-    readonly onboardingProfileRequired?: boolean;
     readonly numberCleanupInProgress?: boolean;
     readonly numberDeletionInProgress?: boolean;
     readonly persistenceFailure?: boolean;
@@ -124,9 +123,6 @@ const makeHarness = (
                     setup: existing.setup,
                   }
                 : { outcome: "idempotency_conflict" as const };
-            }
-            if (options.onboardingProfileRequired) {
-              return { outcome: "onboarding_profile_required" as const };
             }
             return {
               accountKey,
@@ -384,23 +380,6 @@ describe("Connection Setup HTTP boundary", () => {
     expect(await response.json()).toEqual({ error: "idempotency_conflict" });
     expect(harness.bindings).toHaveLength(1);
     expect(harness.encryptedNumbers).toEqual(["+15550123456"]);
-  });
-
-  test("rejects the first Connection Setup when no onboarding profile exists", async () => {
-    const harness = makeHarness({ onboardingProfileRequired: true });
-    const response = await harness.handler(setupRequest("+15550123456"));
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({
-      error: "onboarding_profile_required",
-    });
-    expect(harness.bindings).toHaveLength(0);
-    expect(harness.events).toEqual([
-      {
-        event: "connection_setup.start.completed",
-        outcome: "onboarding_profile_required",
-        service: "api",
-      },
-    ]);
   });
 
   test("lets only the owning User idempotently cancel through the signed-in HTTP boundary", async () => {

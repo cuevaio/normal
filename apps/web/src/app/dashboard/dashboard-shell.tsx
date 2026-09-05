@@ -13,8 +13,8 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import type { ReactNode } from "react";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -202,11 +202,6 @@ const viewByPathname: Readonly<Record<string, PersonalAccountView>> = {
   "/dashboard/settings": "settings",
 };
 
-const firstConnectionOnboardingEntryPaths = new Set([
-  "/dashboard",
-  "/dashboard/connections",
-]);
-
 export function DashboardShell({
   children,
   configuration,
@@ -215,17 +210,6 @@ export function DashboardShell({
   readonly configuration: PersonalAccountConfiguration;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const isOnboardingEntry = firstConnectionOnboardingEntryPaths.has(pathname);
-  const [onboardingRequired, setOnboardingRequired] = useState<boolean | null>(
-    null,
-  );
-
-  useEffect(() => {
-    if (isOnboardingEntry && onboardingRequired === true) {
-      router.replace("/onboarding");
-    }
-  }, [isOnboardingEntry, onboardingRequired, router]);
 
   const journey =
     pathname === "/dashboard/api-keys" && configuration !== null ? (
@@ -237,35 +221,26 @@ export function DashboardShell({
     ) : (
       <ConfiguredPersonalAccountJourney
         configuration={configuration}
-        onFirstConnectionOnboardingChange={setOnboardingRequired}
         view={viewByPathname[pathname] ?? "overview"}
       />
     );
 
   return (
     <SignedInGate>
-      {isOnboardingEntry && onboardingRequired !== false ? (
-        <main className="min-h-screen bg-muted/30">
-          <div className="dashboard-main">
-            <section className="dashboard-content">{journey}</section>
-          </div>
-        </main>
-      ) : (
-        <TooltipProvider>
-          <SidebarProvider className="bg-muted/30">
-            <DashboardSidebar />
-            <SidebarInset className="bg-muted/30">
-              <div className="flex h-14 items-center border-b bg-background px-4 md:hidden">
-                <SidebarTrigger aria-label="Open dashboard navigation" />
-              </div>
-              <div className="dashboard-main">
-                {children}
-                <section className="dashboard-content">{journey}</section>
-              </div>
-            </SidebarInset>
-          </SidebarProvider>
-        </TooltipProvider>
-      )}
+      <TooltipProvider>
+        <SidebarProvider className="bg-muted/30">
+          <DashboardSidebar />
+          <SidebarInset className="bg-muted/30">
+            <div className="flex h-14 items-center border-b bg-background px-4 md:hidden">
+              <SidebarTrigger aria-label="Open dashboard navigation" />
+            </div>
+            <div className="dashboard-main">
+              {children}
+              <section className="dashboard-content">{journey}</section>
+            </div>
+          </SidebarInset>
+        </SidebarProvider>
+      </TooltipProvider>
     </SignedInGate>
   );
 }

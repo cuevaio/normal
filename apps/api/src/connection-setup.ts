@@ -173,8 +173,7 @@ type ConnectionSetupOutcome =
         | "idempotency_conflict"
         | "number_cleanup_in_progress"
         | "number_deletion_in_progress"
-        | "number_unavailable"
-        | "onboarding_profile_required";
+        | "number_unavailable";
     };
 
 export const startConnectionSetup = (
@@ -207,9 +206,6 @@ export const startConnectionSetup = (
     });
     if (prepared === null) {
       return yield* Effect.fail(new ConnectionSetupNotAccessible());
-    }
-    if (prepared.outcome === "onboarding_profile_required") {
-      return prepared;
     }
     const matchesStoredName = (
       material: ConnectionSetupNameMaterial,
@@ -581,11 +577,7 @@ export const createConnectionSetupHandler =
                   : result.outcome === "number_deletion_in_progress"
                     ? "whatsapp_number_deletion_in_progress"
                     : result.outcome;
-            return jsonResponse(
-              { error },
-              result.outcome === "onboarding_profile_required" ? 403 : 409,
-              browserOrigin,
-            );
+            return jsonResponse({ error }, 409, browserOrigin);
           },
         }),
       ),

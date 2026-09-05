@@ -12,11 +12,9 @@ type PersonalAccountConfiguration = ReturnType<
 
 export function ConfiguredPersonalAccountJourney({
   configuration,
-  onFirstConnectionOnboardingChange,
   view,
 }: {
   readonly configuration: PersonalAccountConfiguration;
-  readonly onFirstConnectionOnboardingChange?: (required: boolean) => void;
   readonly view: PersonalAccountView;
 }) {
   if (configuration === null) {
@@ -37,12 +35,6 @@ export function ConfiguredPersonalAccountJourney({
       connectionSetupEndpoint={configuration.connectionSetupEndpoint}
       mcpAuthorizationsEndpoint={configuration.mcpAuthorizationsEndpoint}
       mcpServerUrl={configuration.mcpServerUrl}
-      {...(onFirstConnectionOnboardingChange === undefined
-        ? {}
-        : {
-            onFirstConnectionOnboardingChange,
-          })}
-      onboardingProfileEndpoint={configuration.onboardingProfileEndpoint}
       personalAccountDeletionEndpoint={
         configuration.personalAccountDeletionEndpoint
       }

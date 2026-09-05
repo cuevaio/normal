@@ -942,16 +942,18 @@ User and bootstrap once. Confirm the browser sends `POST
 `Personal Account ready`, and a retry reports the same state without creating a
 second account. Confirm the product states the three-Connection, 5 GB Stored
 Media, and default 30-day Message Retention Policy values returned from Neon.
-In a non-production environment, set capacity to exactly three, admit one
-designated User, and verify a second Clerk-approved User receives transient
-service unavailability on retries without persisted applicant state or any
-provider-control lifecycle telemetry. Restore the approved value before further onboarding. A wrong
-Origin, expired token, or token from another environment
-must produce the same not-found response. Do not copy a token into shell
-history, query tenant tables with an owner role, or log identifiers to prove
-this check. Safe telemetry may show only
-`personal_account.bootstrap.completed` with `created` on the first request or
-`recovered` on the retry. Capacity exhaustion emits no successful completion.
+In a non-production environment, exhaust provider capacity and verify another
+Clerk-approved User still bootstraps successfully on retries without persisted
+applicant state or provider-control lifecycle telemetry. Start a Connection
+Setup for that User and verify a definitive provider rejection reports temporary
+capacity unavailability and creates no WhatsApp Connection. Restore the approved
+capacity before starting another Connection Setup. A wrong Origin, expired
+token, or token from another environment must produce the same not-found
+response. Do not copy a token into shell history, query tenant tables with an
+owner role, or log identifiers to prove this check. Safe bootstrap telemetry may
+show only `personal_account.bootstrap.completed` with `created` on the first
+request or `recovered` on the retry. Provider capacity exhaustion emits no
+successful Connection Setup completion.
 
 Enter an explicitly international smoke-test WhatsApp Number in the signed-in
 product and start one Connection Setup. Confirm the browser sends `POST
@@ -1188,11 +1190,11 @@ Exercise the reviewed provider-control test fixture for an ambiguous create
 timeout and confirm the next Queue delivery reconciles before any create
 decision. Exercise its duplicate fixture and confirm Neon exposes only the
 safe setup state `provisioning_quarantined` and duplicate count while no session
-becomes usable. A production quarantine is an incident: pause new onboarding,
-retain every reservation and encrypted provider reference, and do not manually
-repeat create or release the number. Use audited restricted diagnostics for
-state/counts only, preserve provider evidence, and follow the provider cleanup
-procedure below. A growing recovery candidate
+becomes usable. A production quarantine is an incident: pause new Connection
+Setup, retain every reservation and encrypted provider reference, and do not
+manually repeat create or release the number. Use audited restricted diagnostics
+for state/counts only, preserve provider evidence, and follow the provider
+cleanup procedure below. A growing recovery candidate
 count, repeated normalized failure code, or setup approaching its 15-minute
 expiry requires paging the on-call operator.
 
@@ -1461,9 +1463,10 @@ under the production recovery authority.
 ## External rollout gates
 
 Clerk Waitlist mode controls private-beta applicant approval. The API has no
-second onboarding gate: a User who can authenticate is already approved and
-can bootstrap a Personal Account. Provider availability is managed internally
-and evaluated only when a Connection Setup provisions a WhatsApp Connection.
+second application-level admission gate: a User who can authenticate is already
+approved and can bootstrap a Personal Account. Provider availability is managed
+internally and evaluated only when a Connection Setup provisions a WhatsApp
+Connection.
 
 The weekly and quarterly schedules in
 `.github/workflows/recovery-drills.yml` call the production recovery automation
@@ -1477,15 +1480,16 @@ delivery, and deletion-gate bypass denial. Configure
 `production-recovery` GitHub environment; they are external rollout inputs, not
 test substitutes or application runtime bindings.
 
-Run the `External onboarding launch gate` workflow after successful drill
-artifacts exist. It reruns the real deployed smoke and production bundle
-inspection and requires the exact environment attestations `approved` for
-numeric quotas, provider capacity, and Wasender governance terms. Evidence
-older than 8 days for the weekly drill or 100 days for the quarterly drill is
-rejected. The successful result is release evidence; it does not mutate
-application admission state. Any missing artifact, secret, external approval,
-malformed report, failed check, missed four-hour RTO, missed five-minute Neon
-RPO, or nonzero deletion marker loss blocks the production launch decision.
+Run the external product launch workflow in
+`.github/workflows/launch-gate.yml` after successful drill artifacts exist. It
+reruns the real deployed smoke and production bundle inspection and requires
+the exact environment attestations `approved` for numeric quotas, provider
+capacity, and Wasender governance terms. Evidence older than 8 days for the
+weekly drill or 100 days for the quarterly drill is rejected. The successful
+result is release evidence; it does not mutate application admission state. Any
+missing artifact, secret, external approval, malformed report, failed check,
+missed four-hour RTO, missed five-minute Neon RPO, or nonzero deletion marker
+loss blocks the production launch decision.
 
 ## Public API release gate
 
@@ -1529,8 +1533,8 @@ ownership, and DNS approval. These values are intentionally absent from source.
 No code substitution, fake provider, public provider-control route, or
 production fallback is needed when the external values become available.
 
-External onboarding and any live Directory rollout remain gated on the written
-Wasender terms required by ADR 0004, including approved capacity, data
+External product launch and any live Directory rollout remain gated on the
+written Wasender terms required by ADR 0004, including approved capacity, data
 processing and subprocessors, deletion and backup erasure, security controls,
 webhook authentication, and retry behavior. The real adapter remains in the
 production bundle while that business gate is closed; do not route production
@@ -1543,12 +1547,12 @@ Production subprocessors that may process User or product data are:
 | Subprocessor | Purpose | Data in scope |
 | --- | --- | --- |
 | Clerk | Sign-in identity | User identity and session claims. Not WhatsApp content. |
-| Neon | Authoritative tenant data | Personal Account state, onboarding profiles, encrypted WhatsApp data, authorization, and lifecycle records. |
+| Neon | Authoritative tenant data | Personal Account state, encrypted WhatsApp data, authorization, and lifecycle records. |
 | Cloudflare | API, Workers, R2, Queues | Request handling, encrypted objects, and operational queues. |
 | Vercel | Web application hosting | Public browser configuration and the signed-in UI. Not the data plane. |
 | AWS KMS | Envelope encryption | Key use for Personal Account and WhatsApp Connection content keys. |
 | Wasender | WhatsApp provider seam | Provider session lifecycle behind provider-control. |
-| PostHog | Optional aggregate product analytics | Allowlisted non-identifying browser events only. No Clerk IDs, emails, Personal Account IDs, public handles, WhatsApp Numbers, profile answers, message content, or QR material. No person profiles or session replay. |
+| PostHog | Optional aggregate product analytics | Allowlisted non-identifying browser events only. No Clerk IDs, emails, Personal Account IDs, public handles, WhatsApp Numbers, message content, or QR material. No person profiles or session replay. |
 
 Do not enable production PostHog collection until this inventory, CSP, privacy
 copy, retention configuration, and browser-IP handling are reviewed for that

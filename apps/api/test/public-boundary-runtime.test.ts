@@ -71,44 +71,6 @@ describe("public-boundary Worker harness", () => {
   });
 
   test("starts and replays a Connection Setup through the signed-in HTTP boundary", async () => {
-    const profile = await exports.default.fetch(
-      new Request(
-        "https://api.example.test/v1/personal-account/onboarding-profile",
-        {
-          body: JSON.stringify({
-            intended_mcp_client: "not_sure",
-            primary_use_case: "exploration",
-            research_call_interest: "not_sure",
-            role: "not_sure",
-            whatsapp_usage_context: "personal",
-          }),
-          headers: {
-            authorization: "Bearer signed-test-user",
-            "content-type": "application/json",
-            origin: "http://127.0.0.1:3000",
-          },
-          method: "PUT",
-        },
-      ),
-    );
-    expect(profile.status).toBe(200);
-
-    const security = await exports.default.fetch(
-      new Request(
-        "https://api.example.test/v1/personal-account/onboarding-profile",
-        {
-          body: JSON.stringify({ security_completed: true }),
-          headers: {
-            authorization: "Bearer signed-test-user",
-            "content-type": "application/json",
-            origin: "http://127.0.0.1:3000",
-          },
-          method: "PATCH",
-        },
-      ),
-    );
-    expect(security.status).toBe(200);
-
     const request = () =>
       new Request("https://api.example.test/v1/connection-setups", {
         body: JSON.stringify({

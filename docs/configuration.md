@@ -508,7 +508,10 @@ stores the three-Connection limit, the 5 GB Stored Media limit, and the default
 response. Bootstrap does not invoke provider-control or reserve provider
 capacity. Provider availability is evaluated when a Connection Setup attempts
 to provision a WhatsApp Connection; a definitive provider rejection leaves no
-WhatsApp Connection and is shown as temporary capacity unavailability.
+WhatsApp Connection and is shown as temporary capacity unavailability. After
+successful bootstrap, the signed-in product makes Connection Setup available
+directly; no separate application-level admission gate or intermediate product
+journey is required.
 A deleting or deleted mapping, invalid identity, wrong tenant, wrong Origin, or
 unavailable key returns the same public not-found boundary and never discloses
 an identifier.
@@ -517,114 +520,26 @@ Successful bootstrap telemetry is limited to
 `personal_account.bootstrap.completed`, the API service name, and an
 allowlisted `created` or `recovered` outcome. Never add
 Clerk User IDs, Personal Account IDs, token claims, Origin values, network
-addresses, key identifiers, ciphertext, or profile data to this event.
-
-## First-connection onboarding profile
-
-A signed-in User with no WhatsApp Connection completes a short first-connection
-onboarding journey before Connection Setup. The journey collects one structured
-research profile owned by the Personal Account:
-
-- primary use case
-- WhatsApp usage context (`personal`, `work`, or `both`)
-- role
-- intended MCP Client
-- research-call interest
-
-Choices are constrained enums only. Free text is rejected. The authenticated
-browser reads and upserts the profile at
-`/v1/personal-account/onboarding-profile` with no-store responses and the same
-Origin/CORS rules as other Personal Account browser routes. Neon remains
-authoritative. The profile has one row per Personal Account, tenant RLS, and
-cascades on Personal Account purge. Personal Account Deletion removes it with
-other User-addressable tenant data; a terminally deleted profile must not become
-readable after restore.
-
-The same profile row records security-stage completion and the first successful
-WhatsApp Connection activation. The first-activation marker remains after
-Connection Deletion so an account with zero current Connections does not restart
-onboarding. Both markers share the profile's Personal Account ownership,
-deletion, restore, and access behavior and contain no WhatsApp Number or provider
-identity. The browser marks the security transition through an idempotent `PATCH`
-on the profile route before showing Connection Setup. A refresh therefore resumes
-Connection Setup without replaying the security disclosures, including when no
-Connection Setup has been created. Neon also requires this durable completion
-before the first Connection Setup, so browser state alone cannot bypass the
-security stage.
-
-The first Connection Setup is rejected at the API boundary until a completed
-profile exists, except when the Personal Account already retains a WhatsApp
-Connection (grandfathered). Profile values never enter Activity Logs, Security
-Records, or worker telemetry beyond the allowlisted outcome event
-`onboarding_profile.upsert.completed`.
-
-The Normal team may query completed profiles through existing restricted
-operational database access. Do not copy profile answers, Clerk User IDs, or
-Personal Account identifiers into tickets, telemetry, or PostHog. Useful
-starting queries:
-
-```sql
-SELECT primary_use_case, count(*) AS profiles
-FROM public.personal_account_onboarding_profiles
-GROUP BY 1
-ORDER BY profiles DESC;
-
-SELECT whatsapp_usage_context, role, intended_mcp_client,
-  research_call_interest, count(*) AS profiles
-FROM public.personal_account_onboarding_profiles
-GROUP BY 1, 2, 3, 4
-ORDER BY profiles DESC;
-
-SELECT date_trunc('day', completed_at) AS completed_on, count(*) AS profiles
-FROM public.personal_account_onboarding_profiles
-GROUP BY 1
-ORDER BY 1;
-
-SELECT
-  profiles.intended_mcp_client,
-  EXISTS (
-    SELECT 1
-    FROM public.whatsapp_connections AS connections
-    WHERE connections.personal_account_id = profiles.personal_account_id
-      AND connections.state = 'connected'
-  ) AS has_active_whatsapp_connection,
-  count(*) AS profiles
-FROM public.personal_account_onboarding_profiles AS profiles
-GROUP BY 1, 2
-ORDER BY 1, 2;
-
-SELECT identities.clerk_user_id, profiles.role, profiles.intended_mcp_client,
-  profiles.research_call_interest, profiles.completed_at
-FROM public.personal_account_onboarding_profiles AS profiles
-JOIN public.clerk_identities AS identities
-  ON identities.personal_account_id = profiles.personal_account_id
-WHERE profiles.research_call_interest = 'yes'
-ORDER BY profiles.completed_at DESC;
-```
-
-Join Clerk identity only when preparing a specific research call. Do not export
-these rows into a CRM or analytics warehouse.
+addresses, key identifiers, ciphertext, or other identity data to this event.
 
 ## Browser product analytics
 
 PostHog is an aggregate behavioral analytics destination only. Neon remains
-authoritative for identity and profile state. Browser product code emits typed
+authoritative for tenant and lifecycle state. Browser product code emits typed
 events through a small analytics boundary that:
 
 - accepts only explicitly allowlisted event names and bounded properties
 - disables automatic capture and session replay
 - uses an ephemeral random browser-session identifier that is not persisted
   beyond the browser session and cannot be joined to Neon or Clerk
-- never blocks profile persistence, Connection Setup, navigation, or rendering
+- never blocks Connection Setup, navigation, or rendering
 
-Allowed funnel events cover onboarding stage viewed/completed, profile
-completed, security education reached, Connection Setup started/completed by
+Allowed events cover Connection Setup started, Connection Setup completed by
 normalized outcome, anonymous Connection Setup timing by bounded phase and
-duration, onboarding completed, and selected aggregate feature-use events.
-Events must not contain or derive from Clerk IDs, email, Personal Account IDs,
-public handles, WhatsApp Connection IDs, WhatsApp Numbers, connection names,
-profile answers tied to a persistent User identity, message, contact, media,
-provider, request-body, or code material.
+duration, and selected aggregate feature use. Events must not contain or derive
+from Clerk IDs, email, Personal Account IDs, public handles, WhatsApp Connection
+IDs, WhatsApp Numbers, connection names, message, contact, media, provider,
+request-body, or code material.
 
 `NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST` are public browser
 configuration validated per environment. When either is absent, analytics is
@@ -641,10 +556,9 @@ inventory. The approval is an explicit deployment gate, not a runtime flag.
 
 ## Connection Setup creation
 
-The first Connection Setup for a Personal Account also requires a completed
-onboarding profile unless the account already retains a WhatsApp Connection.
-Additional WhatsApp Connections keep the existing compact Connection Setup
-dialog and do not repeat profile collection.
+After sign-in and successful Personal Account bootstrap, a User can open the
+compact Connection Setup flow directly. The same flow creates the first or any
+additional WhatsApp Connection.
 
 The signed-in browser creates a fresh 21-character NanoID idempotency key for
 each named WhatsApp Number intent and retains it for exact transport retries. It

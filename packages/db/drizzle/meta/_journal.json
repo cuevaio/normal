@@ -225,6 +225,13 @@
       "when": 1787707546000,
       "tag": "0031_record_account_envelope_recovery",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788570000000,
+      "tag": "0032_remove_first_connection_onboarding",
+      "breakpoints": true
     }
   ]
 }

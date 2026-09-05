@@ -4,7 +4,6 @@ import {
   type ConnectionSetupConnectionProvider,
   makeConnectionSetupRepository,
 } from "../src/connection-setup";
-import { makeOnboardingProfileRepository } from "../src/onboarding-profile";
 import {
   makePersonalAccountRepository,
   type PersonalAccountConnectionProvider,
@@ -48,22 +47,6 @@ describe("Connection Setup repository", () => {
       kmsKeyId: "arn:aws:kms:us-east-1:111122223333:key/content-root-key",
       personalAccountId: accountB,
     });
-    const profiles = makeOnboardingProfileRepository(provider);
-    for (const user of ["user_setupa", "user_setupb"]) {
-      await profiles.upsertForUser({
-        clerkUserId: user,
-        intendedMcpClient: "not_sure",
-        primaryUseCase: "exploration",
-        researchCallInterest: "not_sure",
-        role: "not_sure",
-        updatedAt: createdAt,
-        whatsappUsageContext: "personal",
-      });
-      await profiles.markSecurityCompletedForUser({
-        clerkUserId: user,
-        completedAt: createdAt,
-      });
-    }
   });
 
   afterEach(async () => {
@@ -101,7 +84,7 @@ describe("Connection Setup repository", () => {
     setupId,
   });
 
-  test("creates one durable 15-minute setup and returns its exact replay", async () => {
+  test("prepares a newly bootstrapped account and creates one durable 15-minute setup with exact replay", async () => {
     const repository = makeConnectionSetupRepository(provider);
     const prepared = await repository.prepare({
       clerkUserId: "user_setupa",
@@ -166,30 +149,6 @@ describe("Connection Setup repository", () => {
     );
     expect(persisted.rows[0]?.plaintext_column_count).toBe(0);
     expect(persisted.rows[0]?.plaintext_in_ciphertext).toBe(false);
-  });
-
-  test("requires a completed profile before replaying a pending first Connection Setup", async () => {
-    const repository = makeConnectionSetupRepository(provider);
-    await database.query(
-      "DELETE FROM public.personal_account_onboarding_profiles WHERE personal_account_id = $1",
-      [accountA],
-    );
-    await repository.start(
-      startInput(
-        accountA,
-        "cst_000000000000000000001",
-        "123456789012345678901",
-        1,
-      ),
-    );
-
-    await expect(
-      repository.prepare({
-        clerkUserId: "user_setupa",
-        idempotencyKey: "123456789012345678901",
-        numberToken: new Uint8Array(32).fill(1),
-      }),
-    ).resolves.toEqual({ outcome: "onboarding_profile_required" });
   });
 
   test("rejects changed input, a globally reserved number, and excess retained Connections", async () => {
