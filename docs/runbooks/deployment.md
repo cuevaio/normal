@@ -884,8 +884,12 @@ restricted Hyperdrive role, private provider-control safe-read reachability,
 Queue publication and consumption, and an encrypted disposable R2/KMS round
 trip. The docs, web, and API origins must stay distinct. The Queue consumer removes its object before reporting success; KV status
 expires automatically. Output contains only safe subsystem or credential
-outcomes. Re-run after an ordinary pre-exchange store or network failure. If
-descendant persistence fails after exchange, do not retry the predecessor: it
+outcomes. For routine certification or a retry after an ordinary pre-exchange
+store or network failure, dispatch the `Smoke production` workflow from `main`.
+It assumes the narrow role through GitHub OIDC and does not require local AWS
+credentials.
+
+If descendant persistence fails after exchange, do not retry the predecessor: it
 may already be consumed. Revoke the affected MCP Authorization, complete fresh
 consent, replace the secret through the bootstrap procedure, and rerun. An
 `invalid or reused` outcome requires the same reauthorization and review of

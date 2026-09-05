@@ -122,6 +122,7 @@ describe("production deployment order", () => {
       "recovery-drills.yml",
       "rotate-production-content-credentials.yml",
       "rotate-production-deletion-credentials.yml",
+      "smoke-production.yml",
     ]) {
       const source = await Bun.file(
         new URL(`../.github/workflows/${workflow}`, import.meta.url),

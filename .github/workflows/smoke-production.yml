@@ -1,0 +1,39 @@
+name: Smoke production
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: production-operations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  smoke:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Assume the production MCP smoke credential role
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: us-east-1
+          role-session-name: production-smoke-certification
+          role-to-assume: ${{ vars.AWS_MCP_SMOKE_CREDENTIAL_ROLE_ARN }}
+      - name: Rotate credential and smoke production
+        run: bun run deploy:smoke
+        env:
+          SMOKE_API_ORIGIN: ${{ vars.API_ORIGIN }}
+          SMOKE_CHECK_SECRET: ${{ secrets.SMOKE_CHECK_SECRET }}
+          SMOKE_DOCS_ORIGIN: ${{ vars.DOCS_ORIGIN }}
+          SMOKE_MCP_REFRESH_SECRET_ID: ${{ vars.MCP_SMOKE_REFRESH_SECRET_ID }}
+          SMOKE_WEB_ORIGIN: ${{ vars.WEB_ORIGIN }}
