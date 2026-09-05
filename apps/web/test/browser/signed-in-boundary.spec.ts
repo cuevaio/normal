@@ -32,6 +32,18 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   let reconnectRequests = 0;
   let renameRequests = 0;
   let retentionUpdateRequests = 0;
+  let releaseRename: (() => void) | undefined;
+  const renameCanContinue = new Promise<void>((resolve) => {
+    releaseRename = resolve;
+  });
+  let releaseRetentionUpdate: (() => void) | undefined;
+  const retentionUpdateCanContinue = new Promise<void>((resolve) => {
+    releaseRetentionUpdate = resolve;
+  });
+  let releaseRecipientExclusion: (() => void) | undefined;
+  const recipientExclusionCanContinue = new Promise<void>((resolve) => {
+    releaseRecipientExclusion = resolve;
+  });
   let resumeReconnectPolling = false;
   let releaseReconnectPoll: (() => void) | undefined;
   const reconnectPollCanContinue = new Promise<void>((resolve) => {
@@ -82,6 +94,7 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
       original.method() === "PUT"
     ) {
       renameRequests += 1;
+      await renameCanContinue;
     }
     if (
       /\/v1\/whatsapp-connections\/con_[A-Za-z0-9_-]{21}\/retention-policy$/u.test(
@@ -90,6 +103,15 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
       original.method() === "PUT"
     ) {
       retentionUpdateRequests += 1;
+      await retentionUpdateCanContinue;
+    }
+    if (
+      /\/v1\/whatsapp-connections\/con_[A-Za-z0-9_-]{21}\/recipients\/(?:ctc|grp)_[A-Za-z0-9_-]{21}\/exclusion$/u.test(
+        requestPath,
+      ) &&
+      original.method() === "PUT"
+    ) {
+      await recipientExclusionCanContinue;
     }
     if (
       /^\/v1\/whatsapp-connections\/con_[A-Za-z0-9_-]{21}\/reconnect$/u.test(
@@ -368,14 +390,29 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   const saveConfiguration = configuration.getByRole("button", {
     name: "Save changes",
   });
+  const nameAnnouncement = configuration.getByTestId(
+    "connection-name-announcement",
+  );
+  const retentionAnnouncement = configuration.getByTestId(
+    "retention-policy-announcement",
+  );
+  await expect(nameAnnouncement).toHaveAttribute("aria-live", "polite");
+  await expect(nameAnnouncement).toBeEmpty();
+  await expect(retentionAnnouncement).toHaveAttribute("aria-live", "polite");
+  await expect(retentionAnnouncement).toBeEmpty();
   await expect(saveConfiguration).toBeDisabled();
   await configuration.getByLabel("Name", { exact: true }).fill("Work WhatsApp");
   await expect(saveConfiguration).toBeEnabled();
   await saveConfiguration.click();
+  await expect(nameAnnouncement).toHaveText("Saving name…");
+  releaseRename?.();
   await expect(configuration).toContainText("Name saved.");
+  const nameSuccess = configuration.locator("p", { hasText: "Name saved." });
+  await expect(nameSuccess).not.toHaveAttribute("aria-live");
   await expect(
-    configuration.locator("p", { hasText: "Name saved." }),
-  ).not.toHaveAttribute("aria-live");
+    nameSuccess.locator("xpath=ancestor::*[@aria-live]"),
+  ).toHaveCount(0);
+  await expect(nameAnnouncement).toBeEmpty();
   await expectSuccessToast(page, "Name saved.");
   expect(renameRequests).toBe(1);
   expect(retentionUpdateRequests).toBe(0);
@@ -384,10 +421,19 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   await retentionPolicy.click();
   await page.getByRole("option", { name: "7 days" }).click();
   await saveConfiguration.click();
+  await expect(retentionAnnouncement).toHaveText(
+    "Saving Message Retention Policy…",
+  );
+  releaseRetentionUpdate?.();
   await expect(configuration).toContainText("Current policy: 7 days");
+  const retentionSuccess = configuration.locator("p", {
+    hasText: "Message Retention Policy saved",
+  });
+  await expect(retentionSuccess).not.toHaveAttribute("aria-live");
   await expect(
-    configuration.locator("p", { hasText: "Message Retention Policy saved" }),
-  ).not.toHaveAttribute("aria-live");
+    retentionSuccess.locator("xpath=ancestor::*[@aria-live]"),
+  ).toHaveCount(0);
+  await expect(retentionAnnouncement).toBeEmpty();
   await expectSuccessToast(page, "Message Retention Policy saved");
   expect(renameRequests).toBe(1);
   expect(retentionUpdateRequests).toBe(1);
@@ -481,13 +527,25 @@ test("drives the signed-in browser-to-API boundary over real HTTP", async ({
   const excludeAda = exclusions.getByRole("button", {
     name: "Stop tracking Ada Lovelace",
   });
+  const exclusionAnnouncement = page.getByTestId(
+    "recipient-exclusion-announcement",
+  );
+  await expect(exclusionAnnouncement).toHaveAttribute("aria-live", "polite");
+  await expect(exclusionAnnouncement).toBeEmpty();
   await excludeAda.click();
+  await expect(exclusionAnnouncement).toHaveText(
+    "Saving. Normal will stop tracking Ada Lovelace.",
+  );
+  releaseRecipientExclusion?.();
   await expect(page.getByTestId("recipient-exclusion-status")).toContainText(
     "Normal no longer tracks Ada Lovelace.",
   );
+  const exclusionSuccess = page.getByTestId("recipient-exclusion-status");
+  await expect(exclusionSuccess).not.toHaveAttribute("aria-live");
   await expect(
-    page.getByTestId("recipient-exclusion-status"),
-  ).not.toHaveAttribute("aria-live");
+    exclusionSuccess.locator("xpath=ancestor::*[@aria-live]"),
+  ).toHaveCount(0);
+  await expect(exclusionAnnouncement).toBeEmpty();
   await expectSuccessToast(page, "Normal no longer tracks Ada Lovelace.");
   await expect(
     exclusions.getByRole("button", { name: "Track again Ada Lovelace" }),

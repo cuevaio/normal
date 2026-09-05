@@ -250,14 +250,18 @@ export function PublicBoundaryJourney({
     Readonly<Record<string, boolean>>
   >({});
   const [retentionStatus, setRetentionStatus] = useState<
-    Readonly<Record<string, string>>
+    Readonly<
+      Record<string, { readonly announce: boolean; readonly message: string }>
+    >
   >({});
   const [connectionName, setConnectionName] = useState("");
   const [nameDrafts, setNameDrafts] = useState<
     Readonly<Record<string, string>>
   >({});
   const [nameStatus, setNameStatus] = useState<
-    Readonly<Record<string, string>>
+    Readonly<
+      Record<string, { readonly announce: boolean; readonly message: string }>
+    >
   >({});
   const [savingNames, setSavingNames] = useState<ReadonlySet<string>>(
     new Set(),
@@ -766,7 +770,7 @@ export function PublicBoundaryJourney({
     const name = nameDrafts[connection.id] ?? connection.displayName;
     setNameStatus((current) => ({
       ...current,
-      [connection.id]: "Saving name…",
+      [connection.id]: { announce: true, message: "Saving name…" },
     }));
     try {
       const token = await getToken();
@@ -804,13 +808,16 @@ export function PublicBoundaryJourney({
       }));
       setNameStatus((current) => ({
         ...current,
-        [connection.id]: "Name saved.",
+        [connection.id]: { announce: false, message: "Name saved." },
       }));
       toast.success("Name saved.");
     } catch {
       setNameStatus((current) => ({
         ...current,
-        [connection.id]: "Name could not be saved.",
+        [connection.id]: {
+          announce: true,
+          message: "Name could not be saved.",
+        },
       }));
     }
   };
@@ -823,7 +830,10 @@ export function PublicBoundaryJourney({
       (connection.retentionDays !== null && days > connection.retentionDays);
     setRetentionStatus((current) => ({
       ...current,
-      [connection.id]: "Saving Message Retention Policy…",
+      [connection.id]: {
+        announce: true,
+        message: "Saving Message Retention Policy…",
+      },
     }));
     try {
       const token = await getToken();
@@ -865,7 +875,10 @@ export function PublicBoundaryJourney({
       }));
       setRetentionStatus((current) => ({
         ...current,
-        [connection.id]: `Message Retention Policy saved. Current policy: ${body.policy?.days === null ? "retain until Connection Deletion" : `${body.policy?.days} days`}. Shorter policies apply promptly to retained content.`,
+        [connection.id]: {
+          announce: false,
+          message: `Message Retention Policy saved. Current policy: ${body.policy?.days === null ? "retain until Connection Deletion" : `${body.policy?.days} days`}. Shorter policies apply promptly to retained content.`,
+        },
       }));
       toast.success("Message Retention Policy saved", {
         description:
@@ -876,7 +889,10 @@ export function PublicBoundaryJourney({
     } catch {
       setRetentionStatus((current) => ({
         ...current,
-        [connection.id]: "Message Retention Policy could not be saved.",
+        [connection.id]: {
+          announce: true,
+          message: "Message Retention Policy could not be saved.",
+        },
       }));
     }
   };
@@ -901,10 +917,18 @@ export function PublicBoundaryJourney({
     if (!nameChanged && !retentionChanged) return;
     setSavingNames((current) => new Set(current).add(connection.id));
     if (!nameChanged) {
-      setNameStatus((current) => ({ ...current, [connection.id]: "" }));
+      setNameStatus((current) => {
+        const next = { ...current };
+        delete next[connection.id];
+        return next;
+      });
     }
     if (!retentionChanged) {
-      setRetentionStatus((current) => ({ ...current, [connection.id]: "" }));
+      setRetentionStatus((current) => {
+        const next = { ...current };
+        delete next[connection.id];
+        return next;
+      });
     }
     try {
       await Promise.all([
@@ -2254,16 +2278,18 @@ export function PublicBoundaryJourney({
                               connection.displayName
                             }
                           />
-                          <p aria-live="polite" className="sr-only">
-                            {nameStatus[connection.id] === "Saving name…" ||
-                            nameStatus[connection.id] ===
-                              "Name could not be saved."
-                              ? nameStatus[connection.id]
+                          <p
+                            aria-live="polite"
+                            className="sr-only"
+                            data-testid="connection-name-announcement"
+                          >
+                            {nameStatus[connection.id]?.announce
+                              ? nameStatus[connection.id]?.message
                               : ""}
                           </p>
                           {nameStatus[connection.id] ? (
                             <p className="text-sm text-muted-foreground">
-                              {nameStatus[connection.id]}
+                              {nameStatus[connection.id]?.message}
                             </p>
                           ) : null}
                         </Field>
@@ -2362,16 +2388,17 @@ export function PublicBoundaryJourney({
                               </Field>
                             ) : null;
                           })()}
-                          <p aria-live="polite" className="sr-only">
-                            {retentionStatus[connection.id] ===
-                              "Saving Message Retention Policy…" ||
-                            retentionStatus[connection.id] ===
-                              "Message Retention Policy could not be saved."
-                              ? retentionStatus[connection.id]
+                          <p
+                            aria-live="polite"
+                            className="sr-only"
+                            data-testid="retention-policy-announcement"
+                          >
+                            {retentionStatus[connection.id]?.announce
+                              ? retentionStatus[connection.id]?.message
                               : ""}
                           </p>
                           <p className="text-sm text-muted-foreground">
-                            {retentionStatus[connection.id] ??
+                            {retentionStatus[connection.id]?.message ??
                               `Current policy: ${connection.retentionDays === null ? "retain until Connection Deletion" : `${connection.retentionDays} days`}.`}
                           </p>
                         </FieldGroup>
