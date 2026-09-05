@@ -48,7 +48,9 @@ bun run --cwd apps/web dev
 bun run --cwd apps/provider-control dev
 ```
 
-Run CI checks in workflow order:
+Run the local CI-equivalent checks in workflow order. `bun run test` is the
+complete local equivalent of CI's concurrent `test:without-db` command and four
+database test shards:
 
 ```sh
 bun run format:check

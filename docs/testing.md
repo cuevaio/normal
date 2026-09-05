@@ -204,6 +204,18 @@ Run the coordinated suite:
 bun run test
 ```
 
+This local command runs the complete database suite in one process. The public
+API release gate invokes it and then reruns the complete database suite for its
+separate migrated-Postgres attestation. Ordinary pull-request and `main` CI
+preserve the same coverage while reducing elapsed time: `bun run
+test:without-db` runs the script and non-database workspace suites, and four
+required matrix jobs run `packages/db` with Bun's `--shard` option. Automatic
+production deployment requires the whole `CI` workflow to succeed, so a missing
+or failed database shard blocks it. The matrix uses more total runner-minutes
+in exchange for a shorter wall-clock critical path; it does not change the
+migrated PGlite database, restricted runtime roles, RLS policies, or per-test
+isolation.
+
 The API public-boundary suite can be run alone with:
 
 ```sh

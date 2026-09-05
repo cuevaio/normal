@@ -30,6 +30,7 @@
     "observability:validate": "bun scripts/validate-observability.ts",
     "recovery:drill": "bun scripts/run-recovery-drill.ts",
     "test": "bun test scripts/*.test.ts && turbo run test --cache-dir=.turbo/cache",
+    "test:without-db": "bun test scripts/*.test.ts && turbo run test --filter=!@whatsapp-mcp/db --cache-dir=.turbo/cache",
     "typecheck": "tsc --noEmit -p tsconfig.tools.json && turbo run typecheck --cache-dir=.turbo/cache",
     "validate:infra": "bun scripts/validate-kms-infrastructure.ts && tofu -chdir=infra/aws fmt -check && tofu -chdir=infra/aws init -backend=false -input=false && tofu -chdir=infra/aws validate",
     "sandcastle": "bun .sandcastle/main.mts",
