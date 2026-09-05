@@ -8,7 +8,11 @@ import { validEnvironment } from "./support/production";
 
 describe("API production root", () => {
   beforeEach(() => {
-    vi.mocked(checkDatabaseReadiness).mockResolvedValue(undefined);
+    vi.mocked(checkDatabaseReadiness).mockImplementation(
+      async (connectionString) => {
+        if (!connectionString) throw new Error("Database unavailable");
+      },
+    );
   });
 
   test("accepts valid production configuration", async () => {
@@ -17,6 +21,22 @@ describe("API production root", () => {
     );
 
     expect(response.status).toBe(200);
+  });
+
+  test("checks database readiness once for the readiness canary", async () => {
+    vi.mocked(checkDatabaseReadiness).mockClear();
+    const environment = validEnvironment();
+    const response = await createProductionHandler(environment)(
+      new Request("https://api.example.test/ready"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(checkDatabaseReadiness).toHaveBeenCalledTimes(1);
+    expect(checkDatabaseReadiness).toHaveBeenCalledWith(
+      environment.HYPERDRIVE.connectionString,
+      environment.NEON_BRANCH_ID,
+      false,
+    );
   });
 
   test("fails public traffic closed until replay approves the configured branch", async () => {

@@ -13,7 +13,7 @@ const deployables = [
 const oauthKvValidationId = "22222222222222222222222222222222";
 const recoveryKvValidationId = "33333333333333333333333333333333";
 const operationsKvValidationId = "44444444444444444444444444444444";
-const requiredApiCrons = ["* * * * *", "*/5 * * * *", "0 * * * *"].sort();
+const requiredApiCrons = ["*/4 * * * *", "*/5 * * * *", "0 * * * *"].sort();
 
 const manifestConfigurations = (manifest: Record<string, unknown>) => [
   ["top level", manifest] as const,
@@ -424,7 +424,7 @@ for (const deployable of deployables) {
           : `-${configurationName}`;
       if (!hasSameStrings(configuredCrons(configuration), requiredApiCrons)) {
         throw new Error(
-          `API ${configurationName} configuration must schedule minute recovery, five-minute reconciliation, and hourly retention.`,
+          `API ${configurationName} configuration must schedule four-minute recovery, five-minute reconciliation, and hourly retention.`,
         );
       }
       const provisioning = findQueueConsumer(

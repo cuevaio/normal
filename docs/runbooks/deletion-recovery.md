@@ -219,7 +219,10 @@ provider-control, OAuth, or public-route binding.
 After the branch reaches `ready`, `awaiting_verification`, or `drill_verified`,
 scheduled restore-coordinator runs for that same branch must return no replay
 candidates. New markers created while the branch is serving belong to the live
-deletion path and must not reopen restore replay.
+deletion path and must not reopen restore replay. A warm coordinator isolate may
+remember successful completion for that exact branch and skip later scheduled
+checks. This process-local optimization is not readiness evidence; cold isolates
+and changed branch identities always recheck Neon.
 
 Do not sample marker or recipient transition replay, skip a malformed object,
 substitute a database copy of marker or journal state, or unlock/delete either

@@ -14,7 +14,7 @@
     "head_sampling_rate": 1
   },
   "triggers": {
-    "crons": ["* * * * *", "*/5 * * * *", "0 * * * *"]
+    "crons": ["*/4 * * * *", "*/5 * * * *", "0 * * * *"]
   },
   "vars": {
     "AWS_KMS_REGION": "us-east-1",
@@ -142,7 +142,7 @@
         "region": "aws:us-east-1"
       },
       "triggers": {
-        "crons": ["* * * * *", "*/5 * * * *", "0 * * * *"]
+        "crons": ["*/4 * * * *", "*/5 * * * *", "0 * * * *"]
       },
       "vars": {
         "AWS_KMS_REGION": "us-east-1",
@@ -268,7 +268,7 @@
         "region": "aws:us-east-1"
       },
       "triggers": {
-        "crons": ["* * * * *", "*/5 * * * *", "0 * * * *"]
+        "crons": ["*/4 * * * *", "*/5 * * * *", "0 * * * *"]
       },
       "vars": {
         "AWS_KMS_REGION": "us-east-1",
@@ -394,7 +394,7 @@
         "region": "aws:us-east-1"
       },
       "triggers": {
-        "crons": ["* * * * *", "*/5 * * * *", "0 * * * *"]
+        "crons": ["*/4 * * * *", "*/5 * * * *", "0 * * * *"]
       },
       "vars": {
         "AWS_KMS_REGION": "us-east-1",

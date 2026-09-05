@@ -253,12 +253,13 @@ describe("Connection Setup cleanup saga", () => {
     });
   });
 
-  test("the minute scheduled handler expires setups and publishes cleanup without a browser request", async () => {
+  test("the four-minute scheduled handler expires setups and publishes cleanup without a browser request", async () => {
     const batches: Array<ReadonlyArray<{ readonly body: unknown }>> = [];
     const observed: Array<string> = [];
     const sweepObserved: string[] = [];
     const sendLeaseSweeps: Date[] = [];
     const processedMedia: PendingStoredMediaCandidate[] = [];
+    let recoverySourcePoints = 0;
     const pendingMedia = {
       id: "30000000-0000-4000-8000-000000000045",
     } as PendingStoredMediaCandidate;
@@ -276,6 +277,11 @@ describe("Connection Setup cleanup saga", () => {
         HYPERDRIVE: { connectionString: "test-connection-string" },
       },
       {
+        recordRecoverySourcePoint: async (connectionString) => {
+          expect(connectionString).toBe("test-connection-string");
+          recoverySourcePoints += 1;
+          return "2026-07-31T12:16:00.000Z";
+        },
         makeRepository: () => ({
           expire: async ({ observedAt: value }) => {
             observed.push(value);
@@ -304,13 +310,14 @@ describe("Connection Setup cleanup saga", () => {
     );
 
     await handler({
-      cron: "* * * * *",
-      scheduledTime: Date.parse("2026-07-31T12:15:00.000Z"),
+      cron: "*/4 * * * *",
+      scheduledTime: Date.parse("2026-07-31T12:16:00.000Z"),
     } as ScheduledController);
 
-    expect(observed).toEqual(["2026-07-31T12:15:00.000Z"]);
-    expect(sweepObserved).toEqual(["2026-07-31T12:15:00.000Z"]);
-    expect(sendLeaseSweeps).toEqual([new Date("2026-07-31T12:15:00.000Z")]);
+    expect(recoverySourcePoints).toBe(1);
+    expect(observed).toEqual(["2026-07-31T12:16:00.000Z"]);
+    expect(sweepObserved).toEqual(["2026-07-31T12:16:00.000Z"]);
+    expect(sendLeaseSweeps).toEqual([new Date("2026-07-31T12:16:00.000Z")]);
     expect(processedMedia).toEqual([pendingMedia]);
     expect(batches).toEqual([
       [

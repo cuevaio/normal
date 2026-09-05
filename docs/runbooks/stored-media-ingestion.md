@@ -4,7 +4,7 @@ Stored Media is projected as `pending` from an authenticated message before prov
 
 Processing uses the production Wasender media adapter and its guarded HTTPS download boundary. It applies the media-type limits from ADR 0008 to actual streamed bytes, hashes plaintext while streaming it into the chunked AES-256-GCM R2 container, and reads the completed container once to authenticate its complete structure. Only then may the Neon finalization transaction reserve the verified byte count and change the row to `ready`.
 
-The API Worker's one-minute scheduled handler loads up to 10 pending rows with their encrypted key envelopes, provider authority, and provider source. Overlapping invocations use distinct opaque object keys; the quota transaction chooses the sole winner and every losing object is deleted. Failed R2 deletions enter the opaque Neon deletion outbox and are retried by later scheduled runs.
+The API Worker's four-minute scheduled handler loads up to 10 pending rows with their encrypted key envelopes, provider authority, and provider source. Overlapping invocations use distinct opaque object keys; the quota transaction chooses the sole winner and every losing object is deleted. Failed R2 deletions enter the opaque Neon deletion outbox and are retried by later scheduled runs.
 
 ## Failure handling
 

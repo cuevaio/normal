@@ -14,7 +14,10 @@ import {
 const jsonResponse = (body: unknown, status: number): Response =>
   noStoreJsonResponse(body, status);
 
-const canaryProgram = (request: Request) =>
+const canaryProgram = (
+  request: Request,
+  options: { readonly databaseAlreadyChecked?: boolean },
+) =>
   Effect.gen(function* () {
     const config = yield* ApplicationConfig;
     const database = yield* DatabaseReadiness;
@@ -23,7 +26,7 @@ const canaryProgram = (request: Request) =>
     const isHealth = request.method === "GET" && path === "/health";
     const isReady = request.method === "GET" && path === "/ready";
 
-    if (!isHealth) {
+    if (!isHealth && options.databaseAlreadyChecked !== true) {
       yield* database.check;
     }
 
@@ -63,6 +66,9 @@ export const createCanaryHandler =
       ApplicationConfig | DatabaseReadiness | SafeTelemetry,
       unknown
     >,
+    options: { readonly databaseAlreadyChecked?: boolean } = {},
   ) =>
   (request: Request): Promise<Response> =>
-    Effect.runPromise(canaryProgram(request).pipe(Effect.provide(layer)));
+    Effect.runPromise(
+      canaryProgram(request, options).pipe(Effect.provide(layer)),
+    );

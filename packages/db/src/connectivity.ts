@@ -7,10 +7,7 @@ import {
 import { assertExpectedSchemaVersion } from "./readiness";
 import { withPgRequestConnection } from "./request-connection";
 
-const DEVELOPMENT_READINESS_TTL_MS = 15_000;
-let recentDevelopmentReadiness:
-  | { readonly branchId: string | undefined; readonly checkedAt: number }
-  | undefined;
+const READINESS_TTL_MS = 15_000;
 
 const withClient = <Value>(
   connectionString: string,
@@ -20,32 +17,50 @@ const withClient = <Value>(
     use(makeQueryConnection(client)),
   );
 
-export const checkDatabaseReadiness = (
-  connectionString: string,
-  branchId?: string,
-  allowLegacyMigrationTable = false,
-): Promise<void> => {
-  const now = Date.now();
-  const recent = recentDevelopmentReadiness;
-  if (
-    allowLegacyMigrationTable &&
-    recent !== undefined &&
-    recent.branchId === branchId &&
-    now - recent.checkedAt < DEVELOPMENT_READINESS_TTL_MS
-  ) {
-    return Promise.resolve();
-  }
-  return withClient(connectionString, async (client) => {
-    await assertExpectedSchemaVersion(
-      client,
+export const makeDatabaseReadinessChecker = (dependencies: {
+  readonly now: () => number;
+  readonly verify: (
+    connectionString: string,
+    branchId: string | undefined,
+    allowLegacyMigrationTable: boolean,
+  ) => Promise<void>;
+}) => {
+  const successfulChecks = new Map<string, number>();
+  return async (
+    connectionString: string,
+    branchId?: string,
+    allowLegacyMigrationTable = false,
+  ): Promise<void> => {
+    const key = JSON.stringify({
+      allowLegacyMigrationTable,
+      branchId,
+      connectionString,
+    });
+    const now = dependencies.now();
+    const checkedAt = successfulChecks.get(key);
+    if (
+      checkedAt !== undefined &&
+      now >= checkedAt &&
+      now - checkedAt < READINESS_TTL_MS
+    ) {
+      return;
+    }
+    await dependencies.verify(
+      connectionString,
       branchId,
       allowLegacyMigrationTable,
     );
-    if (allowLegacyMigrationTable) {
-      recentDevelopmentReadiness = { branchId, checkedAt: Date.now() };
-    }
-  });
+    successfulChecks.set(key, dependencies.now());
+  };
 };
+
+export const checkDatabaseReadiness = makeDatabaseReadinessChecker({
+  now: Date.now,
+  verify: (connectionString, branchId, allowLegacyMigrationTable) =>
+    withClient(connectionString, (client) =>
+      assertExpectedSchemaVersion(client, branchId, allowLegacyMigrationTable),
+    ),
+});
 
 export const checkRestrictedDatabaseAccess = (
   connectionString: string,

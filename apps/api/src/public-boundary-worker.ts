@@ -336,7 +336,7 @@ export const createPublicBoundaryWorker = (
       environment: PublicBoundaryEnvironment,
       _context: ExecutionContext,
     ): Promise<void> {
-      if (controller.cron === "* * * * *") {
+      if (controller.cron === "*/4 * * * *") {
         await handleWebhookIngressSweep(
           new Date(controller.scheduledTime).toISOString(),
           options.webhookRecoveryLayer(environment),

@@ -186,7 +186,10 @@ supplied by a public request. The production composition root fails closed
 when any required binding is absent or has the wrong runtime capability.
 `/health` remains a non-sensitive liveness endpoint; every other API route
 passes the database readiness gate, and `/ready` returns unavailable unless
-`HYPERDRIVE` can report exactly the compiled schema version.
+`HYPERDRIVE` can report exactly the compiled schema version. A successful
+schema-and-restore check is cached in the Worker isolate for at most 15 seconds,
+keyed by the exact connection, Neon branch, and migration mode. Failures are
+never cached.
 
 `PROVIDER_CONTROL` is a Cloudflare RPC service binding with the closed
 `listSessions`, `createSession`, `connectSession`, `getQrCode`,
@@ -599,7 +602,7 @@ After the setup transaction commits, the API publishes only the opaque setup
 identifier and a fixed message version to
 `CONNECTION_SETUP_PROVISIONING_QUEUE`. A failed publication makes the HTTP
 request unavailable but does not roll back durable intent; an exact browser
-retry republishes the same setup, and the minute recovery scan republishes up
+retry republishes the same setup, and the four-minute recovery scan republishes up
 to 100 unleased, unexpired intents. Duplicate Queue deliveries are expected.
 
 One restricted worker claims a two-minute Neon lease, asks provider-control to
@@ -629,7 +632,7 @@ possible, and every later attempt begins with reconciliation. A definitive
 and is not selected by recovery; it cannot become a repeated create loop.
 Queue delivery
 uses batches of one, a three-minute visibility timeout, ten 30-second delivery
-retries, and seven-day retention. The durable setup and minute recovery scan
+retries, and seven-day retention. The durable setup and four-minute recovery scan
 remain authoritative if Cloudflare exhausts a delivery. Telemetry contains only
 `connection_setup.provision.claimed` with first-claim delay,
 `connection_setup.provision.completed` with service, allowlisted outcome,
@@ -642,12 +645,12 @@ values, or ciphertext.
 The owning User cancels an incomplete setup with `DELETE
 /v1/connection-setups/{setup_id}`. The transition to `cancelled` is
 idempotent and immediately prevents provisioning from advancing. The existing
-minute cron transitions every incomplete setup whose fixed 15-minute deadline
+four-minute cron transitions every incomplete setup whose fixed 15-minute deadline
 has passed to `expired`; expiry does not depend on a browser request.
 
 Both terminal transitions persist `cleanup_state: pending` and publish a
 `connection_setup.cleanup` message to the existing Connection Setup Queue.
-The durable minute recovery scan republishes eligible cleanup work if request
+The durable four-minute recovery scan republishes eligible cleanup work if request
 publication or Queue delivery fails. Cleanup waits for any provisioning lease
 that was active at the terminal transition to expire, then obtains its own
 two-minute lease. This closes the race in which an already-authorized provider
@@ -920,9 +923,11 @@ Ingestion allows exactly seven retries and uses a three-hour default delay,
 giving the roughly 21-hour bound required by ADR 0005; ingestion code may
 select a jittered per-message delay inside that cap. Exhausted ingestion items
 move to the actively consumed DLQ, whose unconsumed retention is four days.
-API cron triggers run durable provisioning recovery and other maintenance each
-minute, connection and webhook health reconciliation every five minutes, and
-retention/deletion cleanup hourly. Resource names use the
+API cron triggers run durable provisioning recovery and other maintenance every
+four minutes, connection and webhook health reconciliation every five minutes,
+and retention/deletion cleanup hourly. The committed four-minute recovery
+heartbeat preserves the five-minute recovery-point evidence but prevents
+reliable suspension when Neon's autosuspend delay is five minutes. Resource names use the
 deployment-environment suffix outside production so development, preview, and
 production never share state by name.
 
@@ -930,7 +935,7 @@ The private deletion-coordinator Worker runs every minute with only the
 Deletion Capsule bucket, the deletion-coordinator KMS role, provider-control,
 and a `whatsapp_deletion_runtime` Neon credential. It confirms provider absence
 before recording that content-free fact and destroying the capsule. The API
-minute job then deletes the connection's encrypted Webhook Event and Stored
+four-minute job then deletes the connection's encrypted Webhook Event and Stored
 Media objects, releases retained-media quota only after each Stored Media
 delete succeeds, and invokes the fixed-search-path purge function. A risk event
 is emitted at 23 hours so operators have warning before the 24-hour deadline.
