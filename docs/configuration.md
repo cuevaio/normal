@@ -688,7 +688,10 @@ generated SVG. An available SVG is streamed directly as
 policy, and `X-Content-Type-Options: nosniff`. The bytes exist only in the
 bounded provider-control RPC result, API response, and browser object URL; no
 database, R2, Queue, analytics, trace, snapshot, or telemetry field receives
-them.
+them. A transient QR-route `503` or browser transport failure retains the
+current object URL and continues the existing bounded polling schedule; it does
+not abandon or restart the durable Setup. Definitive terminal Setup outcomes
+still replace the QR and stop observation.
 
 Every later observation reconciles again. Only a single provider session in
 trusted `connected` state can activate the Setup. One Neon transaction locks
