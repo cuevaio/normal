@@ -73,6 +73,7 @@ describe("production content credential rotation", () => {
     const deployment = await read(".github/workflows/deploy-production.yml");
 
     expect(rotation).toContain('cron: "7,27,47 * * * *"');
+    expect(rotation).toContain("group: production-content-credential-rotation");
     expect(rotation).toContain("environment: production");
     expect(rotation).toContain("id-token: write");
     expect(rotation).toContain("role-chaining: true");
@@ -93,5 +94,42 @@ describe("production content credential rotation", () => {
     }
     expect(rotation).not.toMatch(/secrets\.AWS_(?:ACCESS|SECRET|SESSION)/u);
     expect(deployment).not.toMatch(/secrets\.AWS_(?:ACCESS|SECRET|SESSION)/u);
+  });
+
+  test("rotates isolated deletion coordinator credentials before expiry and deployment", async () => {
+    const template = await read(
+      "infra/aws/deletion-credential-broker.template.json",
+    );
+    const rotation = await read(
+      ".github/workflows/rotate-production-deletion-credentials.yml",
+    );
+    const deployment = await read(".github/workflows/deploy-production.yml");
+
+    expect(template).toContain("DeletionCredentialBrokerRole");
+    expect(template).toContain("DeletionCoordinatorRoleArn");
+    expect(template).not.toContain("ContentRuntimeRole");
+    expect(rotation).toContain('cron: "17,37,57 * * * *"');
+    expect(rotation).toContain(
+      "group: production-deletion-credential-rotation",
+    );
+    expect(rotation).toContain("environment: production");
+    expect(rotation).toContain("id-token: write");
+    expect(rotation).toContain("role-chaining: true");
+    expect(rotation).toContain("role-skip-session-tagging: true");
+    expect(rotation).toContain("wrangler secret bulk");
+    expect(rotation).toContain("Verify the rotated secret inventory");
+    expect(rotation).toContain("wrangler secret list");
+    expect(rotation).toContain("--name whatsapp-mcp-deletion-coordinator");
+    expect(deployment).toContain("Rotate Deletion Coordinator credentials");
+    expect(deployment).toContain("--name whatsapp-mcp-deletion-coordinator");
+    for (const name of [
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN",
+    ]) {
+      expect(rotation).toContain(name);
+      expect(deployment).toContain(name);
+    }
+    expect(rotation).not.toMatch(/secrets\.AWS_(?:ACCESS|SECRET|SESSION)/u);
   });
 });

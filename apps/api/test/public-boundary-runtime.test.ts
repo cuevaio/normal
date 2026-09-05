@@ -71,44 +71,6 @@ describe("public-boundary Worker harness", () => {
   });
 
   test("starts and replays a Connection Setup through the signed-in HTTP boundary", async () => {
-    const profile = await exports.default.fetch(
-      new Request(
-        "https://api.example.test/v1/personal-account/onboarding-profile",
-        {
-          body: JSON.stringify({
-            intended_mcp_client: "not_sure",
-            primary_use_case: "exploration",
-            research_call_interest: "not_sure",
-            role: "not_sure",
-            whatsapp_usage_context: "personal",
-          }),
-          headers: {
-            authorization: "Bearer signed-test-user",
-            "content-type": "application/json",
-            origin: "http://127.0.0.1:3000",
-          },
-          method: "PUT",
-        },
-      ),
-    );
-    expect(profile.status).toBe(200);
-
-    const security = await exports.default.fetch(
-      new Request(
-        "https://api.example.test/v1/personal-account/onboarding-profile",
-        {
-          body: JSON.stringify({ security_completed: true }),
-          headers: {
-            authorization: "Bearer signed-test-user",
-            "content-type": "application/json",
-            origin: "http://127.0.0.1:3000",
-          },
-          method: "PATCH",
-        },
-      ),
-    );
-    expect(security.status).toBe(200);
-
     const request = () =>
       new Request("https://api.example.test/v1/connection-setups", {
         body: JSON.stringify({
@@ -253,6 +215,7 @@ describe("public-boundary Worker harness", () => {
         },
       );
 
+    const connecting = await exports.default.fetch(qrRequest());
     const qr = await exports.default.fetch(qrRequest());
     const connected = await exports.default.fetch(qrRequest());
     const listed = await exports.default.fetch(
@@ -296,6 +259,10 @@ describe("public-boundary Worker harness", () => {
       }),
     );
 
+    expect(connecting.status).toBe(202);
+    expect(connecting.headers.get("x-connection-setup-state")).toBe(
+      "connecting",
+    );
     expect(qr.status).toBe(200);
     expect(qr.headers.get("content-type")).toBe("image/svg+xml");
     expect((await qr.arrayBuffer()).byteLength).toBeGreaterThan(0);
@@ -350,7 +317,7 @@ describe("public-boundary Worker harness", () => {
         body: JSON.stringify({
           idempotency_key: "423456789012345678901",
           name: "Work WhatsApp",
-          whatsapp_number: "+1 (555) 012-3457",
+          whatsapp_number: "+1 (555) 012-3459",
         }),
         headers: {
           authorization: "Bearer signed-test-user",
@@ -374,6 +341,7 @@ describe("public-boundary Worker harness", () => {
           },
         },
       );
+    const connecting = await exports.default.fetch(qrRequest());
     const qr = await exports.default.fetch(qrRequest());
     const rejected = await exports.default.fetch(qrRequest());
     const listed = await exports.default.fetch(
@@ -385,6 +353,10 @@ describe("public-boundary Worker harness", () => {
       }),
     );
 
+    expect(connecting.status).toBe(202);
+    expect(connecting.headers.get("x-connection-setup-state")).toBe(
+      "connecting",
+    );
     expect(qr.status).toBe(200);
     expect(qr.headers.get("content-type")).toBe("image/svg+xml");
     expect(rejected.status).toBe(409);
@@ -394,7 +366,7 @@ describe("public-boundary Worker harness", () => {
     });
     expect(await listed.json()).not.toMatchObject({
       whatsapp_connections: expect.arrayContaining([
-        expect.objectContaining({ number_suffix: "3457" }),
+        expect.objectContaining({ number_suffix: "3459" }),
       ]),
     });
   });
@@ -1124,7 +1096,7 @@ describe("public-boundary Worker harness", () => {
     const orphanId = orphan.key.slice("webhook-events/".length);
 
     const controller = createScheduledController({
-      cron: "* * * * *",
+      cron: "*/4 * * * *",
       scheduledTime: orphan.uploaded.valueOf() + 60_000,
     });
     const context = createExecutionContext();

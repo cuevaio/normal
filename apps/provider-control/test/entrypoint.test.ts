@@ -6,39 +6,21 @@ const json = (body: unknown) =>
     headers: { "content-type": "application/json" },
   });
 
-const websharePlan = () =>
-  json({
-    count: 1,
-    next: null,
-    results: [
-      {
-        automatic_refresh_frequency: 0,
-        id: 14_141_301,
-        proxy_count: 20,
-        proxy_countries: { CO: 20 },
-        proxy_subtype: "isp",
-        proxy_type: "shared",
-        status: "active",
-      },
-    ],
-  });
-
-const proxyCredential = (kind: "pass" | "user", index: number) =>
-  `${kind}_${index}_fixture`;
-
-const webshareProxies = () =>
-  json({
-    count: 20,
-    next: null,
-    results: Array.from({ length: 20 }, (_, index) => ({
-      country_code: "CO",
-      id: `b-${index + 1}`,
-      password: proxyCredential("pass", index + 1),
-      port: 10_000 + index,
-      username: proxyCredential("user", index + 1),
-      valid: true,
-    })),
-  });
+const webhookEvents = [
+  "contacts.update",
+  "contacts.upsert",
+  "groups.update",
+  "groups.upsert",
+  "message-receipt.update",
+  "message.sent",
+  "messages-group.received",
+  "messages-personal.received",
+  "messages.delete",
+  "messages.received",
+  "messages.update",
+  "messages.upsert",
+  "session.status",
+];
 
 describe("provider-control Worker entrypoint", () => {
   test("serves the health canary through its service-binding entrypoint", async () => {
@@ -100,88 +82,50 @@ describe("provider-control Worker entrypoint", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  test("serializes provider allocation operations through one gate", async () => {
-    const requests: Request[] = [];
-    let releaseFirst: () => void = () => undefined;
-    const firstRelease = new Promise<void>((resolve) => {
-      releaseFirst = resolve;
-    });
-    let markFirstStarted: () => void = () => undefined;
-    const firstStarted = new Promise<void>((resolve) => {
-      markFirstStarted = resolve;
-    });
+  test("creates a safely configured provider session without a proxy", async () => {
+    const setupMarker = "cst_0123456789abcdefghijk";
+    const webhookUrl =
+      "https://api.example.test/webhooks/wasender/30000000-0000-4000-8000-000000000041";
+    let createBody: Record<string, unknown> | undefined;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const request = input instanceof Request ? input : new Request(input);
-      requests.push(request);
-      if (requests.length === 1) {
-        markFirstStarted();
-        await firstRelease;
-      }
-      return new Response(JSON.stringify({ data: [], success: true }), {
-        headers: { "content-type": "application/json" },
-      });
-    });
-
-    const first = exports.default.reconcileSession({
-      setupMarker: "cst_0123456789abcdefghijk",
-    });
-    await firstStarted;
-    const second = exports.default.reconcileSession({
-      setupMarker: "cst_0123456789abcdefghijl",
-    });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    expect(requests).toHaveLength(1);
-    releaseFirst();
-    await Promise.all([first, second]);
-    expect(requests).toHaveLength(2);
-  });
-
-  test("quarantines the pool after an ambiguous proxy allocation write", async () => {
-    let providerWrites = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const request = input instanceof Request ? input : new Request(input);
-      if (request.url.includes("/subscription/plan/")) return websharePlan();
-      if (request.url.includes("/proxy/list/")) return webshareProxies();
       if (request.method === "POST") {
-        providerWrites += 1;
-        throw new DOMException("timed out", "AbortError");
+        createBody = (await request.json()) as Record<string, unknown>;
+        return json({
+          data: {
+            ...createBody,
+            api_key: "session_credential",
+            created_at: "2026-08-25T22:00:00Z",
+            id: 41,
+            status: "NEED_SCAN",
+            updated_at: "2026-08-25T22:00:00Z",
+            webhook_secret: "webhook_secret",
+          },
+          success: true,
+        });
       }
       return json({ data: [], success: true });
     });
 
-    const first = await exports.default.createSession({
+    const result = await exports.default.createSession({
       phoneNumber: "+15550123456",
-      setupMarker: "cst_0123456789abcdefghijk",
-      webhookUrl:
-        "https://api.example.test/webhooks/wasender/30000000-0000-4000-8000-000000000041",
-    });
-    const second = await exports.default.createSession({
-      phoneNumber: "+15550123457",
-      setupMarker: "cst_0123456789abcdefghijl",
-      webhookUrl:
-        "https://api.example.test/webhooks/wasender/30000000-0000-4000-8000-000000000042",
+      setupMarker,
+      webhookUrl,
     });
 
-    expect(first).toMatchObject({
-      error: {
-        code: "timed_out",
-        operation: "lifecycle-write",
-        retryDecision: "reconcile_before_repeat",
-      },
-      ok: false,
+    expect(result).toMatchObject({ ok: true });
+    expect(createBody).toMatchObject({
+      account_protection: true,
+      ignore_groups: false,
+      log_messages: false,
+      name: setupMarker,
+      phone_number: "+15550123456",
+      read_incoming_messages: false,
+      webhook_enabled: true,
+      webhook_events: webhookEvents,
+      webhook_url: webhookUrl,
     });
-    expect(second).toEqual({
-      error: {
-        _tag: "ProviderControlFailure",
-        code: "unavailable",
-        operation: "lifecycle-write",
-        retryAfterMs: null,
-        retryDecision: "reconcile_before_repeat",
-      },
-      ok: false,
-    });
-    expect(providerWrites).toBe(1);
+    expect(createBody).not.toHaveProperty("proxy_url");
   });
 
   test("does not expose lifecycle operations over HTTP", async () => {

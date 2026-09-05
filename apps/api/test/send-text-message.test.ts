@@ -651,13 +651,13 @@ describe("atomic send workflow", () => {
             "image/jpeg",
           );
           return Response.json({
-            publicUrl: "https://www.wasenderapi.com/media/private-image.jpg",
+            publicUrl: "https://api.wapi.crafter.run/media/private-image.jpg",
             success: true,
           });
         }
         order.push("provider-send");
         expect(JSON.parse(String(request.body))).toEqual({
-          imageUrl: "https://www.wasenderapi.com/media/private-image.jpg",
+          imageUrl: "https://api.wapi.crafter.run/media/private-image.jpg",
           text: caption,
           to: "+15551234567",
         });

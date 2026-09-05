@@ -122,7 +122,7 @@ describe("real Wasender lifecycle adapter", () => {
     expect(requests[0]?.method).toBe("GET");
     expect(requests[1]?.method).toBe("POST");
     expect(requests[1]?.url).toBe(
-      "https://www.wasenderapi.com/api/whatsapp-sessions",
+      "https://api.wapi.crafter.run/api/whatsapp-sessions",
     );
     expect(requests[1]?.headers.get("authorization")).toBe(
       `Bearer ${Redacted.value(credential)}`,
@@ -145,6 +145,44 @@ describe("real Wasender lifecycle adapter", () => {
     expect(Redacted.value(result.authority as SessionAuthority)).toContain(
       "session_credential",
     );
+  });
+
+  test("accepts WAPI responses that omit disabled read controls", async () => {
+    const omittedReadControls = {
+      ignore_groups: undefined,
+      read_incoming_messages: undefined,
+    };
+    const responses = [
+      json({ success: true, data: [] }),
+      json({
+        success: true,
+        data: providerSession(omittedReadControls),
+      }),
+      json({
+        success: true,
+        data: [providerSession({ api_key: undefined, ...omittedReadControls })],
+      }),
+      json({
+        success: true,
+        data: providerSession(omittedReadControls),
+      }),
+    ];
+    const lifecycle = makeWasenderSessionLifecycle(
+      { credential, referenceSecret },
+      {
+        fetch: async () => responses.shift() ?? json({}, { status: 500 }),
+      },
+    );
+
+    const created = await Effect.runPromise(
+      lifecycle.createSession({ phoneNumber, setupMarker, webhookEndpoint }),
+    );
+    const reconciled = await Effect.runPromise(
+      lifecycle.reconcileSession({ setupMarker, webhookEndpoint }),
+    );
+
+    expect(created.connectionState).toBe("connecting");
+    expect(reconciled.outcome).toBe("present");
   });
 
   test("assigns an unused proxy while creating a provider session", async () => {
@@ -265,6 +303,30 @@ describe("real Wasender lifecycle adapter", () => {
       code: "unavailable",
       operation: "lifecycle-write",
       retryDecision: "reconcile_before_repeat",
+    });
+  });
+
+  test("maps empty paid proxy inventory to provider capacity unavailability", async () => {
+    const lifecycle = makeWasenderSessionLifecycle(
+      { credential, referenceSecret },
+      {
+        fetch: async () => json({ success: true, data: [] }),
+        proxySelector: {
+          select: async () => {
+            throw new WebshareProxySelectionError(false, true);
+          },
+        },
+      },
+    );
+
+    const failure = await runFailure(
+      lifecycle.createSession({ phoneNumber, setupMarker, webhookEndpoint }),
+    );
+
+    expect(failure).toMatchObject({
+      code: "source_rejected",
+      operation: "lifecycle-write",
+      retryDecision: "do_not_retry",
     });
   });
 
@@ -622,10 +684,13 @@ describe("real Wasender lifecycle adapter", () => {
     expect(failure.retryDecision).toBe("do_not_retry");
   });
 
-  test("rejects a reconciled marker with broader provider retention or read settings", async () => {
+  test("rejects broader or unknown provider retention and read settings", async () => {
     for (const unsafeSetting of [
+      { ignore_groups: true },
+      { ignore_groups: null },
       { log_messages: true },
       { read_incoming_messages: true },
+      { read_incoming_messages: null },
     ]) {
       const responses = [
         json({
@@ -909,7 +974,7 @@ describe("real Wasender lifecycle adapter", () => {
       "POST",
     ]);
     expect(requests[4]?.url).toBe(
-      "https://www.wasenderapi.com/api/whatsapp-sessions/41/connect",
+      "https://api.wapi.crafter.run/api/whatsapp-sessions/41/connect",
     );
     expect(await requests[4]?.json()).toEqual({ linkMethod: "qr" });
   });
@@ -1019,7 +1084,7 @@ describe("real Wasender lifecycle adapter", () => {
       "POST",
     ]);
     expect(requests[4]?.url).toBe(
-      "https://www.wasenderapi.com/api/whatsapp-sessions/41/disconnect",
+      "https://api.wapi.crafter.run/api/whatsapp-sessions/41/disconnect",
     );
   });
 

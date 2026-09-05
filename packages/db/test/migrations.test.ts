@@ -50,7 +50,96 @@ describe("production migrations", () => {
         (SELECT count(*)::int FROM public.schema_migrations) AS legacy,
         (SELECT count(*)::int FROM public.drizzle_migrations) AS standard
     `);
-    expect(ledgers.rows).toEqual([{ legacy: 40, standard: 29 }]);
+    expect(ledgers.rows).toEqual([{ legacy: 40, standard: 33 }]);
+  });
+
+  test("removes every first-connection onboarding database object", async () => {
+    await runMigrations(database);
+
+    const objects = await database.query<{ name: string; type: string }>(`
+      SELECT relname AS name, relkind::text AS type
+      FROM pg_catalog.pg_class
+      JOIN pg_catalog.pg_namespace
+        ON pg_namespace.oid = pg_class.relnamespace
+      WHERE pg_namespace.nspname = 'public'
+        AND relname IN (
+          'personal_account_onboarding_profiles',
+          'personal_account_onboarding_profiles_completed_at'
+        )
+      UNION ALL
+      SELECT proname AS name, 'function' AS type
+      FROM pg_catalog.pg_proc
+      JOIN pg_catalog.pg_namespace
+        ON pg_namespace.oid = pg_proc.pronamespace
+      WHERE pg_namespace.nspname = 'public'
+        AND proname IN (
+          'complete_onboarding_security',
+          'first_connection_setup_eligible',
+          'get_onboarding_profile',
+          'record_first_connection_completion',
+          'restore_first_connection_completion_on_profile_insert',
+          'upsert_onboarding_profile'
+        )
+      UNION ALL
+      SELECT tgname AS name, 'trigger' AS type
+      FROM pg_catalog.pg_trigger
+      WHERE NOT tgisinternal
+        AND tgname IN (
+          'record_first_connection_completion',
+          'restore_first_connection_completion_on_profile_insert'
+        )
+      UNION ALL
+      SELECT polname AS name, 'policy' AS type
+      FROM pg_catalog.pg_policy
+      WHERE polname = 'personal_account_onboarding_profiles_tenant'
+      ORDER BY type, name
+    `);
+
+    expect(objects.rows).toEqual([]);
+  });
+
+  test("keeps account-envelope recovery evidence private and account-bound", async () => {
+    await runMigrations(database);
+    await seedTenants(database);
+
+    await expect(
+      database.query(
+        `INSERT INTO public.personal_account_envelope_recovery_operations
+          (change_reference, personal_account_id, source_point_at, recovered_key_version)
+         VALUES ('unsafe', $1, '2026-08-24T22:45:00.000Z', 1)`,
+        [accountA],
+      ),
+    ).rejects.toThrow();
+    await database.query(
+      `INSERT INTO public.personal_account_envelope_recovery_operations
+        (change_reference, personal_account_id, source_point_at, recovered_key_version)
+       VALUES ($1, $2, '2026-08-24T22:45:00.000Z', 1)`,
+      [`change_${"a".repeat(32)}`, accountA],
+    );
+    await expect(
+      database.query(
+        `INSERT INTO public.personal_account_envelope_recovery_operations
+          (change_reference, personal_account_id, source_point_at, recovered_key_version)
+         VALUES ($1, $2, '2026-08-24T22:45:00.000Z', 1)`,
+        [`change_${"b".repeat(32)}`, accountA],
+      ),
+    ).rejects.toThrow();
+
+    await database.exec("SET ROLE whatsapp_api_runtime");
+    await expect(
+      database.query(
+        "SELECT * FROM public.personal_account_envelope_recovery_operations",
+      ),
+    ).rejects.toThrow();
+    await database.exec("RESET ROLE");
+
+    await database.query("DELETE FROM public.personal_accounts WHERE id = $1", [
+      accountA,
+    ]);
+    const evidence = await database.query<{ count: number }>(
+      "SELECT count(*)::integer AS count FROM public.personal_account_envelope_recovery_operations",
+    );
+    expect(evidence.rows).toEqual([{ count: 0 }]);
   });
 
   test("clears only retention limitations superseded by a complete Directory snapshot", async () => {
@@ -1404,7 +1493,23 @@ describe("production migrations", () => {
         ) AS replayed`,
         [accountA, "a".repeat(64)],
       );
-      expect(replay.rows).toEqual([{ replayed: true }]);
+      expect(replay.rows).toEqual([{ replayed: false }]);
+      const connectionReplay = await database.query<{ replayed: boolean }>(
+        `SELECT public.replay_restore_deletion(
+          'whatsapp_connection', $1, $2, '2026-08-03T12:00:00Z'
+        ) AS replayed`,
+        [connectionA, "b".repeat(64)],
+      );
+      expect(connectionReplay.rows).toEqual([{ replayed: true }]);
+      const completedAccountReplay = await database.query<{
+        replayed: boolean;
+      }>(
+        `SELECT public.replay_restore_deletion(
+          'personal_account', $1, $2, '2026-08-03T12:00:00Z'
+        ) AS replayed`,
+        [accountA, "a".repeat(64)],
+      );
+      expect(completedAccountReplay.rows).toEqual([{ replayed: true }]);
       await database.query(
         "SELECT public.purge_restore_expired('2026-08-03T12:00:00Z', 1000)",
       );
@@ -1418,14 +1523,14 @@ describe("production migrations", () => {
       });
       await expect(
         database.query(
-          "SELECT public.complete_restore_replay('br-restored','2026-08-03T12:01:00Z',1,1,0)",
+          "SELECT public.complete_restore_replay('br-restored','2026-08-03T12:01:00Z',2,2,0)",
         ),
       ).rejects.toThrow("restore object deletions remain");
       await database.query(
         "SELECT public.finish_restore_object_deletion('stored_media','expired/media-object')",
       );
       await database.query(
-        "SELECT public.complete_restore_replay('br-restored','2026-08-03T12:01:00Z',1,1,0)",
+        "SELECT public.complete_restore_replay('br-restored','2026-08-03T12:01:00Z',2,2,0)",
       );
     } finally {
       await database.exec("RESET ROLE");
@@ -1445,6 +1550,156 @@ describe("production migrations", () => {
     );
     expect(protectedState.rows).toEqual([
       { account_count: 0, audit_columns: 7, object_deletion_count: 0 },
+    ]);
+  });
+
+  test("does not replay deletion markers again after a branch is ready", async () => {
+    await runMigrations(database);
+    await seedTenants(database);
+
+    await database.exec("SET ROLE whatsapp_restore_runtime");
+    try {
+      const initial = await database.query(
+        "SELECT * FROM public.begin_restore_replay('br-serving', '2026-08-03T12:00:00Z', false)",
+      );
+      expect(initial.rows).toHaveLength(4);
+      await database.query(
+        "SELECT public.complete_restore_replay('br-serving', '2026-08-03T12:01:00Z', 0, 0, 0)",
+      );
+
+      const repeated = await database.query(
+        "SELECT * FROM public.begin_restore_replay('br-serving', '2026-08-03T12:05:00Z', false)",
+      );
+      expect(repeated.rows).toEqual([]);
+      const complete = await database.query<{ complete: boolean }>(
+        "SELECT public.is_restore_replay_complete('br-serving') AS complete",
+      );
+      expect(complete.rows).toEqual([{ complete: true }]);
+    } finally {
+      await database.exec("RESET ROLE");
+    }
+  });
+
+  test("preserves the Personal Account key when replaying Connection Deletion", async () => {
+    await runMigrations(database);
+    await seedTenants(database);
+    await seedKeyEnvelopes(database);
+    const setupId = `cst_${"a".repeat(21)}`;
+    await database.query(
+      `INSERT INTO public.connection_setups (
+         id, personal_account_id, idempotency_key, state,
+         number_ciphertext_version, number_key_version, number_nonce,
+         number_ciphertext, created_at, expires_at, updated_at,
+         webhook_ingress_id
+       ) VALUES (
+         $1, $2, $3, 'activated', 1, 1, decode($4, 'hex'), decode($5, 'hex'),
+         '2026-08-03T11:00:00Z', '2026-08-03T11:15:00Z', '2026-08-03T11:05:00Z',
+         $6
+       )`,
+      [
+        setupId,
+        accountA,
+        "b".repeat(21),
+        "01".repeat(12),
+        "02".repeat(17),
+        ingressA,
+      ],
+    );
+    await database.query(
+      `INSERT INTO public.whatsapp_number_reservations (
+         number_token, personal_account_id, connection_setup_id, created_at
+       ) VALUES (decode($1, 'hex'), $2, $3, '2026-08-03T11:00:00Z')`,
+      ["03".repeat(32), accountA, setupId],
+    );
+    await database.query(
+      "UPDATE public.whatsapp_connections SET connection_setup_id = $1 WHERE id = $2",
+      [setupId, connectionA],
+    );
+
+    await database.exec("SET ROLE whatsapp_restore_runtime");
+    try {
+      await database.query(
+        "SELECT * FROM public.begin_restore_replay('br-continuation', '2026-08-03T12:00:00Z', false)",
+      );
+      await database.query(
+        `SELECT public.replay_restore_deletion(
+          'whatsapp_connection', $1, $2, '2026-08-03T12:00:00Z'
+        )`,
+        [connectionA, "a".repeat(64)],
+      );
+      await expect(
+        database.query(
+          "SELECT public.complete_restore_replay('br-continuation', '2026-08-03T12:01:00Z', 1, 1, 0)",
+        ),
+      ).resolves.toBeDefined();
+    } finally {
+      await database.exec("RESET ROLE");
+    }
+
+    const retained = await database.query<{
+      ciphertext: string | null;
+      connection_count: number;
+      continuation_count: number;
+      key_version: number | null;
+      kms_key_id: string | null;
+      reservation_count: number;
+      setup_count: number;
+      unavailable_at: Date | null;
+    }>(
+      `SELECT encode(keys.ciphertext, 'hex') AS ciphertext,
+         keys.key_version, keys.kms_key_id, keys.unavailable_at,
+         (SELECT count(*)::integer FROM public.whatsapp_connections
+          WHERE personal_account_id = $1) AS connection_count,
+         (SELECT count(*)::integer FROM public.restore_connection_deletion_continuations
+          WHERE personal_account_id = $1) AS continuation_count,
+         (SELECT count(*)::integer FROM public.whatsapp_number_reservations
+          WHERE personal_account_id = $1 AND released_at IS NULL) AS reservation_count,
+         (SELECT count(*)::integer FROM public.connection_setups
+          WHERE personal_account_id = $1) AS setup_count
+       FROM public.personal_account_key_envelopes keys
+       WHERE keys.personal_account_id = $1`,
+      [accountA],
+    );
+    expect(retained.rows).toEqual([
+      {
+        ciphertext: "0102",
+        connection_count: 0,
+        continuation_count: 1,
+        key_version: 1,
+        kms_key_id: "kms-content-root",
+        reservation_count: 1,
+        setup_count: 1,
+        unavailable_at: null,
+      },
+    ]);
+
+    await database.exec("SET ROLE whatsapp_deletion_runtime");
+    try {
+      const candidates = await database.query<{ deletion_marker_id: string }>(
+        "SELECT deletion_marker_id FROM public.list_whatsapp_connection_deletion_candidates('2026-08-03T12:01:00Z', 100)",
+      );
+      expect(candidates.rows).toEqual([{ deletion_marker_id: "a".repeat(64) }]);
+      const confirmed = await database.query<{ confirmed: boolean }>(
+        `SELECT public.confirm_whatsapp_connection_provider_absence(
+          $1, '2026-08-03T12:01:00Z'
+        ) AS confirmed`,
+        ["a".repeat(64)],
+      );
+      expect(confirmed.rows).toEqual([{ confirmed: true }]);
+    } finally {
+      await database.exec("RESET ROLE");
+    }
+
+    const cleaned = await database.query<{
+      continuation_count: number;
+      reservation_count: number;
+      setup_count: number;
+    }>(`SELECT
+      (SELECT count(*)::integer FROM public.restore_connection_deletion_continuations) AS continuation_count,
+      (SELECT count(*)::integer FROM public.whatsapp_number_reservations) AS reservation_count,
+      (SELECT count(*)::integer FROM public.connection_setups) AS setup_count`);
+    expect(cleaned.rows).toEqual([
+      { continuation_count: 0, reservation_count: 0, setup_count: 0 },
     ]);
   });
 

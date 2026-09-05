@@ -1,4 +1,4 @@
-import type { ConnectionSetupState } from "./first-connection-onboarding";
+import type { ConnectionSetupState } from "./connection-setup";
 
 export type ConnectionSetupObservationPhase =
   | "start_to_code_observed"

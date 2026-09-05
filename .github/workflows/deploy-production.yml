@@ -91,6 +91,14 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run build
 
+      - name: Verify deletion credential rotation authority
+        env:
+          DELETION_BROKER_ROLE_ARN: ${{ vars.AWS_DELETION_CREDENTIAL_BROKER_ROLE_ARN }}
+          DELETION_COORDINATOR_ROLE_ARN: ${{ vars.AWS_DELETION_COORDINATOR_ROLE_ARN }}
+        run: |
+          test -n "$DELETION_BROKER_ROLE_ARN"
+          test -n "$DELETION_COORDINATOR_ROLE_ARN"
+
       - name: Migrate and verify the production database
         run: bun run db:migrate && bun run db:check
         env:
@@ -101,6 +109,44 @@ jobs:
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Remove dormant Webshare credential
+        run: |
+          if bun run --cwd apps/provider-control wrangler secret list --env production --format json | jq -e 'any(.[]; .name == "WEBSHARE_API_KEY")' >/dev/null; then
+            bun run --cwd apps/provider-control wrangler secret delete WEBSHARE_API_KEY --env production
+          fi
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Assume the production deletion credential broker
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: us-east-1
+          role-session-name: production-deploy-deletion-broker
+          role-to-assume: ${{ vars.AWS_DELETION_CREDENTIAL_BROKER_ROLE_ARN }}
+
+      - name: Assume the production Deletion Coordinator role
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: us-east-1
+          role-chaining: true
+          role-skip-session-tagging: true
+          role-session-name: production-deploy-deletion-coordinator
+          role-to-assume: ${{ vars.AWS_DELETION_COORDINATOR_ROLE_ARN }}
+
+      - name: Rotate Deletion Coordinator credentials
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          jq -n \
+            --arg access "$AWS_ACCESS_KEY_ID" \
+            --arg secret "$AWS_SECRET_ACCESS_KEY" \
+            --arg token "$AWS_SESSION_TOKEN" \
+            '{AWS_ACCESS_KEY_ID:$access,AWS_SECRET_ACCESS_KEY:$secret,AWS_SESSION_TOKEN:$token}' \
+            | bun x wrangler secret bulk \
+                --name whatsapp-mcp-deletion-coordinator
 
       - name: Deploy deletion coordinator
         run: bun run --cwd apps/deletion-coordinator wrangler deploy --env production
@@ -248,6 +294,5 @@ jobs:
           SMOKE_API_ORIGIN: ${{ vars.API_ORIGIN }}
           SMOKE_CHECK_SECRET: ${{ secrets.SMOKE_CHECK_SECRET }}
           SMOKE_DOCS_ORIGIN: ${{ vars.DOCS_ORIGIN }}
-          SMOKE_MCP_CLIENT_ID: ${{ vars.MCP_SMOKE_CLIENT_ID }}
           SMOKE_MCP_REFRESH_SECRET_ID: ${{ vars.MCP_SMOKE_REFRESH_SECRET_ID }}
           SMOKE_WEB_ORIGIN: ${{ vars.WEB_ORIGIN }}

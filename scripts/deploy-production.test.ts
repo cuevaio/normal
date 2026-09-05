@@ -7,6 +7,9 @@ describe("production deployment order", () => {
       new URL("../.github/workflows/deploy-production.yml", import.meta.url),
     ).text();
     const provider = workflow.indexOf("Deploy provider control");
+    const removeWebshare = workflow.indexOf(
+      "Remove dormant Webshare credential",
+    );
     const deletion = workflow.indexOf("Deploy deletion coordinator");
     const restore = workflow.indexOf("Deploy restore coordinator");
     const operations = workflow.indexOf("Deploy operations control");
@@ -15,6 +18,8 @@ describe("production deployment order", () => {
     const recovery = workflow.indexOf("Deploy recovery control");
     const api = workflow.indexOf("Deploy API");
     expect(provider).toBeGreaterThan(-1);
+    expect(removeWebshare).toBeGreaterThan(provider);
+    expect(removeWebshare).toBeLessThan(deletion);
     expect(deletion).toBeGreaterThan(provider);
     expect(restore).toBeGreaterThan(deletion);
     expect(operations).toBeGreaterThan(restore);
@@ -22,6 +27,14 @@ describe("production deployment order", () => {
     expect(verifier).toBeGreaterThan(gameDay);
     expect(recovery).toBeGreaterThan(verifier);
     expect(api).toBeGreaterThan(recovery);
+    expect(
+      workflow.indexOf("Verify deletion credential rotation authority"),
+    ).toBeGreaterThan(-1);
+    expect(
+      workflow.indexOf("Verify deletion credential rotation authority"),
+    ).toBeLessThan(
+      workflow.indexOf("Migrate and verify the production database"),
+    );
     expect(
       workflow.match(
         /bun run --cwd apps\/recovery-control wrangler deploy --env production/gu,
@@ -108,6 +121,8 @@ describe("production deployment order", () => {
       "public-api-release-gate.yml",
       "recovery-drills.yml",
       "rotate-production-content-credentials.yml",
+      "rotate-production-deletion-credentials.yml",
+      "smoke-production.yml",
     ]) {
       const source = await Bun.file(
         new URL(`../.github/workflows/${workflow}`, import.meta.url),

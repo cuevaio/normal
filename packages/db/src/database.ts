@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { drizzle, type PgRemoteDatabase } from "drizzle-orm/pg-proxy";
 import type { Client as PgClient } from "pg";
+import { withPgRequestConnection } from "./request-connection";
 import * as schema from "./schema";
 
 export type Database = PgRemoteDatabase<typeof schema>;
@@ -64,17 +65,10 @@ export const withPgQueryConnection = async <Value>(
   use: (connection: QueryConnection) => Promise<Value>,
   queryTimeoutMillis = 5_000,
   connectionTimeoutMillis = 5_000,
-): Promise<Value> => {
-  const { Client } = await import("pg");
-  const client: PgClient = new Client({
+): Promise<Value> =>
+  withPgRequestConnection(
     connectionString,
+    (client) => use(makeQueryConnection(client)),
+    queryTimeoutMillis,
     connectionTimeoutMillis,
-    query_timeout: queryTimeoutMillis,
-  });
-  await client.connect();
-  try {
-    return await use(makeQueryConnection(client));
-  } finally {
-    await client.end();
-  }
-};
+  );

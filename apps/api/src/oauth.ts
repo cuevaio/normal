@@ -24,6 +24,7 @@ const AUTHORIZATION_REQUEST_TTL_SECONDS = 10 * 60;
 const ACCESS_TOKEN_TTL_SECONDS = 10 * 60;
 
 export interface AllowlistedOAuthClient {
+  readonly allowedScopes?: ReadonlyArray<(typeof OAUTH_SCOPES)[number]>;
   readonly clientClass: string;
   readonly clientId: string;
   readonly clientName: string;
@@ -31,6 +32,13 @@ export interface AllowlistedOAuthClient {
 }
 
 const OAUTH_CLIENTS: ReadonlyArray<AllowlistedOAuthClient> = [
+  {
+    allowedScopes: ["connections:read"],
+    clientClass: "deployment_smoke",
+    clientId: "deployment-smoke",
+    clientName: "Normal deployment smoke",
+    redirectUris: ["http://127.0.0.1/oauth/callback"],
+  },
   {
     clientClass: "claude",
     clientId: "claude",
@@ -47,6 +55,44 @@ const OAUTH_CLIENTS: ReadonlyArray<AllowlistedOAuthClient> = [
     ],
   },
 ];
+
+const isAllowedRedirectUri = (
+  redirectUri: string,
+  registeredUris: ReadonlyArray<string>,
+): boolean =>
+  registeredUris.some((registeredUri) => {
+    if (!registeredUri.startsWith("http://127.0.0.1/")) {
+      return redirectUri === registeredUri;
+    }
+    if (!redirectUri.startsWith("http://127.0.0.1:")) return false;
+    try {
+      const requested = new URL(redirectUri);
+      const registered = new URL(registeredUri);
+      return (
+        requested.protocol === "http:" &&
+        registered.protocol === "http:" &&
+        requested.hostname === "127.0.0.1" &&
+        registered.hostname === "127.0.0.1" &&
+        requested.username === "" &&
+        requested.password === "" &&
+        requested.port !== "" &&
+        Number(requested.port) > 0 &&
+        requested.pathname === registered.pathname &&
+        requested.search === registered.search &&
+        requested.hash === registered.hash
+      );
+    } catch {
+      return false;
+    }
+  });
+
+const isAllowedScope = (
+  scope: string,
+  client: AllowlistedOAuthClient,
+): boolean =>
+  (client.allowedScopes ?? OAUTH_SCOPES).includes(
+    scope as (typeof OAUTH_SCOPES)[number],
+  );
 
 const chatGptFallbackRedirectUris = OAUTH_CLIENTS.find(
   (client) => client.clientId === "chatgpt",
@@ -517,12 +563,13 @@ export const openAuthorizationRequest = async (
     opened.expiresAt <= Date.now() ||
     !isAuthRequest(opened.request) ||
     opened.request.clientId !== trustedClient.clientId ||
-    !trustedClient.redirectUris.includes(opened.request.redirectUri) ||
+    !isAllowedRedirectUri(
+      opened.request.redirectUri,
+      trustedClient.redirectUris,
+    ) ||
     opened.request.resource !== configuration.resource ||
     opened.request.scope.length === 0 ||
-    opened.request.scope.some(
-      (scope) => !OAUTH_SCOPES.includes(scope as (typeof OAUTH_SCOPES)[number]),
-    )
+    opened.request.scope.some((scope) => !isAllowedScope(scope, trustedClient))
   ) {
     throw new Error("invalid authorization handoff");
   }
@@ -660,7 +707,7 @@ const makeAuthorizationHandler = (
       if (
         !client ||
         !redirectUri ||
-        !client.redirectUris.includes(redirectUri) ||
+        !isAllowedRedirectUri(redirectUri, client.redirectUris) ||
         resource !== options.configuration.resource ||
         responseType !== "code" ||
         !codeChallenge ||
@@ -669,10 +716,7 @@ const makeAuthorizationHandler = (
         !requestedScope ||
         requestedScope.length === 0 ||
         new Set(requestedScope).size !== requestedScope.length ||
-        requestedScope.some(
-          (scope) =>
-            !OAUTH_SCOPES.includes(scope as (typeof OAUTH_SCOPES)[number]),
-        ) ||
+        requestedScope.some((scope) => !isAllowedScope(scope, client)) ||
         !environment.OAUTH_PROVIDER
       ) {
         throw new Error("invalid authorization request");

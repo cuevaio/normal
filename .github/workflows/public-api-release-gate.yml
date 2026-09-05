@@ -65,7 +65,6 @@ jobs:
           SMOKE_API_ORIGIN: ${{ vars.API_ORIGIN }}
           SMOKE_CHECK_SECRET: ${{ secrets.SMOKE_CHECK_SECRET }}
           SMOKE_DOCS_ORIGIN: ${{ vars.DOCS_ORIGIN }}
-          SMOKE_MCP_CLIENT_ID: ${{ vars.MCP_SMOKE_CLIENT_ID }}
           SMOKE_MCP_REFRESH_SECRET_ID: ${{ vars.MCP_SMOKE_REFRESH_SECRET_ID }}
           SMOKE_WEB_ORIGIN: ${{ vars.WEB_ORIGIN }}
       - run: bun run release:public-api

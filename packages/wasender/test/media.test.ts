@@ -71,7 +71,7 @@ describe("real Wasender media adapter", () => {
           return new Response(
             JSON.stringify({
               publicUrl:
-                "https://www.wasenderapi.com/api/decrypted-media/message-id",
+                "https://api.wapi.crafter.run/api/decrypted-media/message-id",
               success: true,
             }),
             { headers: { "content-type": "application/json" } },
@@ -99,7 +99,7 @@ describe("real Wasender media adapter", () => {
     expect(JSON.stringify(metadata)).not.toContain("decrypted-media");
     expect(calls).toHaveLength(1);
     expect(calls[0]?.input).toBe(
-      "https://www.wasenderapi.com/api/decrypt-media",
+      "https://api.wapi.crafter.run/api/decrypt-media",
     );
     expect(calls[0]?.init.method).toBe("POST");
     expect(new Headers(calls[0]?.init.headers).get("authorization")).toBe(
@@ -155,7 +155,7 @@ describe("real Wasender media adapter", () => {
       adapter.download({
         maxBytes: makeMediaDownloadByteLimit(4),
         source: makeDownloadMediaSource(
-          "https://www.wasenderapi.com/api/decrypted-media/message-id",
+          "https://api.wapi.crafter.run/api/decrypted-media/message-id",
         ),
       }),
     );
@@ -175,12 +175,18 @@ describe("real Wasender media adapter", () => {
   });
 
   test.each([
-    "http://www.wasenderapi.com/api/decrypted-media/id",
-    "https://wasenderapi.com/api/decrypted-media/id",
+    // Wrong scheme.
+    "http://api.wapi.crafter.run/api/decrypted-media/id",
+    // A sibling host of the provider's, which is not the provider.
+    "https://wapi.crafter.run/api/decrypted-media/id",
+    // Suffix confusion against the provider host.
+    "https://api.wapi.crafter.run.evil.test/api/decrypted-media/id",
     "https://evil.example/api/decrypted-media/id",
     "https://127.0.0.1/api/decrypted-media/id",
-    "https://user:password@www.wasenderapi.com/api/decrypted-media/id",
-    "https://www.wasenderapi.com:444/api/decrypted-media/id",
+    // Embedded credentials, which `URL.origin` would otherwise drop silently.
+    "https://user:password@api.wapi.crafter.run/api/decrypted-media/id",
+    // Explicit port.
+    "https://api.wapi.crafter.run:444/api/decrypted-media/id",
   ])("rejects unsafe download URL %s", async (url) => {
     let fetches = 0;
     const adapter = makeWasenderMediaRetrieval({
@@ -239,7 +245,7 @@ describe("real Wasender media adapter", () => {
       adapter.download({
         maxBytes: makeMediaDownloadByteLimit(10),
         source: makeDownloadMediaSource(
-          "https://www.wasenderapi.com/api/decrypted-media/id",
+          "https://api.wapi.crafter.run/api/decrypted-media/id",
         ),
       }),
     );
@@ -266,7 +272,7 @@ describe("real Wasender media adapter", () => {
       adapter.download({
         maxBytes: makeMediaDownloadByteLimit(10),
         source: makeDownloadMediaSource(
-          "https://www.wasenderapi.com/api/decrypted-media/id",
+          "https://api.wapi.crafter.run/api/decrypted-media/id",
         ),
       }),
     );
@@ -275,7 +281,7 @@ describe("real Wasender media adapter", () => {
 
     expect(failure.code).toBe("source_rejected");
     expect(calls).toEqual([
-      "https://www.wasenderapi.com/api/decrypted-media/id",
+      "https://api.wapi.crafter.run/api/decrypted-media/id",
     ]);
   });
 
@@ -288,7 +294,7 @@ describe("real Wasender media adapter", () => {
           fetches += 1;
           return new Response(null, {
             headers: {
-              location: "https://www.wasenderapi.com/api/decrypted-media/next",
+              location: "https://api.wapi.crafter.run/api/decrypted-media/next",
             },
             status: 307,
           });
@@ -306,7 +312,7 @@ describe("real Wasender media adapter", () => {
       adapter.download({
         maxBytes: makeMediaDownloadByteLimit(10),
         source: makeDownloadMediaSource(
-          "https://www.wasenderapi.com/api/decrypted-media/id",
+          "https://api.wapi.crafter.run/api/decrypted-media/id",
         ),
       }),
     );
@@ -344,7 +350,7 @@ describe("real Wasender media adapter", () => {
       adapter.download({
         maxBytes: makeMediaDownloadByteLimit(3),
         source: makeDownloadMediaSource(
-          "https://www.wasenderapi.com/api/decrypted-media/id",
+          "https://api.wapi.crafter.run/api/decrypted-media/id",
         ),
       }),
     );
@@ -381,7 +387,7 @@ describe("real Wasender media adapter", () => {
       adapter.download({
         maxBytes: makeMediaDownloadByteLimit(4),
         source: makeDownloadMediaSource(
-          "https://www.wasenderapi.com/api/decrypted-media/id",
+          "https://api.wapi.crafter.run/api/decrypted-media/id",
         ),
       }),
     );
@@ -416,7 +422,7 @@ describe("real Wasender media adapter", () => {
       adapter.download({
         maxBytes: makeMediaDownloadByteLimit(2),
         source: makeDownloadMediaSource(
-          "https://www.wasenderapi.com/api/decrypted-media/id",
+          "https://api.wapi.crafter.run/api/decrypted-media/id",
         ),
       }),
     );
@@ -443,7 +449,7 @@ describe("real Wasender media adapter", () => {
       adapter.download({
         maxBytes: makeMediaDownloadByteLimit(3),
         source: makeDownloadMediaSource(
-          "https://www.wasenderapi.com/api/decrypted-media/id",
+          "https://api.wapi.crafter.run/api/decrypted-media/id",
         ),
       }),
     );
@@ -468,7 +474,7 @@ describe("real Wasender media adapter", () => {
       adapter.download({
         maxBytes: makeMediaDownloadByteLimit(2),
         source: makeDownloadMediaSource(
-          "https://www.wasenderapi.com/api/decrypted-media/id",
+          "https://api.wapi.crafter.run/api/decrypted-media/id",
         ),
       }),
     );
@@ -504,7 +510,7 @@ describe("real Wasender media adapter", () => {
       adapter.download({
         maxBytes: makeMediaDownloadByteLimit(10),
         source: makeDownloadMediaSource(
-          "https://www.wasenderapi.com/api/decrypted-media/id",
+          "https://api.wapi.crafter.run/api/decrypted-media/id",
         ),
       }),
     );
@@ -550,7 +556,7 @@ describe("real Wasender media adapter", () => {
       adapter.download({
         maxBytes: makeMediaDownloadByteLimit(10),
         source: makeDownloadMediaSource(
-          "https://www.wasenderapi.com/api/decrypted-media/id",
+          "https://api.wapi.crafter.run/api/decrypted-media/id",
         ),
       }),
     );
@@ -629,7 +635,7 @@ describe("real Wasender media adapter", () => {
         adapter.download({
           maxBytes: makeMediaDownloadByteLimit(10),
           source: makeDownloadMediaSource(
-            "https://www.wasenderapi.com/api/decrypted-media/id",
+            "https://api.wapi.crafter.run/api/decrypted-media/id",
           ),
         }),
       );

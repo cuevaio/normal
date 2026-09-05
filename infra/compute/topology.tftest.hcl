@@ -309,11 +309,9 @@ run "development_topology" {
       ]) == toset([
       "inherit:WASENDER_API_CREDENTIAL",
       "inherit:WASENDER_REFERENCE_SECRET",
-      "inherit:WEBSHARE_API_KEY",
-      "durable_object_namespace:PROVIDER_ALLOCATION_GATE",
       "plain_text:DEPLOYMENT_ENVIRONMENT",
     ])
-    error_message = "Provider-control must receive only its environment, lifecycle secrets, and allocation gate."
+    error_message = "Provider-control must receive only its environment and Wasender lifecycle secrets."
   }
 
   assert {
@@ -530,7 +528,7 @@ run "production_topology" {
   assert {
     condition = toset([
       for schedule in cloudflare_workers_cron_trigger.api.schedules : schedule.cron
-    ]) == toset(["* * * * *", "*/5 * * * *", "0 * * * *"])
+    ]) == toset(["*/4 * * * *", "*/5 * * * *", "0 * * * *"])
     error_message = "The API Worker must schedule maintenance, five-minute health reconciliation, and hourly retention work."
   }
 

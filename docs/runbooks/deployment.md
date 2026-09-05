@@ -19,8 +19,6 @@
   AWS credentials for exactly the environment being changed
 - A Wasender account with approved session capacity and an account-level
   Personal Access Token for each environment
-- A Webshare static ISP plan for each environment, allocated exclusively to
-  Colombia with Auto-Refresh disabled, and an account API key
 
 No Clerk tenant or Wasender account is required to build and verify the
 source-controlled platform. A real Directory smoke check additionally requires
@@ -189,9 +187,9 @@ tofu -chdir=infra/compute apply \
 ```
 
 Generate the 32-byte locator key inside the approved recovery inventory, where
-it can remain stable for the environment. Load that value, the account-level
-Personal Access Token, and the Webshare API key without echoing them, then create
-all three required bindings atomically. The pipe does not put any plaintext
+it can remain stable for the environment. Load that value and the account-level
+Personal Access Token without echoing them, then create both required bindings
+atomically. The pipe does not put any plaintext
 value in a file, saved plan, or OpenTofu state:
 
 ```sh
@@ -199,23 +197,28 @@ read -rsp "WASENDER_REFERENCE_SECRET: " WASENDER_REFERENCE_SECRET
 echo
 read -rsp "WASENDER_API_CREDENTIAL: " WASENDER_API_CREDENTIAL
 echo
-read -rsp "WEBSHARE_API_KEY: " WEBSHARE_API_KEY
-echo
-export WASENDER_REFERENCE_SECRET WASENDER_API_CREDENTIAL WEBSHARE_API_KEY
+export WASENDER_REFERENCE_SECRET WASENDER_API_CREDENTIAL
 bun -e 'process.stdout.write(JSON.stringify({
   WASENDER_API_CREDENTIAL: process.env.WASENDER_API_CREDENTIAL,
   WASENDER_REFERENCE_SECRET: process.env.WASENDER_REFERENCE_SECRET,
-  WEBSHARE_API_KEY: process.env.WEBSHARE_API_KEY,
 }))' | wrangler secret bulk \
   --cwd apps/provider-control \
   --env "$DEPLOYMENT_ENVIRONMENT"
+if wrangler secret list \
+  --cwd apps/provider-control \
+  --env "$DEPLOYMENT_ENVIRONMENT" \
+  --format json | jq -e 'any(.[]; .name == "WEBSHARE_API_KEY")' >/dev/null; then
+  wrangler secret delete WEBSHARE_API_KEY \
+    --cwd apps/provider-control \
+    --env "$DEPLOYMENT_ENVIRONMENT"
+fi
 wrangler secret list \
   --cwd apps/provider-control \
   --env "$DEPLOYMENT_ENVIRONMENT"
-unset WASENDER_REFERENCE_SECRET WASENDER_API_CREDENTIAL WEBSHARE_API_KEY
+unset WASENDER_REFERENCE_SECRET WASENDER_API_CREDENTIAL
 ```
 
-The secret list must contain exactly the three names; it never returns their
+The secret list must contain exactly the two names; it never returns their
 values. A new Cloudflare Worker namespace does not accept secret upload until
 it has a version. After the recovery Worker namespaces exist and all protected
 recovery values are populated in the `production` GitHub environment, dispatch
@@ -552,19 +555,95 @@ verify the three secret names before relying on its schedule. The broker retains
 the reviewed emergency assumer in its trust policy for incident recovery, but
 neither authority receives content permissions directly.
 
+The deletion credential broker is a separate authority declared by
+`infra/aws/deletion-credential-broker.template.json`. Deploy it against the
+existing GitHub OIDC provider with the exact `DeletionCoordinatorRoleArn`, then
+update the production KMS stack's `DeletionCoordinatorAssumerArn` parameter to
+the broker role ARN. Retain the prior deletion bootstrap principal only as the
+broker's reviewed emergency assumer. Store the broker output as
+`AWS_DELETION_CREDENTIAL_BROKER_ROLE_ARN` and the coordinator role output as
+`AWS_DELETION_COORDINATOR_ROLE_ARN` in the protected `production` GitHub
+environment.
+
+Bootstrap the broker only from the authenticated production infrastructure
+shell. These commands derive the existing coordinator and emergency authority
+without printing credentials:
+
+```sh
+export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+export GITHUB_OIDC_PROVIDER_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com"
+export AWS_DELETION_COORDINATOR_ROLE_ARN="$(
+  tofu -chdir=infra/aws output -raw deletion_coordinator_role_arn
+)"
+export DELETION_EMERGENCY_ASSUMER_ARN="$(
+  aws cloudformation describe-stacks \
+    --stack-name whatsapp-mcp-production-kms \
+    --query "Stacks[0].Parameters[?ParameterKey=='DeletionCoordinatorAssumerArn'].ParameterValue | [0]" \
+    --output text
+)"
+
+aws cloudformation deploy \
+  --stack-name whatsapp-mcp-production-deletion-credential-broker \
+  --template-file infra/aws/deletion-credential-broker.template.json \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --no-fail-on-empty-changeset \
+  --parameter-overrides \
+    "DeletionCoordinatorRoleArn=${AWS_DELETION_COORDINATOR_ROLE_ARN}" \
+    "EmergencyAssumerArn=${DELETION_EMERGENCY_ASSUMER_ARN}" \
+    "GitHubOidcProviderArn=${GITHUB_OIDC_PROVIDER_ARN}"
+
+export AWS_DELETION_CREDENTIAL_BROKER_ROLE_ARN="$(
+  aws cloudformation describe-stacks \
+    --stack-name whatsapp-mcp-production-deletion-credential-broker \
+    --query "Stacks[0].Outputs[?OutputKey=='DeletionCredentialBrokerRoleArn'].OutputValue | [0]" \
+    --output text
+)"
+```
+
+Re-run the reviewed `tofu -chdir=infra/aws plan` command above with every
+unchanged production input and
+`-var="deletion_coordinator_assumer_arn=${AWS_DELETION_CREDENTIAL_BROKER_ROLE_ARN}"`,
+review the plan for that one trust-parameter change, then apply its saved plan:
+
+```sh
+tofu -chdir=infra/aws apply kms.tfplan
+
+gh variable set AWS_DELETION_COORDINATOR_ROLE_ARN \
+  --env production \
+  --body "${AWS_DELETION_COORDINATOR_ROLE_ARN}"
+gh variable set AWS_DELETION_CREDENTIAL_BROKER_ROLE_ARN \
+  --env production \
+  --body "${AWS_DELETION_CREDENTIAL_BROKER_ROLE_ARN}"
+```
+
+Set the broker variable last because it enables the workflows. Production
+deployment checks both variables before migration or any Worker publication,
+so an incomplete bootstrap fails before changing production.
+
+Run `rotate-production-deletion-credentials.yml` manually and verify that the
+three session secret names exist only on
+`whatsapp-mcp-deletion-coordinator`. The workflow renews them every 20 minutes,
+and production deployment renews them again before publishing the coordinator.
+Credential rotation uses a dedicated concurrency group so a long production
+operation or recovery drill cannot delay renewal beyond the one-hour session.
+Never copy the API Content Runtime session to the coordinator or allow either
+broker to assume the other's runtime role.
+
 Production MCP smoke uses the separate
 `infra/aws/mcp-smoke-credential.template.json` stack. Deploy it with the
 existing GitHub OIDC provider ARN and a distinct emergency recovery assumer,
 then store its outputs as protected environment variables
 `AWS_MCP_SMOKE_CREDENTIAL_ROLE_ARN` and `MCP_SMOKE_REFRESH_SECRET_ID` in both
-`production` and `production-launch-gate`. Store the reviewed public client ID
-as `MCP_SMOKE_CLIENT_ID`. The role trusts only those two exact environment
-subjects and can only describe, read, and create a version of that one secret.
+`production` and `production-launch-gate`. The workflows fix the reviewed
+public client ID to `deployment-smoke`; do not add a mutable client-ID variable.
+The role trusts only those two exact environment subjects and can only describe,
+read, and create a version of that one secret.
 
-Do not give Cloudflare the administrator, deletion coordinator,
-provider-control, or ordinary operator credentials. Never print the assumed
-credentials or store them in GitHub secrets, repository files, workflow
-artifacts, or shell history.
+Do not give Cloudflare the administrator, provider-control, or ordinary
+operator credentials. The deletion coordinator Worker receives only its
+short-lived, purpose-specific role session. Never print assumed credentials or
+store them in GitHub secrets, repository files, workflow artifacts, or shell
+history.
 
 Generate the deletion-marker HMAC once per environment, store it only as the
 `DELETION_MARKER_HMAC_SECRET` Worker secret and in the encrypted recovery
@@ -718,17 +797,15 @@ capacity and approved MCP minute and hour request quotas are valid.
 
 Provider-control authority is populated during the first-deployment bootstrap
 above, directly in Cloudflare's secret store. The Wrangler manifest declares
-all three names under `secrets.required`, so a subsequent Wrangler upload or deploy
+both names under `secrets.required`, so a subsequent Wrangler upload or deploy
 fails before publishing code if the selected environment does not already have
-all three secrets. OpenTofu represents all three names as `inherit` bindings, so every
+both secrets. OpenTofu represents both names as `inherit` bindings, so every
 subsequent provider-control version preserves the already stored ciphertext
 without putting either plaintext value in input, a saved plan, or state. The
-provider-control Wrangler deployment also creates the SQLite-backed
-`ProviderAllocationGate` class and binds the one named object used to serialize
-the environment's proxy-pool operations. During a proxy-changing write, the
-object may retain only the opaque setup marker and settlement deadline until
-alarm-driven safe reconciliation settles an ambiguous result; it stores no
-assignment or credential data. Run
+provider-control Wrangler deployment retains the migrated SQLite-backed
+`ProviderAllocationGate` class without binding it; production lifecycle calls do
+not use proxy allocation. The workflow idempotently deletes the dormant
+`WEBSHARE_API_KEY` after provider-control is live. Run
 the bootstrap against `development`, `preview`, and `production` independently;
 never rely on one environment's secrets for another.
 
@@ -740,40 +817,64 @@ account-level credential with `wrangler secret put WASENDER_API_CREDENTIAL`
 against the exact target environment, deploy provider-control, and verify its
 private service-binding health before deploying the API. Never rotate
 `WASENDER_REFERENCE_SECRET` directly; use the reconciliation procedure in
-`docs/configuration.md` so retained provider sessions remain addressable. Rotate
-`WEBSHARE_API_KEY` with `wrangler secret put WEBSHARE_API_KEY`; if Webshare proxy
-credentials or inventory also change, run provider configuration reconciliation
-before reconnecting affected WhatsApp Connections.
+`docs/configuration.md` so retained provider sessions remain addressable.
 
 ## Smoke check
 
 Create a dedicated approved MCP Authorization for deployment automation with
-the minimum discovery scope needed by the release policy. During bootstrap,
-complete consent once, capture the returned refresh credential without printing
-it, and put it into the exact `MCP_SMOKE_REFRESH_SECRET_ID` through a reviewed
-stdin or console operation. Never place it in a command argument, shell history,
-OpenTofu input/state, GitHub secret, workflow output, log, or artifact. Store the
-independently generated `SMOKE_CHECK_SECRET` in GitHub and the API Worker as
-before. The deployment and launch-gate workflows assume the narrow smoke role
-through GitHub OIDC and run the same command:
+the minimum `connections:read` discovery scope needed by the release policy.
+First deploy the API containing the source-allowlisted `deployment-smoke`
+client. Because the old refresh family belongs to a different client, the first
+ordinary production workflow run is expected to fail only at its final MCP
+smoke step after the API deployment succeeds. Verify that the API deployment
+step completed and that no earlier step failed; do not bypass the workflow with
+an improvised API-only deployment. Authenticate to AWS as the exact emergency
+assumer reviewed when the smoke stack was deployed, then run the PKCE bootstrap
+from a trusted local machine:
+
+```sh
+SMOKE_API_ORIGIN="https://api.normal.fast" \
+AWS_MCP_SMOKE_CREDENTIAL_ROLE_ARN="$(gh variable get AWS_MCP_SMOKE_CREDENTIAL_ROLE_ARN --env production)" \
+SMOKE_MCP_REFRESH_SECRET_ID="$(gh variable get MCP_SMOKE_REFRESH_SECRET_ID --env production)" \
+bun run deploy:smoke:bootstrap
+```
+
+The command assumes the narrow smoke role for 15 minutes, verifies the exact
+secret exists, binds an ephemeral listener only to `127.0.0.1`, opens the
+source-allowlisted authorization request with S256 PKCE and a random state, and
+requests only `connections:read`. Complete Clerk reverification and consent for
+one designated smoke-test WhatsApp Connection. The command exchanges the code,
+writes only the returned refresh credential directly to the exact Secrets
+Manager secret, prints only `{"status":"ok"}`, and discards the access token.
+It never prints either token or passes one through a command argument, shell
+history, OpenTofu input/state, GitHub secret, workflow output, log, or artifact.
+If exchange or persistence fails, revoke the newly created MCP Authorization
+before retrying bootstrap.
+
+Store the independently generated `SMOKE_CHECK_SECRET` in GitHub and the API
+Worker as before. The deployment and launch-gate workflows assume the narrow
+smoke role through GitHub OIDC and run the rotating smoke command with the fixed
+client:
 
 ```sh
 SMOKE_API_ORIGIN="$(tofu -chdir=infra/compute output -raw api_origin)" \
 SMOKE_DOCS_ORIGIN="$(tofu -chdir=infra/compute output -raw docs_origin)" \
 SMOKE_WEB_ORIGIN="$(tofu -chdir=infra/compute output -raw web_origin)" \
-SMOKE_MCP_CLIENT_ID="$MCP_SMOKE_CLIENT_ID" \
 SMOKE_MCP_REFRESH_SECRET_ID="$MCP_SMOKE_REFRESH_SECRET_ID" \
 SMOKE_CHECK_SECRET="$DEPLOYMENT_SMOKE_CHECK_SECRET" \
 bun run deploy:smoke
 ```
 
-The command first reads the current refresh credential and proves durable write
-authority by creating an equivalent secret version before contacting OAuth. It
-then exchanges the one-time credential, persists the descendant, and only then
-uses the ephemeral ten-minute access token for MCP smoke. All production
-deployment, migration, recovery, launch, release, and credential-rotation
-workflows use the `production-operations` concurrency group, so only one
-production operation can run at a time.
+The command first resolves the exact `AWSCURRENT` version through
+`DescribeSecret`, then reads that immutable version with both its version ID and
+the `AWSCURRENT` stage so a stale stage mapping fails closed instead of returning
+a consumed predecessor. It proves durable write authority by creating an
+equivalent secret version before contacting OAuth, exchanges the one-time
+credential, persists the descendant, and only then uses the ephemeral ten-minute
+access token for MCP smoke. All production deployment, migration, recovery,
+launch, release, and credential-rotation workflows use the
+`production-operations` concurrency group, so only one production operation can
+run at a time.
 
 The command validates web and API health, the static docs origin serving the
 generated OpenAPI document with reviewed security headers and no Scalar CDN or
@@ -783,8 +884,12 @@ restricted Hyperdrive role, private provider-control safe-read reachability,
 Queue publication and consumption, and an encrypted disposable R2/KMS round
 trip. The docs, web, and API origins must stay distinct. The Queue consumer removes its object before reporting success; KV status
 expires automatically. Output contains only safe subsystem or credential
-outcomes. Re-run after an ordinary pre-exchange store or network failure. If
-descendant persistence fails after exchange, do not retry the predecessor: it
+outcomes. For routine certification or a retry after an ordinary pre-exchange
+store or network failure, dispatch the `Smoke production` workflow from `main`.
+It assumes the narrow role through GitHub OIDC and does not require local AWS
+credentials.
+
+If descendant persistence fails after exchange, do not retry the predecessor: it
 may already be consumed. Revoke the affected MCP Authorization, complete fresh
 consent, replace the secret through the bootstrap procedure, and rerun. An
 `invalid or reused` outcome requires the same reauthorization and review of
@@ -841,16 +946,18 @@ User and bootstrap once. Confirm the browser sends `POST
 `Personal Account ready`, and a retry reports the same state without creating a
 second account. Confirm the product states the three-Connection, 5 GB Stored
 Media, and default 30-day Message Retention Policy values returned from Neon.
-In a non-production environment, set capacity to exactly three, admit one
-designated User, and verify a second Clerk-approved User receives transient
-service unavailability on retries without persisted applicant state or any
-provider-control lifecycle telemetry. Restore the approved value before further onboarding. A wrong
-Origin, expired token, or token from another environment
-must produce the same not-found response. Do not copy a token into shell
-history, query tenant tables with an owner role, or log identifiers to prove
-this check. Safe telemetry may show only
-`personal_account.bootstrap.completed` with `created` on the first request or
-`recovered` on the retry. Capacity exhaustion emits no successful completion.
+In a non-production environment, exhaust provider capacity and verify another
+Clerk-approved User still bootstraps successfully on retries without persisted
+applicant state or provider-control lifecycle telemetry. Start a Connection
+Setup for that User and verify a definitive provider rejection reports temporary
+capacity unavailability and creates no WhatsApp Connection. Restore the approved
+capacity before starting another Connection Setup. A wrong Origin, expired
+token, or token from another environment must produce the same not-found
+response. Do not copy a token into shell history, query tenant tables with an
+owner role, or log identifiers to prove this check. Safe bootstrap telemetry may
+show only `personal_account.bootstrap.completed` with `created` on the first
+request or `recovered` on the retry. Provider capacity exhaustion emits no
+successful Connection Setup completion.
 
 Enter an explicitly international smoke-test WhatsApp Number in the signed-in
 product and start one Connection Setup. Confirm the browser sends `POST
@@ -1087,11 +1194,11 @@ Exercise the reviewed provider-control test fixture for an ambiguous create
 timeout and confirm the next Queue delivery reconciles before any create
 decision. Exercise its duplicate fixture and confirm Neon exposes only the
 safe setup state `provisioning_quarantined` and duplicate count while no session
-becomes usable. A production quarantine is an incident: pause new onboarding,
-retain every reservation and encrypted provider reference, and do not manually
-repeat create or release the number. Use audited restricted diagnostics for
-state/counts only, preserve provider evidence, and follow the provider cleanup
-procedure below. A growing recovery candidate
+becomes usable. A production quarantine is an incident: pause new Connection
+Setup, retain every reservation and encrypted provider reference, and do not
+manually repeat create or release the number. Use audited restricted diagnostics
+for state/counts only, preserve provider evidence, and follow the provider
+cleanup procedure below. A growing recovery candidate
 count, repeated normalized failure code, or setup approaching its 15-minute
 expiry requires paging the on-call operator.
 
@@ -1172,6 +1279,9 @@ sufficient on its own.
 The readiness response proves a restricted Hyperdrive connection can read the
 exact expected schema version. It emits only an allowlisted request outcome;
 database URLs, SQL, tenant identifiers, and migration errors are never logged.
+Successful checks may be reused within one Worker isolate for up to 15 seconds
+only when the connection, Neon branch, and migration mode are identical;
+failures are never reused.
 The repository's provider-control acceptance suite invokes real lifecycle
 reconciliation through the Cloudflare RPC entrypoint, rejects malformed RPC
 arguments before provider access, and proves that the same lifecycle operation
@@ -1191,7 +1301,7 @@ provider response in logs as a credential-handling incident.
 
 No additional Cloudflare binding or public ingress is required for media
 retrieval. If an organization-level egress policy is applied outside this
-repository, allow outbound HTTPS only as needed to `www.wasenderapi.com` for
+repository, allow outbound HTTPS only as needed to `api.wapi.crafter.run` for
 decrypt metadata and guarded downloads and to `cloudflare-dns.com` for the
 adapter's bounded A and AAAA checks. Do not add an alternate media hostname or
 disable DNS validation to work around an outage.
@@ -1241,7 +1351,7 @@ outcomes and counts, never either identity or message content.
 
 If a Worker terminates after the durable transaction but before a complete
 provider response is recorded, allow the 30-second dispatch lease to expire.
-The minute schedule atomically changes unresolved operations to `unknown`; an
+The four-minute schedule atomically changes unresolved operations to `unknown`; an
 exact replay can perform the same convergence before the schedule runs and
 must never dispatch. Monitor `send.dispatch_lease.sweep_completed` by its count
 only; a sustained nonzero count indicates interrupted or overlong attempts.
@@ -1360,9 +1470,10 @@ under the production recovery authority.
 ## External rollout gates
 
 Clerk Waitlist mode controls private-beta applicant approval. The API has no
-second onboarding gate: a User who can authenticate is already approved and
-can bootstrap a Personal Account. Provider availability is managed internally
-and evaluated only when a Connection Setup provisions a WhatsApp Connection.
+second application-level admission gate: a User who can authenticate is already
+approved and can bootstrap a Personal Account. Provider availability is managed
+internally and evaluated only when a Connection Setup provisions a WhatsApp
+Connection.
 
 The weekly and quarterly schedules in
 `.github/workflows/recovery-drills.yml` call the production recovery automation
@@ -1376,15 +1487,16 @@ delivery, and deletion-gate bypass denial. Configure
 `production-recovery` GitHub environment; they are external rollout inputs, not
 test substitutes or application runtime bindings.
 
-Run the `External onboarding launch gate` workflow after successful drill
-artifacts exist. It reruns the real deployed smoke and production bundle
-inspection and requires the exact environment attestations `approved` for
-numeric quotas, provider capacity, and Wasender governance terms. Evidence
-older than 8 days for the weekly drill or 100 days for the quarterly drill is
-rejected. The successful result is release evidence; it does not mutate
-application admission state. Any missing artifact, secret, external approval,
-malformed report, failed check, missed four-hour RTO, missed five-minute Neon
-RPO, or nonzero deletion marker loss blocks the production launch decision.
+Run the external product launch workflow in
+`.github/workflows/launch-gate.yml` after successful drill artifacts exist. It
+reruns the real deployed smoke and production bundle inspection and requires
+the exact environment attestations `approved` for numeric quotas, provider
+capacity, and Wasender governance terms. Evidence older than 8 days for the
+weekly drill or 100 days for the quarterly drill is rejected. The successful
+result is release evidence; it does not mutate application admission state. Any
+missing artifact, secret, external approval, malformed report, failed check,
+missed four-hour RTO, missed five-minute Neon RPO, or nonzero deletion marker
+loss blocks the production launch decision.
 
 ## Public API release gate
 
@@ -1428,8 +1540,8 @@ ownership, and DNS approval. These values are intentionally absent from source.
 No code substitution, fake provider, public provider-control route, or
 production fallback is needed when the external values become available.
 
-External onboarding and any live Directory rollout remain gated on the written
-Wasender terms required by ADR 0004, including approved capacity, data
+External product launch and any live Directory rollout remain gated on the
+written Wasender terms required by ADR 0004, including approved capacity, data
 processing and subprocessors, deletion and backup erasure, security controls,
 webhook authentication, and retry behavior. The real adapter remains in the
 production bundle while that business gate is closed; do not route production
@@ -1442,12 +1554,12 @@ Production subprocessors that may process User or product data are:
 | Subprocessor | Purpose | Data in scope |
 | --- | --- | --- |
 | Clerk | Sign-in identity | User identity and session claims. Not WhatsApp content. |
-| Neon | Authoritative tenant data | Personal Account state, onboarding profiles, encrypted WhatsApp data, authorization, and lifecycle records. |
+| Neon | Authoritative tenant data | Personal Account state, encrypted WhatsApp data, authorization, and lifecycle records. |
 | Cloudflare | API, Workers, R2, Queues | Request handling, encrypted objects, and operational queues. |
 | Vercel | Web application hosting | Public browser configuration and the signed-in UI. Not the data plane. |
 | AWS KMS | Envelope encryption | Key use for Personal Account and WhatsApp Connection content keys. |
 | Wasender | WhatsApp provider seam | Provider session lifecycle behind provider-control. |
-| PostHog | Optional aggregate product analytics | Allowlisted non-identifying browser events only. No Clerk IDs, emails, Personal Account IDs, public handles, WhatsApp Numbers, profile answers, message content, or QR material. No person profiles or session replay. |
+| PostHog | Optional aggregate product analytics | Allowlisted non-identifying browser events only. No Clerk IDs, emails, Personal Account IDs, public handles, WhatsApp Numbers, message content, or QR material. No person profiles or session replay. |
 
 Do not enable production PostHog collection until this inventory, CSP, privacy
 copy, retention configuration, and browser-IP handling are reviewed for that

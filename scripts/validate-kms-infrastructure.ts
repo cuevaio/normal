@@ -172,6 +172,89 @@ console.info(
   "Content credential broker restricts GitHub OIDC and runtime role authority.",
 );
 
+const deletionBrokerTemplate = (await Bun.file(
+  "infra/aws/deletion-credential-broker.template.json",
+).json()) as {
+  readonly Resources?: Readonly<Record<string, Resource>>;
+};
+const deletionBrokerResources = deletionBrokerTemplate.Resources;
+assert(
+  deletionBrokerResources,
+  "Deletion credential broker must declare resources",
+);
+assert.deepEqual(Object.keys(deletionBrokerResources), [
+  "DeletionCredentialBrokerRole",
+]);
+assert.equal(
+  deletionBrokerResources.DeletionCredentialBrokerRole?.Type,
+  "AWS::IAM::Role",
+);
+const deletionBroker = deletionBrokerResources.DeletionCredentialBrokerRole as
+  | (Resource & {
+      readonly Properties?: Readonly<Record<string, unknown>>;
+    })
+  | undefined;
+const deletionBrokerProperties = deletionBroker?.Properties;
+assert(deletionBrokerProperties, "Deletion broker properties are required");
+assert.deepEqual(Object.keys(deletionBrokerProperties).sort(), [
+  "AssumeRolePolicyDocument",
+  "Description",
+  "ManagedPolicyArns",
+  "MaxSessionDuration",
+  "Policies",
+  "RoleName",
+]);
+assert.deepEqual(deletionBrokerProperties.AssumeRolePolicyDocument, {
+  Statement: [
+    {
+      Action: "sts:AssumeRoleWithWebIdentity",
+      Condition: {
+        StringEquals: {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          "token.actions.githubusercontent.com:sub": {
+            "Fn::Sub": githubSubject,
+          },
+        },
+      },
+      Effect: "Allow",
+      Principal: {
+        Federated: { Ref: "GitHubOidcProviderArn" },
+      },
+    },
+    {
+      Action: "sts:AssumeRole",
+      Effect: "Allow",
+      Principal: { AWS: { Ref: "EmergencyAssumerArn" } },
+    },
+  ],
+  Version: "2012-10-17",
+});
+assert.deepEqual(deletionBrokerProperties.Policies, [
+  {
+    PolicyDocument: {
+      Statement: [
+        {
+          Action: "sts:AssumeRole",
+          Effect: "Allow",
+          Resource: { Ref: "DeletionCoordinatorRoleArn" },
+        },
+      ],
+      Version: "2012-10-17",
+    },
+    PolicyName: "AssumeDeletionCoordinatorRole",
+  },
+]);
+assert.deepEqual(deletionBrokerProperties.ManagedPolicyArns, []);
+assert.equal(deletionBrokerProperties.MaxSessionDuration, 3600);
+assert.equal(
+  deletionBrokerProperties.RoleName,
+  "whatsapp-mcp-production-deletion-credential-broker",
+);
+
+console.info(
+  "Deletion credential broker restricts GitHub OIDC and coordinator role authority.",
+);
+
 const smokeTemplate = (await Bun.file(
   "infra/aws/mcp-smoke-credential.template.json",
 ).json()) as {

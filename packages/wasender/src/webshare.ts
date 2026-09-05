@@ -16,11 +16,13 @@ const maximumAttempts = 3;
 type Fetch = (request: Request) => Promise<Response>;
 
 export class WebshareProxySelectionError extends Error {
+  readonly capacityUnavailable: boolean;
   readonly retryable: boolean;
 
-  constructor(retryable: boolean) {
+  constructor(retryable: boolean, capacityUnavailable = false) {
     super("Webshare proxy selection failed");
     this.name = "WebshareProxySelectionError";
+    this.capacityUnavailable = capacityUnavailable;
     this.retryable = retryable;
   }
 }
@@ -286,6 +288,9 @@ export const makeWebshareProxySelector = (
         (left, right) =>
           left.port - right.port || left.id.localeCompare(right.id),
       );
+    if (count === 0) {
+      throw new WebshareProxySelectionError(false, true);
+    }
     if (count !== proxyCount || valid.length !== proxyCount) {
       throw new WebshareProxySelectionError(false);
     }

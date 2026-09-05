@@ -51,13 +51,16 @@ export interface Env {
 }
 
 export default createWorker<Env>({
-  fetch: (request, env, context) => {
-    const handle = () => createProductionHandler(env)(request, context);
-    return new URL(request.url).pathname === "/mcp"
-      ? withPgRequestConnectionScope(handle)
-      : handle();
-  },
-  queue: (batch, env) => createProductionQueueHandler(env)(batch),
+  fetch: (request, env, context) =>
+    withPgRequestConnectionScope(() =>
+      createProductionHandler(env)(request, context),
+    ),
+  queue: (batch, env) =>
+    withPgRequestConnectionScope(() =>
+      createProductionQueueHandler(env)(batch),
+    ),
   scheduled: (controller, env) =>
-    createProductionScheduledHandler(env)(controller),
+    withPgRequestConnectionScope(() =>
+      createProductionScheduledHandler(env)(controller),
+    ),
 });

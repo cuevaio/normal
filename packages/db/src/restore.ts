@@ -56,6 +56,7 @@ export interface RestoreRepository {
     readonly digestsCleared: number;
     readonly revoked: number;
   }>;
+  readonly isReplayComplete: (branchId: string) => Promise<boolean>;
   readonly listObjectDeletions: (
     limit: number,
   ) => Promise<ReadonlyArray<RestoreObjectDeletion>>;
@@ -107,6 +108,13 @@ export const makePgRestoreRepository = (
         deletionKind: row.deletion_kind,
         opaqueEntityId: row.opaque_entity_id,
       }));
+    }),
+  isReplayComplete: (branchId) =>
+    withClient(connectionString, async (client) => {
+      const result = await makeDatabase(client).execute<{ complete: boolean }>(
+        sql`SELECT public.is_restore_replay_complete(${branchId}) AS complete`,
+      );
+      return result[0]?.complete === true;
     }),
   replayDeletion: (input) =>
     withClient(connectionString, async (client) => {

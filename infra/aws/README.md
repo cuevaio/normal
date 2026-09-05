@@ -1,9 +1,12 @@
 # AWS encryption infrastructure
 
 `main.tf` is the OpenTofu entry point and manages `kms.template.json` as one
-CloudFormation stack per environment. In production it also manages the
-purpose-specific `mcp-smoke-credential.template.json` and
-`recovery-game-day.template.json` stacks. The KMS template
+CloudFormation stack per environment. Production also uses the separate
+`content-credential-broker.template.json` and
+`deletion-credential-broker.template.json` stacks to rotate isolated runtime
+sessions, and manages the purpose-specific
+`mcp-smoke-credential.template.json` and `recovery-game-day.template.json`
+stacks. The KMS template
 declares two non-exportable,
 single-Region symmetric KMS keys and six separated IAM authorities. Deploy it
 only in `us-east-1`; both OpenTofu and the template enforce that region.

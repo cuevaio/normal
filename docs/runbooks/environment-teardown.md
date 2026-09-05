@@ -4,13 +4,14 @@ Teardown retires an environment; it is not rollback or a shortcut around
 Personal Account Deletion. Use a dedicated reviewed change and exact remote
 state. Never use `tofu destroy` against an unreviewed plan, a broad directory,
 or the wrong environment. Production teardown requires evidence that external
-onboarding is closed and every Personal Account entered the ordinary terminal
-deletion workflow.
+account admission is closed and every Personal Account entered the ordinary
+terminal deletion workflow.
 
 ## Preconditions
 
-1. Disable onboarding and new MCP Authorization grants, then stop new sends and
-   webhook registration without making provider-control public.
+1. Disable new account admission, new Connection Setup, and new MCP
+   Authorization grants, then stop new sends and webhook registration without
+   making provider-control public.
 2. Complete every Personal Account and Connection Deletion. Confirm provider
    absence, no Deletion Capsule remains, active R2/Neon cleanup finished, and
    the 24-hour escalation queue is empty. Do not release a WhatsApp Number on

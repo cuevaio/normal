@@ -169,7 +169,7 @@ describe("real Wasender text-send adapter", () => {
       }),
       method: "POST",
       redirect: "manual",
-      url: "https://www.wasenderapi.com/api/send-message",
+      url: "https://api.wapi.crafter.run/api/send-message",
     });
     expect(harness.attempts[0]?.headers.get("authorization")).toBe(
       "Bearer session-api-key-do-not-log",

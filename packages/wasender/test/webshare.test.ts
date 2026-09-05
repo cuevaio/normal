@@ -117,6 +117,25 @@ describe("Webshare proxy selector", () => {
     expect(Redacted.value(selected)).toContain("@p.webshare.io:");
   });
 
+  test("classifies an empty paid inventory as unavailable capacity", async () => {
+    const selector = makeWebshareProxySelector(
+      { apiKey },
+      {
+        fetch: fetchList([]),
+      },
+    );
+
+    const failure = await selector
+      .select({ occupiedProxyUrls: [], setupMarker })
+      .catch((cause) => cause);
+
+    expect(failure).toBeInstanceOf(WebshareProxySelectionError);
+    expect((failure as WebshareProxySelectionError).capacityUnavailable).toBe(
+      true,
+    );
+    expect((failure as WebshareProxySelectionError).retryable).toBe(false);
+  });
+
   test("fails closed when the assigned list is not Colombian", async () => {
     const selector = makeWebshareProxySelector(
       { apiKey },

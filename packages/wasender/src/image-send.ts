@@ -5,6 +5,7 @@ import {
   requestWithTimeout,
   uploadFailure,
 } from "./pdf-send";
+import { providerOrigin } from "./provider-origin";
 import {
   deriveIdentityRecipientRouteKeys,
   deriveRecipientRouteKeys,
@@ -26,8 +27,8 @@ import {
   readBoundedBody,
 } from "./text-send";
 
-const uploadUrl = "https://www.wasenderapi.com/api/upload";
-const sendMessageUrl = "https://www.wasenderapi.com/api/send-message";
+const uploadUrl = `${providerOrigin}/api/upload`;
+const sendMessageUrl = `${providerOrigin}/api/send-message`;
 
 /** Internal transport seam used only by focused adapter tests. */
 export const makeWasenderImageSendingWithRuntime = (

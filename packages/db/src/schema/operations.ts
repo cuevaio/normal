@@ -220,6 +220,45 @@ export const restoreReplayAuditInAppPrivate = publicSchema.table(
   ],
 );
 
+export const personalAccountEnvelopeRecoveryOperationsInAppPrivate =
+  publicSchema.table(
+    "personal_account_envelope_recovery_operations",
+    {
+      changeReference: text("change_reference").primaryKey().notNull(),
+      personalAccountId: uuid("personal_account_id").notNull().unique(),
+      sourcePointAt: timestamp("source_point_at", {
+        withTimezone: true,
+        mode: "string",
+      }).notNull(),
+      recoveredKeyVersion: integer("recovered_key_version").notNull(),
+      completedAt: timestamp("completed_at", {
+        withTimezone: true,
+        mode: "string",
+      })
+        .default(sql`statement_timestamp()`)
+        .notNull(),
+    },
+    (table) => [
+      foreignKey({
+        columns: [table.personalAccountId],
+        foreignColumns: [personalAccountsInApp.id],
+        name: "personal_account_envelope_recovery_operations_account_fkey",
+      }).onDelete("cascade"),
+      check(
+        "personal_account_envelope_recovery_operations_reference_check",
+        sql`change_reference ~ '^change_[a-f0-9]{32}$'::text`,
+      ),
+      check(
+        "personal_account_envelope_recovery_operations_key_version_check",
+        sql`recovered_key_version > 0`,
+      ),
+      check(
+        "personal_account_envelope_recovery_operations_time_check",
+        sql`source_point_at <= completed_at`,
+      ),
+    ],
+  );
+
 export const restoreReadinessInAppPrivate = publicSchema.table(
   "restore_readiness",
   {

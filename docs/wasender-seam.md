@@ -15,6 +15,39 @@ Effect capabilities:
 - `WebhookNormalization` turns one authenticated delivery into independently
   processable provider-neutral items.
 
+## Provider origin
+
+The provider origin is `https://api.wapi.crafter.run`, defined once in
+`src/provider-origin.ts` and imported by the six adapter modules that would
+otherwise repeat it as a literal. It is a call target for text, PDF, and image
+sends, Directory reads, and lifecycle control. It is also a validation boundary
+for media downloads and provider upload responses. Those validation boundaries
+are why it is one constant rather than per-module literals: a build whose call
+target and validated host disagree fails mid-operation, at a boundary, rather
+than anywhere a reader would look for it.
+
+The package, its types, and its fixtures keep the Wasender name deliberately.
+This is a change of host, not of protocol. The wire contract is still the one
+Wasender defined, and the adapters still encode its response envelopes, its
+distinct failure shapes, and its two different pagination styles; the
+`api-docs` links throughout these documents remain the reference for that
+contract. Renaming the package would be a separate change with a much larger
+diff and no behavioral content.
+
+There is no runtime override and no environment variable. The origin is a
+constant, so the seam still offers no runtime provider selection and no
+selectable fake, exactly as before.
+
+**Known gap.** `apps/operations-control/src/wasender.ts` still reads
+`https://wasenderapi.com/status` for the dependency-availability signal. That
+page is an Inertia status page exposing 7-day uptime and a scheduled-outage
+feed; the new origin exposes a liveness endpoint (`GET /health`) and no uptime
+history, so there is no equivalent source to read and no honest way to
+synthesize one from a health check. The signal is therefore now measuring a
+provider that is no longer in the request path, and closing this properly means
+sourcing the SLO input from the operator's own monitoring rather than from the
+provider.
+
 The text-send implementation is available through `makeWasenderTextSendingLayer`
 and the PDF and image implementations through `makeWasenderPdfSendingLayer` and
 `makeWasenderImageSendingLayer`; all three fix the provider endpoint and
@@ -24,21 +57,17 @@ implementation is exported as
 production implementations are exposed through their capability-specific
 modules. The seam does not add runtime provider selection or a selectable fake.
 The lifecycle implementation closes over the account-level Provider API
-Credential, a stable locator HMAC key, and a Webshare proxy selector in
-provider-control; none is a capability input or output, and no runtime setting
-can select a fake or alternate provider origin. The selector accepts only the
-complete Colombian Backbone inventory and returns a redacted SOCKS5 URL for one
-unused static ISP proxy.
+Credential and a stable locator HMAC key in provider-control; neither is a
+capability input or output, and no runtime setting can select a fake or alternate
+provider origin. The production composition does not install the dormant
+Webshare selector, so session creation omits `proxy_url`.
 Provider-control publishes that capability only as closed Cloudflare RPC
 methods on its service-binding entrypoint. Each input is validated before the
 credential-backed Layer is loaded, adapter failures cross as content-free
-provider-control results, and lifecycle methods are not HTTP routes. Create,
-proxy-aware reconcile, repair, and reconnect validation run through the one
-named Durable Object representing the deployment's proxy pool so their
-read-then-write allocation cannot race across Worker isolates. The gate stores
-only an opaque setup marker and settlement deadline while a proxy-changing write
-is unresolved; it stores no assignment or credential data. Disconnect, deletion, QR reads, and number
-verification remain direct provider-control RPC methods. The
+provider-control results, and lifecycle methods are not HTTP routes. All
+lifecycle methods call the private production RPC composition directly. The
+dormant proxy-allocation Durable Object class remains only for deployed migration
+compatibility and has no binding. The
 account-level credential never crosses the binding. Because Effect `Redacted`
 instances intentionally do not serialize their hidden values, provider-control
 unwraps only the newly issued per-session authority into the RPC value; the API
@@ -50,12 +79,16 @@ log-safe `Redacted` value so the owning Worker can envelope-encrypt it before a
 per-session Layer uses it.
 
 The lifecycle adapter calls the documented account endpoints at the fixed
-`https://www.wasenderapi.com` origin. Creation uses the deterministic Connection
+`https://api.wapi.crafter.run` origin. Creation uses the deterministic Connection
 Setup marker as the provider name, always disables provider message logging
 and automatic incoming-message reads, and explicitly keeps group webhook
-delivery enabled. The five-minute reconciliation may repair only this complete
-safe webhook configuration through the lifecycle-write policy. It verifies the
-repair with a fresh provider read before reporting the configuration healthy.
+delivery enabled. WAPI persists `ignore_groups` and `read_incoming_messages` as
+disabled by default but omits both properties from session responses, so the
+lifecycle adapter normalizes only absence to `false`; explicit null,
+non-boolean, or enabled values remain invalid or configuration drift. The
+five-minute reconciliation may repair only this complete safe webhook
+configuration through the lifecycle-write policy. It verifies the repair with
+a fresh provider read before reporting the configuration healthy.
 Provider numeric identifiers become
 domain-separated HMAC locators; resolving a locator therefore performs a
 bounded account list instead of exposing or embedding the raw identifier. A QR
@@ -203,12 +236,12 @@ data, URLs, or credentials.
 ## Production media retrieval
 
 The real `MediaRetrieval` Layer uses the per-session authority only for the
-30-second `POST https://www.wasenderapi.com/api/decrypt-media` metadata call.
+30-second `POST https://api.wapi.crafter.run/api/decrypt-media` metadata call.
 The encrypted provider message and the returned one-hour download URL remain
 inside versioned Effect `Redacted` adapter values. The download request never
 forwards the session authority.
 
-`www.wasenderapi.com` is the only approved metadata and download hostname and
+`api.wapi.crafter.run` is the only approved metadata and download hostname and
 is deliberately not configurable. Before every request, including every
 same-host redirect, the adapter resolves both address families through bounded
 DNS-over-HTTPS requests and rejects empty answers or any non-global, private,
@@ -228,7 +261,7 @@ authority and exposes no runtime fake or host override.
 
 The production Directory adapter calls Wasender's documented paginated
 `GET /api/contacts` and `GET /api/groups` endpoints at the fixed
-`https://www.wasenderapi.com` origin. It closes over exactly one redacted
+`https://api.wapi.crafter.run` origin. It closes over exactly one redacted
 session API key and sends that value only as the Bearer credential for those
 per-session requests. No account-level PAT is accepted by the constructor or
 read methods.

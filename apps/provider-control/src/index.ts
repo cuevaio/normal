@@ -15,12 +15,9 @@ import {
   type ProviderControlEnvironment,
 } from "./production";
 
-type Env = ProviderControlEnvironment & {
-  readonly PROVIDER_ALLOCATION_GATE: DurableObjectNamespace<ProviderAllocationGate>;
-};
+type Env = ProviderControlEnvironment;
 
 const allocationQuarantineKey = "allocation-quarantine";
-const allocationSettlementDelayMs = 60_000;
 const allocationReconciliationRetryMs = 30_000;
 
 interface AllocationQuarantine {
@@ -43,10 +40,7 @@ export class ProviderAllocationGate extends DurableObject<Env> {
   private serial = Promise.resolve();
 
   private rpc() {
-    return createProductionRpc(this.env, {
-      release: (setupMarker) => this.release(String(setupMarker)),
-      reserve: (setupMarker) => this.reserve(String(setupMarker)),
-    });
+    return createProductionRpc(this.env);
   }
 
   private async serialized<Value>(operation: () => Promise<Value>) {
@@ -61,19 +55,6 @@ export class ProviderAllocationGate extends DurableObject<Env> {
     } finally {
       release();
     }
-  }
-
-  private async reserve(setupMarker: string) {
-    const existing = await this.ctx.storage.get<AllocationQuarantine>(
-      allocationQuarantineKey,
-    );
-    if (existing !== undefined) throw new Error("allocation already reserved");
-    const quarantine = {
-      reconcileAfter: Date.now() + allocationSettlementDelayMs,
-      setupMarker,
-    } satisfies AllocationQuarantine;
-    await this.ctx.storage.put(allocationQuarantineKey, quarantine);
-    await this.ctx.storage.setAlarm(quarantine.reconcileAfter);
   }
 
   private async release(setupMarker: string) {
@@ -179,20 +160,16 @@ export class ProviderAllocationGate extends DurableObject<Env> {
 }
 
 export default class ProviderControl extends WorkerEntrypoint<Env> {
-  private allocationGate() {
-    return this.env.PROVIDER_ALLOCATION_GATE.getByName("webshare-proxy-pool");
-  }
-
   fetch(request: Request) {
     return createProductionHandler(this.env)(request);
   }
 
   connectSession(request: SessionRequest) {
-    return this.allocationGate().connectSession(request);
+    return createProductionRpc(this.env).connectSession(request);
   }
 
   createSession(request: CreateSessionRequest) {
-    return this.allocationGate().createSession(request);
+    return createProductionRpc(this.env).createSession(request);
   }
 
   deleteSession(request: SessionRequest) {
@@ -212,11 +189,11 @@ export default class ProviderControl extends WorkerEntrypoint<Env> {
   }
 
   reconcileSession(request: ReconcileSessionRequest) {
-    return this.allocationGate().reconcileSession(request);
+    return createProductionRpc(this.env).reconcileSession(request);
   }
 
   repairSessionConfiguration(request: RepairSessionConfigurationRequest) {
-    return this.allocationGate().repairSessionConfiguration(request);
+    return createProductionRpc(this.env).repairSessionConfiguration(request);
   }
 
   verifySessionNumber(request: VerifySessionNumberRequest) {

@@ -148,7 +148,7 @@ const bootstrapRequest = (
   });
 
 describe("Personal Account bootstrap HTTP boundary", () => {
-  test("bootstraps a Clerk-approved User without a second onboarding gate", async () => {
+  test("bootstraps a Clerk-approved User without an additional gate", async () => {
     const harness = makeHarness();
     const response = await harness.handler(bootstrapRequest());
     expect(response.status).toBe(200);

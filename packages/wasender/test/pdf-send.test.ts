@@ -86,7 +86,7 @@ const send = (sending: ReturnType<typeof makeHarness>["sending"]) =>
 describe("real Wasender PDF-send adapter", () => {
   test("uploads raw PDF bytes, keeps the URL internal, and sends once", async () => {
     const temporaryUrl =
-      "https://wasenderapi.com/media/private-temporary-document.pdf";
+      "https://api.wapi.crafter.run/media/private-temporary-document.pdf";
     const harness = makeHarness((attempt) =>
       attempt.url.endsWith("/api/upload")
         ? Response.json({ publicUrl: temporaryUrl, success: true })
@@ -110,7 +110,7 @@ describe("real Wasender PDF-send adapter", () => {
       body: pdf,
       method: "POST",
       redirect: "manual",
-      url: "https://www.wasenderapi.com/api/upload",
+      url: "https://api.wapi.crafter.run/api/upload",
     });
     expect(harness.attempts[0]?.headers.get("content-type")).toBe(
       "application/pdf",
@@ -126,7 +126,7 @@ describe("real Wasender PDF-send adapter", () => {
       }),
       method: "POST",
       redirect: "manual",
-      url: "https://www.wasenderapi.com/api/send-message",
+      url: "https://api.wapi.crafter.run/api/send-message",
     });
     expect(harness.attempts[1]?.headers.get("authorization")).toBe(
       "Bearer session-api-key-do-not-log",
@@ -150,7 +150,7 @@ describe("real Wasender PDF-send adapter", () => {
   test("rejects an upload URL outside the exact Wasender origin", async () => {
     const harness = makeHarness(() =>
       Response.json({
-        publicUrl: "https://www.wasenderapi.com.evil.test/document.pdf",
+        publicUrl: "https://api.wapi.crafter.run.evil.test/document.pdf",
         success: true,
       }),
     );
@@ -184,7 +184,7 @@ describe("real Wasender PDF-send adapter", () => {
     const harness = makeHarness((attempt) =>
       attempt.url.endsWith("/api/upload")
         ? Response.json({
-            publicUrl: "https://www.wasenderapi.com/media/document.pdf",
+            publicUrl: "https://api.wapi.crafter.run/media/document.pdf",
             success: true,
           })
         : Promise.reject(new TypeError("send connection closed")),

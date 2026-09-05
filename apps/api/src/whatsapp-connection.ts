@@ -643,6 +643,7 @@ export const observeConnectionSetup = (
     }
 
     let session = reconciliation.session;
+    let startedConnecting = false;
     if (
       session.connectionState !== "connected" &&
       session.connectionState !== "connecting"
@@ -650,6 +651,7 @@ export const observeConnectionSetup = (
       session = yield* providerValue(
         yield* provider.connect({ session: session.session }),
       );
+      startedConnecting = true;
     }
     if (session.connectionState === "connected") {
       const number = yield* revealSetupNumber(loaded.setup);
@@ -675,6 +677,10 @@ export const observeConnectionSetup = (
         connection: yield* activate(loaded.setup, session),
         outcome: "connected",
       };
+    }
+
+    if (startedConnecting && session.connectionState === "connecting") {
+      return { outcome: "connecting" };
     }
 
     const qr = yield* providerValue(

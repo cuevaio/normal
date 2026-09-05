@@ -1191,11 +1191,16 @@ export const makeWhatsAppConnectionRepository = (
 
 const makePgConnectionProvider = (
   connectionString: string,
+  queryTimeoutMillis?: number,
 ): WhatsAppConnectionConnectionProvider => ({
-  withConnection: (use) => withPgQueryConnection(connectionString, use),
+  withConnection: (use) =>
+    withPgQueryConnection(connectionString, use, queryTimeoutMillis),
 });
 
 export const makePgWhatsAppConnectionRepository = (
   connectionString: string,
+  queryTimeoutMillis?: number,
 ): WhatsAppConnectionRepository =>
-  makeWhatsAppConnectionRepository(makePgConnectionProvider(connectionString));
+  makeWhatsAppConnectionRepository(
+    makePgConnectionProvider(connectionString, queryTimeoutMillis),
+  );

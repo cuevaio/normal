@@ -1,9 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { runRotatingDeploymentSmoke } from "./mcp-smoke-credentials";
+import {
+  DescribeSecretCommand,
+  GetSecretValueCommand,
+  type SecretsManagerClient,
+} from "@aws-sdk/client-secrets-manager";
+import {
+  makeRefreshCredentialStore,
+  runRotatingDeploymentSmoke,
+} from "./mcp-smoke-credentials";
 
 const config = {
   apiOrigin: "https://api.example.test",
-  clientId: "deployment-smoke",
   docsOrigin: "https://docs.example.test",
   refreshSecretId: "production/mcp-smoke-refresh",
   smokeSecret: "smoke-secret",
@@ -11,6 +18,42 @@ const config = {
 };
 
 describe("rotating deployment MCP smoke credentials", () => {
+  test("reads the exact current version instead of a stale default value", async () => {
+    const currentVersionId = "b".repeat(64);
+    const predecessorVersionId = "a".repeat(64);
+    const client = {
+      send: async (command: unknown) => {
+        if (command instanceof DescribeSecretCommand) {
+          return {
+            VersionIdsToStages: {
+              [currentVersionId]: ["AWSCURRENT"],
+              [predecessorVersionId]: ["AWSPREVIOUS"],
+            },
+          };
+        }
+        if (command instanceof GetSecretValueCommand) {
+          return command.input.VersionId === currentVersionId &&
+            command.input.VersionStage === "AWSCURRENT"
+            ? {
+                SecretString: "current-refresh",
+                VersionId: currentVersionId,
+                VersionStages: ["AWSCURRENT"],
+              }
+            : {
+                SecretString: "consumed-predecessor",
+                VersionId: predecessorVersionId,
+                VersionStages: ["AWSPREVIOUS"],
+              };
+        }
+        throw new Error("unexpected command");
+      },
+    } as unknown as SecretsManagerClient;
+
+    const store = makeRefreshCredentialStore(config.refreshSecretId, client);
+
+    expect(await store.read()).toBe("current-refresh");
+  });
+
   test("persists the descendant before using the ephemeral access token", async () => {
     const persisted: string[] = [];
     const events: string[] = [];

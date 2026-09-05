@@ -83,7 +83,6 @@ export const safeTelemetryFieldsByEvent = {
   ],
   "oauth.protocol.request.failed": [...common, "code", "status"],
   "oauth.refresh.completed": [...common, "clientClass", "outcome"],
-  "onboarding_profile.upsert.completed": [...common, "outcome"],
   "personal_account.bootstrap.completed": [...common, "outcome"],
   "personal_account.deletion.completed": [...common, "outcome", "source"],
   "personal_account.deletion.deadline_risk": [

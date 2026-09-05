@@ -80,8 +80,7 @@ export type PreparedConnectionSetup =
       readonly nameMaterial: ConnectionSetupNameMaterial;
       readonly setup: ConnectionSetupRecord;
     }
-  | { readonly outcome: "idempotency_conflict" }
-  | { readonly outcome: "onboarding_profile_required" };
+  | { readonly outcome: "idempotency_conflict" };
 
 export interface PrepareConnectionSetupInput {
   readonly clerkUserId: string;
@@ -123,6 +122,8 @@ export type StartedConnectionSetup =
       readonly outcome:
         | "connection_limit_reached"
         | "idempotency_conflict"
+        | "number_cleanup_in_progress"
+        | "number_deletion_in_progress"
         | "number_unavailable";
     };
 
@@ -823,13 +824,6 @@ export const makeConnectionSetupRepository = (
           return null;
         }
 
-        const eligibility = await db.execute<{ eligible: unknown }>(
-          sql`SELECT public.first_connection_setup_eligible(${input.clerkUserId}) AS eligible`,
-        );
-        if (eligibility[0]?.eligible !== true) {
-          return { outcome: "onboarding_profile_required" as const };
-        }
-
         const binding = await db
           .select({
             created_at: connectionSetupsInApp.createdAt,
@@ -972,10 +966,49 @@ export const makeConnectionSetupRepository = (
         const row = rows[0];
         if (
           row?.outcome === "connection_limit_reached" ||
-          row?.outcome === "idempotency_conflict" ||
-          row?.outcome === "number_unavailable"
+          row?.outcome === "idempotency_conflict"
         ) {
           return { outcome: row.outcome };
+        }
+        if (row?.outcome === "number_unavailable") {
+          const ownedReservation = await db.execute<{
+            cleanup_in_progress: unknown;
+            deletion_in_progress: unknown;
+          }>(sql`
+            SELECT
+              EXISTS (
+                SELECT 1
+                FROM public.whatsapp_number_reservations AS reservations
+                JOIN public.connection_setups AS setups
+                  ON setups.personal_account_id = reservations.personal_account_id
+                 AND setups.id = reservations.connection_setup_id
+                WHERE reservations.personal_account_id = ${input.personalAccountId}
+                  AND reservations.number_token = ${input.numberToken}
+                  AND reservations.released_at IS NULL
+                  AND setups.state IN ('cancelled', 'expired', 'provisioning_failed')
+                  AND setups.cleanup_state <> 'complete'
+              ) AS cleanup_in_progress,
+              EXISTS (
+              SELECT 1
+              FROM public.whatsapp_number_reservations AS reservations
+              JOIN public.whatsapp_connections AS connections
+                ON connections.personal_account_id = reservations.personal_account_id
+               AND connections.connection_setup_id = reservations.connection_setup_id
+              WHERE reservations.personal_account_id = ${input.personalAccountId}
+                AND reservations.number_token = ${input.numberToken}
+                AND reservations.released_at IS NULL
+                AND connections.state = 'deleting'
+              ) AS deletion_in_progress
+          `);
+          const owned = ownedReservation[0];
+          return {
+            outcome:
+              owned?.deletion_in_progress === true
+                ? ("number_deletion_in_progress" as const)
+                : owned?.cleanup_in_progress === true
+                  ? ("number_cleanup_in_progress" as const)
+                  : row.outcome,
+          };
         }
         if (row?.outcome === "created" || row?.outcome === "replay") {
           if (row.outcome === "created") {

@@ -5,6 +5,7 @@ import {
   maximumJsonResponseBytes,
   maximumRetryAfterMs,
 } from "./common";
+import { providerOrigin } from "./provider-origin";
 import {
   deriveIdentityRecipientRouteKeys,
   deriveRecipientRouteKeys,
@@ -22,7 +23,7 @@ import {
   type WasenderTextSendingOptions,
 } from "./session";
 
-const sendMessageUrl = "https://www.wasenderapi.com/api/send-message";
+const sendMessageUrl = `${providerOrigin}/api/send-message`;
 const textEncoder = new TextEncoder();
 
 const contactIdentifier =

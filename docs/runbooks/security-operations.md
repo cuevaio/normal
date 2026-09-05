@@ -5,6 +5,29 @@ incident or change reference. Never print a secret, token, credential hash,
 provider identifier, tenant identifier, plaintext, or ciphertext. Rotate one
 authority at a time, verify its consumer, then revoke the predecessor.
 
+## Restore-damaged Personal Account envelope
+
+Use `Recover production Personal Account envelope` only when an investigated
+restore defect left exactly one active Personal Account with an unavailable
+account-key envelope and at least one retained, non-deleting WhatsApp
+Connection. Supply a canonical source point from before key unavailability and
+an opaque `change_` reference. The workflow creates one guarded non-serving PITR
+branch, verifies the exact Neon project and serving branch, requires the PITR
+account-key version to match every retained Connection and Setup envelope,
+restores only the unavailable account-key envelope in a serializable
+transaction, verifies it before commit, and atomically records the opaque change
+reference so an ambiguous commit can be safely reconciled. The operation retries
+PITR cleanup through a bounded control-plane consistency window. Recovery
+evidence contains an internal Personal Account reference, source point, key
+version, and completion time; it is inaccessible to runtime roles, contains no
+key material, and is removed with Personal Account Deletion. The workflow emits
+no tenant identity, KMS identity, ciphertext, or key material. Any candidate
+ambiguity, branch mismatch, unavailable source envelope, version mismatch,
+concurrent change, or failed in-transaction verification aborts the write.
+If the workflow result is ambiguous, dispatch it again with the exact same
+source point and `change_` reference; the atomically stored evidence makes that
+retry verification-only. Never invent a second reference for the same recovery.
+
 ## Routine secret rotation
 
 Follow the inventory in [deployment configuration](../configuration.md).

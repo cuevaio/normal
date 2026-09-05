@@ -1,4 +1,4 @@
-name: External onboarding launch gate
+name: External product launch gate
 
 on:
   workflow_dispatch:
@@ -48,7 +48,6 @@ jobs:
           API_ORIGIN: ${{ vars.API_ORIGIN }}
           DOCS_ORIGIN: ${{ vars.DOCS_ORIGIN }}
           WEB_ORIGIN: ${{ vars.WEB_ORIGIN }}
-          MCP_SMOKE_CLIENT_ID: ${{ vars.MCP_SMOKE_CLIENT_ID }}
           MCP_SMOKE_REFRESH_SECRET_ID: ${{ vars.MCP_SMOKE_REFRESH_SECRET_ID }}
           SMOKE_CHECK_SECRET: ${{ secrets.SMOKE_CHECK_SECRET }}
           WEEKLY_RECOVERY_EVIDENCE: evidence/weekly/weekly_restore.json

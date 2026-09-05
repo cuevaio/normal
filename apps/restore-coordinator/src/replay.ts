@@ -97,14 +97,28 @@ export const replayRestore = async (input: {
   readonly requireVerification?: boolean;
   readonly repository: RestoreRepository;
 }) => {
-  const [candidates, markerReferences] = await Promise.all([
-    input.repository.begin(
-      input.branchId,
-      input.observedAt,
-      input.requireVerification ?? false,
-    ),
-    Effect.runPromise(input.markers.enumerate()),
-  ]);
+  const candidates = await input.repository.begin(
+    input.branchId,
+    input.observedAt,
+    input.requireVerification ?? false,
+  );
+  if (
+    candidates.length === 0 &&
+    (await input.repository.isReplayComplete(input.branchId))
+  ) {
+    return {
+      apiKeyDigestsCleared: 0,
+      apiKeysRevoked: 0,
+      deletedEntityCount: 0,
+      deletedIdentifierCountRemaining: 0,
+      expiredRecordCount: 0,
+      markerCount: 0,
+      objectDeletionCount: 0,
+      recipientTransitionCount: 0,
+      unresolvedRecipientPrefixCount: 0,
+    };
+  }
+  const markerReferences = await Effect.runPromise(input.markers.enumerate());
   const markers = new Map(
     markerReferences.map((reference) => [reference.markerId, reference]),
   );

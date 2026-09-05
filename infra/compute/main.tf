@@ -331,16 +331,6 @@ resource "cloudflare_worker_version" "provider_control" {
       name = "WASENDER_REFERENCE_SECRET"
       type = "inherit"
     },
-    {
-      name = "WEBSHARE_API_KEY"
-      type = "inherit"
-    },
-    {
-      name        = "PROVIDER_ALLOCATION_GATE"
-      class_name  = "ProviderAllocationGate"
-      script_name = cloudflare_worker.provider_control.name
-      type        = "durable_object_namespace"
-    }
   ]
 }
 
@@ -1094,7 +1084,7 @@ resource "cloudflare_workers_cron_trigger" "api" {
   script_name = cloudflare_worker.api.name
 
   schedules = [
-    { cron = "* * * * *" },
+    { cron = "*/4 * * * *" },
     { cron = "*/5 * * * *" },
     { cron = "0 * * * *" },
   ]

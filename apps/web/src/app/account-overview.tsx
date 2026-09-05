@@ -13,6 +13,7 @@ import {
   type AccountInsights,
   describeAccountInsights,
 } from "./account-insights";
+import { getWhatsAppConnectionCapacity } from "./connection-capacity";
 
 interface OverviewConnection {
   readonly displayName: string;
@@ -202,6 +203,7 @@ export function AccountOverview({
       connection.state,
     ),
   );
+  const connectionCapacity = getWhatsAppConnectionCapacity(connections.length);
 
   return (
     <section aria-label="Account overview" className="flex flex-col gap-6">
@@ -269,7 +271,10 @@ export function AccountOverview({
         <Card>
           <CardHeader>
             <CardTitle>WhatsApp numbers</CardTitle>
-            <CardDescription>{copy.connection}</CardDescription>
+            <CardDescription>
+              Up to {connectionCapacity.limit} WhatsApp Connections.{" "}
+              {copy.connection}
+            </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             {connections.length === 0 ? (
@@ -305,7 +310,11 @@ export function AccountOverview({
               })}
               href="/dashboard/connections"
             >
-              Manage connections
+              {connectionCapacity.reached
+                ? "Manage connections"
+                : connections.length === 0
+                  ? "Add a WhatsApp number"
+                  : "Add or manage numbers"}
             </Link>
           </CardContent>
         </Card>

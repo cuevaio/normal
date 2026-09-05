@@ -69,7 +69,7 @@ describe("real Wasender Directory adapter", () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.url).toBe(
-      "https://www.wasenderapi.com/api/contacts?paginated=true&page=1&limit=100",
+      "https://api.wapi.crafter.run/api/contacts?paginated=true&page=1&limit=100",
     );
     expect(requests[0]?.method).toBe("GET");
     expect(requests[0]?.headers.get("authorization")).toBe(

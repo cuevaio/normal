@@ -1,0 +1,58 @@
+name: Recover production Personal Account envelope
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_point_at:
+        description: Canonical UTC source point before key unavailability
+        required: true
+        type: string
+      change_reference:
+        description: Opaque change reference (change_ plus 32 lowercase hex characters)
+        required: true
+        type: string
+
+concurrency:
+  group: production-operations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Recover sole unavailable account envelope with retained Connections
+        id: recover
+        run: bun scripts/recover-unavailable-account-envelope.ts
+        timeout-minutes: 15
+        env:
+          MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
+          NEON_BRANCH_ID: ${{ vars.NEON_BRANCH_ID }}
+          NEON_PARENT_BRANCH_ID: ${{ secrets.NEON_PARENT_BRANCH_ID }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          NEON_RECOVERY_API_KEY: ${{ secrets.NEON_RECOVERY_API_KEY }}
+          RECOVERY_CHANGE_REFERENCE: ${{ inputs.change_reference }}
+          RECOVERY_SOURCE_POINT_AT: ${{ inputs.source_point_at }}
+      - name: Delete guarded PITR branch
+        if: always() && steps.recover.outcome != 'success'
+        run: bun scripts/recover-unavailable-account-envelope.ts
+        timeout-minutes: 10
+        env:
+          MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
+          NEON_BRANCH_ID: ${{ vars.NEON_BRANCH_ID }}
+          NEON_PARENT_BRANCH_ID: ${{ secrets.NEON_PARENT_BRANCH_ID }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          NEON_RECOVERY_API_KEY: ${{ secrets.NEON_RECOVERY_API_KEY }}
+          RECOVERY_CHANGE_REFERENCE: ${{ inputs.change_reference }}
+          RECOVERY_MODE: cleanup
+          RECOVERY_SOURCE_POINT_AT: ${{ inputs.source_point_at }}

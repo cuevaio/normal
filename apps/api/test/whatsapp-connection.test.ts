@@ -67,7 +67,9 @@ const makeHarness = (
     readonly disconnectFailureState?: "connected" | "degraded" | "disconnected";
     readonly identityValid?: boolean;
     readonly initialFailureCode?: string;
+    readonly initialProviderConnecting?: boolean;
     readonly numberVerification?: "match" | "mismatch" | "unverified";
+    readonly qrUnavailableImmediatelyAfterConnect?: boolean;
     readonly initialSetupState?:
       | "activated"
       | "pending"
@@ -97,6 +99,7 @@ const makeHarness = (
     stateChangedAt: string;
   }> = [];
   let providerConnected = false;
+  let providerConnecting = options.initialProviderConnecting ?? false;
   let disconnectFailed = false;
   let lifecycleClaimId: string | null = null;
   let setupState = options.initialSetupState ?? "provisioned";
@@ -298,6 +301,7 @@ const makeHarness = (
     connect: () =>
       Effect.sync(() => {
         providerCalls.push("connectSession");
+        providerConnecting = true;
         return {
           ok: true as const,
           value: lifecycleSession,
@@ -330,7 +334,24 @@ const makeHarness = (
       }),
     getQrCode: () =>
       Effect.sync(() => {
+        const immediatelyAfterConnect =
+          providerCalls.at(-1) === "connectSession";
         providerCalls.push("getQrCode");
+        if (
+          options.qrUnavailableImmediatelyAfterConnect === true &&
+          immediatelyAfterConnect
+        ) {
+          return {
+            error: {
+              _tag: "ProviderControlFailure" as const,
+              code: "invalid_response" as const,
+              operation: "safe-read" as const,
+              retryAfterMs: null,
+              retryDecision: "do_not_retry" as const,
+            },
+            ok: false as const,
+          };
+        }
         return {
           ok: true as const,
           value: {
@@ -369,7 +390,9 @@ const makeHarness = (
                 ? disconnectFailed
                   ? (options.disconnectFailureState ?? "degraded")
                   : ("connected" as const)
-                : ("disconnected" as const),
+                : providerConnecting
+                  ? ("connecting" as const)
+                  : ("disconnected" as const),
             },
           },
         };
@@ -497,6 +520,7 @@ const makeHarness = (
     reconciliationInputs,
     scanQr: () => {
       providerConnected = true;
+      providerConnecting = false;
     },
   };
 };
@@ -523,7 +547,7 @@ const renameRequest = (name: unknown) =>
 
 describe("WhatsApp Connection HTTP boundary", () => {
   test("streams current QR bytes without retaining or emitting them", async () => {
-    const harness = makeHarness();
+    const harness = makeHarness({ initialProviderConnecting: true });
 
     const response = await harness.handler(request(qrEndpoint));
 
@@ -536,15 +560,33 @@ describe("WhatsApp Connection HTTP boundary", () => {
       outcome: "qr_available",
       service: "api",
     });
-    expect(harness.providerCalls).toEqual([
-      "reconcileSession",
-      "connectSession",
-      "getQrCode",
-    ]);
+    expect(harness.providerCalls).toEqual(["reconcileSession", "getQrCode"]);
     expect(JSON.stringify(harness.events)).not.toContain("<svg");
     expect(JSON.stringify(harness.events)).not.toContain("cst_");
     expect(harness.connections).toEqual([]);
     expect(harness.cleanupEnqueues).toEqual([]);
+  });
+
+  test("waits for the next observation before reading QR data after starting linking", async () => {
+    const harness = makeHarness({
+      qrUnavailableImmediatelyAfterConnect: true,
+    });
+
+    const connecting = await harness.handler(request(qrEndpoint));
+    const qr = await harness.handler(request(qrEndpoint));
+
+    expect(connecting.status).toBe(202);
+    expect(connecting.headers.get("x-connection-setup-state")).toBe(
+      "connecting",
+    );
+    expect(qr.status).toBe(200);
+    expect(qr.headers.get("content-type")).toBe("image/svg+xml");
+    expect(harness.providerCalls).toEqual([
+      "reconcileSession",
+      "connectSession",
+      "reconcileSession",
+      "getQrCode",
+    ]);
   });
 
   test("activates once from trusted connected state and lists only safe fields", async () => {

@@ -39,7 +39,8 @@ type PersistedSetupState =
 const makeHarness = (
   options: {
     readonly identityValid?: boolean;
-    readonly onboardingProfileRequired?: boolean;
+    readonly numberCleanupInProgress?: boolean;
+    readonly numberDeletionInProgress?: boolean;
     readonly persistenceFailure?: boolean;
   } = {},
 ) => {
@@ -123,9 +124,6 @@ const makeHarness = (
                   }
                 : { outcome: "idempotency_conflict" as const };
             }
-            if (options.onboardingProfileRequired) {
-              return { outcome: "onboarding_profile_required" as const };
-            }
             return {
               accountKey,
               outcome: "unbound" as const,
@@ -148,7 +146,13 @@ const makeHarness = (
                 : { outcome: "idempotency_conflict" as const };
             }
             if (reservations.has(token)) {
-              return { outcome: "number_unavailable" as const };
+              return {
+                outcome: options.numberDeletionInProgress
+                  ? ("number_deletion_in_progress" as const)
+                  : options.numberCleanupInProgress
+                    ? ("number_cleanup_in_progress" as const)
+                    : ("number_unavailable" as const),
+              };
             }
             if (retainedConnections + bindings.size >= 3) {
               return { outcome: "connection_limit_reached" as const };
@@ -378,23 +382,6 @@ describe("Connection Setup HTTP boundary", () => {
     expect(harness.encryptedNumbers).toEqual(["+15550123456"]);
   });
 
-  test("rejects the first Connection Setup when no onboarding profile exists", async () => {
-    const harness = makeHarness({ onboardingProfileRequired: true });
-    const response = await harness.handler(setupRequest("+15550123456"));
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({
-      error: "onboarding_profile_required",
-    });
-    expect(harness.bindings).toHaveLength(0);
-    expect(harness.events).toEqual([
-      {
-        event: "connection_setup.start.completed",
-        outcome: "onboarding_profile_required",
-        service: "api",
-      },
-    ]);
-  });
-
   test("lets only the owning User idempotently cancel through the signed-in HTTP boundary", async () => {
     const harness = makeHarness();
     await harness.handler(setupRequest("+15550123456"));
@@ -464,6 +451,34 @@ describe("Connection Setup HTTP boundary", () => {
     expect(limited.status).toBe(409);
     expect(await limited.json()).toEqual({
       error: "connection_limit_reached",
+    });
+  });
+
+  test("distinguishes cleanup of the User's deleted Connection from a globally unavailable number", async () => {
+    const harness = makeHarness({ numberDeletionInProgress: true });
+    await harness.handler(setupRequest("+15550123456"));
+
+    const response = await harness.handler(
+      setupRequest("+15550123456", "223456789012345678901"),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "whatsapp_number_deletion_in_progress",
+    });
+  });
+
+  test("distinguishes cleanup of the User's previous Setup from a globally unavailable number", async () => {
+    const harness = makeHarness({ numberCleanupInProgress: true });
+    await harness.handler(setupRequest("+15550123456"));
+
+    const response = await harness.handler(
+      setupRequest("+15550123456", "223456789012345678901"),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "whatsapp_number_cleanup_in_progress",
     });
   });
 

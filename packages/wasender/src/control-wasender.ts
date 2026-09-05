@@ -20,12 +20,12 @@ import {
   type SessionReconciliation,
   type SetupMarker,
 } from "./control";
+import { providerOrigin } from "./provider-origin";
 import {
   WebshareProxySelectionError,
   type WebshareProxySelector,
 } from "./webshare";
 
-const providerOrigin = "https://www.wasenderapi.com";
 const safeReadAttemptTimeoutMs = 10_000;
 const safeReadMaximumAttempts = 3;
 const safeReadTotalTimeoutMs = 25_000;
@@ -198,12 +198,21 @@ const parseProviderSession = (
   return {
     apiKey: typeof apiKey === "string" && apiKey.length > 0 ? apiKey : null,
     id: id as number,
-    ignoreGroups: typeof ignoreGroups === "boolean" ? ignoreGroups : null,
+    ignoreGroups:
+      ignoreGroups === undefined
+        ? false
+        : typeof ignoreGroups === "boolean"
+          ? ignoreGroups
+          : null,
     logMessages: typeof logMessages === "boolean" ? logMessages : null,
     name,
     proxyUrl: typeof proxyUrl === "string" ? proxyUrl : null,
     readIncomingMessages:
-      typeof readIncomingMessages === "boolean" ? readIncomingMessages : null,
+      readIncomingMessages === undefined
+        ? false
+        : typeof readIncomingMessages === "boolean"
+          ? readIncomingMessages
+          : null,
     status,
     webhookEnabled: typeof webhookEnabled === "boolean" ? webhookEnabled : null,
     webhookEvents: Array.isArray(webhookEvents)
@@ -776,10 +785,18 @@ export const makeWasenderSessionLifecycle = (
       }
       if (operation === "safe-read") {
         throw safeFailure(
-          cause instanceof WebshareProxySelectionError && !cause.retryable
+          cause instanceof WebshareProxySelectionError &&
+            !cause.retryable &&
+            !cause.capacityUnavailable
             ? "integrity_failed"
             : "unavailable",
         );
+      }
+      if (
+        cause instanceof WebshareProxySelectionError &&
+        cause.capacityUnavailable
+      ) {
+        throw writeFailure("source_rejected", false);
       }
       if (cause instanceof WebshareProxySelectionError && !cause.retryable) {
         throw writeFailure("integrity_failed", false);

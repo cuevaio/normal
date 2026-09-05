@@ -140,7 +140,7 @@ The Worker runtime suite proves:
 - five-minute safe-read connection and webhook reconciliation with
   evidence-based Ingestion Gap opening, recovery closure, and stale-snapshot
   suppression;
-- minute-scheduled orphan discovery from real R2 metadata, republishing through
+- four-minute-scheduled orphan discovery from real R2 metadata, republishing through
   the Queue binding, convergence with later provider redelivery, jittered
   transient retries, and DLQ acknowledgment after Ingestion Gap persistence;
 - opaque incident alerting, audited immutable replay through the ordinary
@@ -148,6 +148,7 @@ The Worker runtime suite proves:
   non-reversible Webhook Item identities;
 - provider-control service-binding calls;
 - scheduled-handler effects through the supported runtime helpers;
+- branch-specific warm-isolate restore completion suppression;
 - an OAuth authorization redirect over signed-in HTTP;
 - MCP tool discovery over HTTP JSON-RPC;
 - `send_image` authorization and Client Confirmation metadata, strict image
@@ -203,6 +204,18 @@ Run the coordinated suite:
 ```sh
 bun run test
 ```
+
+This local command runs the complete database suite in one process. The public
+API release gate invokes it and then reruns the complete database suite for its
+separate migrated-Postgres attestation. Ordinary pull-request and `main` CI
+preserve the same coverage while reducing elapsed time: `bun run
+test:without-db` runs the script and non-database workspace suites, and four
+required matrix jobs run `packages/db` with Bun's `--shard` option. Automatic
+production deployment requires the whole `CI` workflow to succeed, so a missing
+or failed database shard blocks it. The matrix uses more total runner-minutes
+in exchange for a shorter wall-clock critical path; it does not change the
+migrated PGlite database, restricted runtime roles, RLS policies, or per-test
+isolation.
 
 The API public-boundary suite can be run alone with:
 

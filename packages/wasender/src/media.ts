@@ -9,6 +9,7 @@ import {
   parseDownloadMediaSource,
   parseEncryptedMediaSource,
 } from "./media-source";
+import { providerMediaHostname, providerOrigin } from "./provider-origin";
 import {
   type GuardedMediaDownload,
   guardedMediaDownloadPolicy,
@@ -17,9 +18,16 @@ import {
   mediaDecryptMetadataPolicy,
 } from "./session";
 
-export const wasenderMediaHostname = "www.wasenderapi.com";
-export const wasenderMediaDecryptEndpoint =
-  "https://www.wasenderapi.com/api/decrypt-media";
+/**
+ * The host a download may come from, and the metadata endpoint.
+ *
+ * `validateDownloadUrl` pins the hostname and re-pins it on every redirect hop, so this must
+ * track the origin the adapter actually calls. Deriving both from one constant is what keeps
+ * that true: a build whose call target and validated host disagree fails mid-download, at a
+ * boundary, instead of anywhere a reader would look for it.
+ */
+export const wasenderMediaHostname = providerMediaHostname;
+export const wasenderMediaDecryptEndpoint = `${providerOrigin}/api/decrypt-media`;
 
 const dnsOverHttpsEndpoint = "https://cloudflare-dns.com/dns-query";
 const maximumDnsResponseBytes = 65_536;

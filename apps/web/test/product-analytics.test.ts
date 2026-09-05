@@ -61,8 +61,7 @@ describe("product analytics boundary", () => {
     });
 
     const allowed: ProductAnalyticsEvent = {
-      event: "onboarding_stage_viewed",
-      stage: "welcome",
+      event: "connection_setup_started",
     };
     expect(isAllowlistedProductAnalyticsEvent(allowed)).toBe(true);
     expect(
@@ -84,7 +83,6 @@ describe("product analytics boundary", () => {
         phase: "start_to_code_observed",
       }),
     ).toBe(true);
-
     captureProductAnalyticsEvent(allowed);
     captureProductAnalyticsEvent({
       durationMs: 320,
@@ -92,11 +90,11 @@ describe("product analytics boundary", () => {
       phase: "start_to_code_observed",
     });
     captureProductAnalyticsEvent({
-      event: "onboarding_stage_abandoned",
-      stage: "connection_setup",
+      event: "connection_setup_completed",
+      outcome: "failed",
     });
     captureProductAnalyticsEvent({
-      event: "onboarding_completed",
+      event: "connection_setup_started",
       email: "user@example.test",
     } as ProductAnalyticsEvent);
 
@@ -104,10 +102,9 @@ describe("product analytics boundary", () => {
     expect(requests[0]?.url).toBe("https://us.i.posthog.com/capture/");
     expect(requests[0]?.body).toMatchObject({
       api_key: "phc_example",
-      event: "onboarding_stage_viewed",
+      event: "connection_setup_started",
       properties: {
         $process_person_profile: false,
-        stage: "welcome",
       },
     });
     expect(requests[1]?.body).toMatchObject({
@@ -130,15 +127,15 @@ describe("product analytics boundary", () => {
     expect(body.properties?.distinct_id).toBeString();
     expect(body.properties?.distinct_id).toBe(body.properties?.$session_id);
     expect(requests[2]?.body).toMatchObject({
-      event: "onboarding_stage_abandoned",
-      properties: { stage: "connection_setup" },
+      event: "connection_setup_completed",
+      properties: { outcome: "failed" },
     });
     expect(JSON.stringify(requests)).not.toMatch(
       /clerk|email|personal_account|whatsapp|phone|message|qr|provider/iu,
     );
   });
 
-  test("swallows capture failures so onboarding can continue", () => {
+  test("swallows capture failures so Connection Setup can continue", () => {
     globalThis.fetch = (() => {
       throw new Error("analytics unavailable");
     }) as unknown as typeof fetch;
@@ -147,11 +144,11 @@ describe("product analytics boundary", () => {
       projectKey: "phc_example",
     });
     expect(() =>
-      captureProductAnalyticsEvent({ event: "onboarding_completed" }),
+      captureProductAnalyticsEvent({ event: "connection_setup_started" }),
     ).not.toThrow();
   });
 
-  test("allowlists the prominent ChatGPT onboarding action without identifying properties", async () => {
+  test("allowlists opening Connection Setup without identifying properties", async () => {
     const requests: Array<unknown> = [];
     globalThis.fetch = ((_input, init) => {
       requests.push(JSON.parse(String(init?.body)) as unknown);
@@ -163,7 +160,7 @@ describe("product analytics boundary", () => {
     });
     const action: ProductAnalyticsEvent = {
       event: "feature_used",
-      feature: "onboarding_chatgpt_opened",
+      feature: "connection_setup_opened",
     };
 
     expect(isAllowlistedProductAnalyticsEvent(action)).toBe(true);
@@ -182,7 +179,7 @@ describe("product analytics boundary", () => {
     expect(requests[0]).toMatchObject({
       event: "feature_used",
       properties: {
-        feature: "onboarding_chatgpt_opened",
+        feature: "connection_setup_opened",
         $process_person_profile: false,
       },
     });
@@ -197,7 +194,7 @@ describe("product analytics boundary", () => {
       requests += 1;
       return Promise.resolve(new Response(null, { status: 204 }));
     }) as unknown as typeof fetch;
-    captureProductAnalyticsEvent({ event: "onboarding_security_reached" });
+    captureProductAnalyticsEvent({ event: "connection_setup_started" });
     expect(requests).toBe(0);
   });
 });

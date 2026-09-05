@@ -77,8 +77,8 @@ its locked marker is durable and every WhatsApp Connection row has completed
 Connection Deletion. The restricted purge function transforms each ordinary
 Activity Log into a Security Record containing only category, allowlisted
 client class, outcome, counts, timing, and latency, then deletes the Personal
-Account row so its Clerk identity mapping, onboarding profile, API Keys, and
-all remaining tenant rows cascade away. MCP events keep their allowlisted
+Account row so its Clerk identity mapping, API Keys, and all remaining tenant
+rows cascade away. MCP events keep their allowlisted
 client class; API events use `api_key`. Security Records keep the source log's
 original 90-day expiry and must not retain an API Key, User, Personal Account,
 Connection, network, message, contact, provider, credential, or content
@@ -163,8 +163,17 @@ provider-control, OAuth, or public-route binding.
 3. Scan the restored branch's opaque Personal Account and WhatsApp Connection
    identifiers, derive each expected marker ID with the dedicated HMAC, and
    match those IDs against the enumerated marker set. Marker bodies deliberately
-   contain no reversible identifier. Make every match's key unavailable first,
-   then re-purge its restored rows and active object references.
+   contain no reversible identifier. Make only the matched entity's key
+   unavailable first: a Connection marker must preserve the Personal Account
+   key, while a Personal Account marker removes it. Then re-purge the matched
+   rows and active object references. If a Connection row is removed before
+   current provider cleanup finishes, retain its opaque marker-to-Setup
+   Deletion Continuation. The deletion coordinator must keep reconciling the
+   existing capsule and may release the WhatsApp Number reservation and remove
+   the Setup only after provider absence is confirmed. A non-serving restored
+   branch retains the continuation without provider authority; if promoted to
+   serving, its deletion coordinator consumes the continuation. This terminal,
+   inaccessible state does not block restore readiness.
 4. Enumerate every `recipient-transitions/v1/` object for each restored
    recipient identity. Scan restored WhatsApp Directory contacts and groups,
    WhatsApp Conversations, and existing exclusion rows, derive each journal
@@ -206,6 +215,14 @@ provider-control, OAuth, or public-route binding.
 9. Enable verification access, and later traffic, only after every marker,
    recipient transition, expiry, API Key invalidation, and HMAC-rotation
    operation succeeds.
+
+After the branch reaches `ready`, `awaiting_verification`, or `drill_verified`,
+scheduled restore-coordinator runs for that same branch must return no replay
+candidates. New markers created while the branch is serving belong to the live
+deletion path and must not reopen restore replay. A warm coordinator isolate may
+remember successful completion for that exact branch and skip later scheduled
+checks. This process-local optimization is not readiness evidence; cold isolates
+and changed branch identities always recheck Neon.
 
 Do not sample marker or recipient transition replay, skip a malformed object,
 substitute a database copy of marker or journal state, or unlock/delete either

@@ -155,6 +155,67 @@ describe("production OAuth boundary", () => {
     );
   });
 
+  test("admits the deployment smoke client on an ephemeral loopback port", async () => {
+    const response = await createProductionHandler(validEnvironment())(
+      new Request(
+        authorizationUrl({
+          client_id: "deployment-smoke",
+          redirect_uri: "http://127.0.0.1:54321/oauth/callback",
+          scope: "connections:read",
+        }),
+        { redirect: "manual" },
+      ),
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toContain("/oauth/consent");
+  });
+
+  test("rejects elevated scopes for the deployment smoke client", async () => {
+    const response = await createProductionHandler(validEnvironment())(
+      new Request(
+        authorizationUrl({
+          client_id: "deployment-smoke",
+          redirect_uri: "http://127.0.0.1:54321/oauth/callback",
+          scope: "connections:read messages:send",
+        }),
+        { redirect: "manual" },
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  test.each([
+    "http://127.0.0.1/oauth/callback",
+    "http://127.0.0.1:0/oauth/callback",
+    "http://127.1:54321/oauth/callback",
+    "http://2130706433:54321/oauth/callback",
+    "http://0x7f000001:54321/oauth/callback",
+    "http://localhost:54321/oauth/callback",
+    "http://127.0.0.1:54321/other",
+    "http://127.0.0.1:54321/oauth/callback?next=attacker",
+    "https://127.0.0.1:54321/oauth/callback",
+  ])(
+    "rejects an unregistered deployment smoke redirect at %s",
+    async (redirectUri) => {
+      const response = await createProductionHandler(validEnvironment())(
+        new Request(
+          authorizationUrl({
+            client_id: "deployment-smoke",
+            redirect_uri: redirectUri,
+            scope: "connections:read",
+          }),
+          { redirect: "manual" },
+        ),
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.headers.get("location")).toBeNull();
+    },
+  );
+
   test.each([
     "https://chatgpt.com/connector/oauth/djePJ1RTfjI5",
     "https://chatgpt.com/connector_platform_oauth_redirect",

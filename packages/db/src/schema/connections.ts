@@ -421,3 +421,34 @@ export const deletedWhatsappConnectionHandlesInAppPrivate = publicSchema.table(
     ),
   ],
 );
+
+export const restoreConnectionDeletionContinuationsInAppPrivate =
+  publicSchema.table(
+    "restore_connection_deletion_continuations",
+    {
+      deletionMarkerId: text("deletion_marker_id").primaryKey().notNull(),
+      personalAccountId: uuid("personal_account_id").notNull(),
+      connectionSetupId: text("connection_setup_id").notNull(),
+      requestedAt: timestamp("requested_at", {
+        withTimezone: true,
+        mode: "string",
+      }).notNull(),
+    },
+    (table) => [
+      foreignKey({
+        columns: [table.deletionMarkerId],
+        foreignColumns: [
+          deletedWhatsappConnectionHandlesInAppPrivate.deletionMarkerId,
+        ],
+        name: "restore_connection_deletion_continuations_marker_fkey",
+      }).onDelete("cascade"),
+      foreignKey({
+        columns: [table.personalAccountId, table.connectionSetupId],
+        foreignColumns: [
+          connectionSetupsInApp.personalAccountId,
+          connectionSetupsInApp.id,
+        ],
+        name: "restore_connection_deletion_continuations_setup_fkey",
+      }).onDelete("cascade"),
+    ],
+  );

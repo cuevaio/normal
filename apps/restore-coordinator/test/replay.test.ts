@@ -68,6 +68,7 @@ describe("restore replay", () => {
             opaqueEntityId: "10000000-0000-4000-8000-000000000001",
           },
         ],
+        isReplayComplete: async () => false,
         replayDeletion: async () => {
           calls.push("replay-marker");
           return true;
@@ -123,6 +124,37 @@ describe("restore replay", () => {
     ]);
   });
 
+  test("does no restore work after the same branch reaches a terminal state", async () => {
+    const enumerate = vi.fn(() => Effect.succeed([]));
+    const result = await replayRestore({
+      branchId: "br-serving",
+      environment: "production",
+      handleObjectDeletion: vi.fn(),
+      hmacSecret: Redacted.make("ab".repeat(32)),
+      markers: { create: vi.fn(), enumerate },
+      observedAt: "2026-08-03T12:05:00.000Z",
+      recipientHmacSecret: Redacted.make("cd".repeat(32)),
+      recipientJournal: emptyJournal,
+      repository: {
+        begin: async () => [],
+        isReplayComplete: async () => true,
+      } as unknown as RestoreRepository,
+    });
+
+    expect(result).toEqual({
+      apiKeyDigestsCleared: 0,
+      apiKeysRevoked: 0,
+      deletedEntityCount: 0,
+      deletedIdentifierCountRemaining: 0,
+      expiredRecordCount: 0,
+      markerCount: 0,
+      objectDeletionCount: 0,
+      recipientTransitionCount: 0,
+      unresolvedRecipientPrefixCount: 0,
+    });
+    expect(enumerate).not.toHaveBeenCalled();
+  });
+
   test("replays every ordered WhatsApp Recipient Exclusion transition it finds", async () => {
     const recipientSecret = Redacted.make("cd".repeat(32));
     const prefix = await deriveRecipientJournalPrefix(
@@ -162,6 +194,7 @@ describe("restore replay", () => {
     const recordedPrefixes: Array<string> = [];
     const repository = {
       begin: async () => [],
+      isReplayComplete: async () => false,
       complete: async () => undefined,
       finishObjectDeletion: async () => undefined,
       invalidateApiKeys: async () => ({ digestsCleared: 0, revoked: 0 }),
@@ -226,6 +259,7 @@ describe("restore replay", () => {
     const recordedPrefixes: Array<string> = [];
     const repository = {
       begin: async () => [],
+      isReplayComplete: async () => false,
       complete: async () => undefined,
       finishObjectDeletion: async () => undefined,
       invalidateApiKeys: async () => ({ digestsCleared: 0, revoked: 0 }),
@@ -293,6 +327,7 @@ describe("restore replay", () => {
     let completed = false;
     const repository = {
       begin: async () => [],
+      isReplayComplete: async () => false,
       complete: async () => {
         completed = true;
       },
@@ -336,6 +371,7 @@ describe("restore replay", () => {
     let completed = false;
     const repository = {
       begin: async () => [],
+      isReplayComplete: async () => false,
       complete: async () => {
         completed = true;
       },
@@ -375,6 +411,7 @@ describe("restore replay", () => {
     let completed = false;
     const repository = {
       begin: async () => [],
+      isReplayComplete: async () => false,
       complete: async () => {
         completed = true;
       },

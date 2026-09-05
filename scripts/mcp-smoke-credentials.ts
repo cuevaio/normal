@@ -1,4 +1,5 @@
 import {
+  DescribeSecretCommand,
   GetSecretValueCommand,
   PutSecretValueCommand,
   SecretsManagerClient,
@@ -8,8 +9,13 @@ import {
   runDeploymentSmoke,
 } from "./deployment-smoke";
 
-interface RefreshCredentialStore {
+export interface RefreshCredentialStore {
   readonly read: () => Promise<string>;
+  readonly persist: (credential: string) => Promise<void>;
+}
+
+export interface BootstrapRefreshCredentialStore {
+  readonly assertAvailable: () => Promise<void>;
   readonly persist: (credential: string) => Promise<void>;
 }
 
@@ -21,7 +27,6 @@ interface Dependencies {
 
 export interface RotatingDeploymentSmokeConfig {
   readonly apiOrigin: string;
-  readonly clientId: string;
   readonly docsOrigin: string;
   readonly refreshSecretId: string;
   readonly smokeSecret: string;
@@ -29,6 +34,7 @@ export interface RotatingDeploymentSmokeConfig {
 }
 
 const remediation = "reauthorize the deployment-smoke MCP Authorization";
+const clientId = "deployment-smoke";
 
 const fail = (outcome: string): never => {
   throw new Error(
@@ -36,8 +42,12 @@ const fail = (outcome: string): never => {
   );
 };
 
-const makeStore = (secretId: string): RefreshCredentialStore => {
-  const client = new SecretsManagerClient({ region: "us-east-1" });
+export const makeRefreshCredentialStore = (
+  secretId: string,
+  client = new SecretsManagerClient({ region: "us-east-1" }),
+): RefreshCredentialStore & BootstrapRefreshCredentialStore => {
+  const describe = () =>
+    client.send(new DescribeSecretCommand({ SecretId: secretId }));
   const versionId = async (credential: string) =>
     Array.from(
       new Uint8Array(
@@ -49,11 +59,31 @@ const makeStore = (secretId: string): RefreshCredentialStore => {
       (byte) => byte.toString(16).padStart(2, "0"),
     ).join("");
   return {
+    assertAvailable: async () => {
+      await describe();
+    },
     read: async () => {
+      const description = await describe();
+      const currentVersionIds = Object.entries(
+        description.VersionIdsToStages ?? {},
+      )
+        .filter(([, stages]) => stages.includes("AWSCURRENT"))
+        .map(([versionId]) => versionId);
+      if (currentVersionIds.length !== 1) return fail("store unavailable");
+      const currentVersionId = currentVersionIds[0];
       const response = await client.send(
-        new GetSecretValueCommand({ SecretId: secretId }),
+        new GetSecretValueCommand({
+          SecretId: secretId,
+          VersionId: currentVersionId,
+          VersionStage: "AWSCURRENT",
+        }),
       );
-      if (!response.SecretString) return fail("store unavailable");
+      if (
+        response.VersionId !== currentVersionId ||
+        !response.VersionStages?.includes("AWSCURRENT") ||
+        !response.SecretString
+      )
+        return fail("store unavailable");
       return response.SecretString;
     },
     persist: async (credential) => {
@@ -94,7 +124,8 @@ export const runRotatingDeploymentSmoke = async (
   dependencies: Dependencies = {},
 ) => {
   const apiOrigin = new URL(config.apiOrigin).origin;
-  const store = dependencies.store ?? makeStore(config.refreshSecretId);
+  const store =
+    dependencies.store ?? makeRefreshCredentialStore(config.refreshSecretId);
   const fetch =
     dependencies.fetch ??
     ((input: string, init?: RequestInit) => globalThis.fetch(input, init));
@@ -111,7 +142,7 @@ export const runRotatingDeploymentSmoke = async (
   try {
     response = await fetch(`${apiOrigin}/oauth/token`, {
       body: new URLSearchParams({
-        client_id: config.clientId,
+        client_id: clientId,
         grant_type: "refresh_token",
         refresh_token: current,
         resource: `${apiOrigin}/mcp`,
@@ -149,7 +180,6 @@ const required = (name: string): string => {
 if (import.meta.main) {
   runRotatingDeploymentSmoke({
     apiOrigin: required("SMOKE_API_ORIGIN"),
-    clientId: required("SMOKE_MCP_CLIENT_ID"),
     docsOrigin: required("SMOKE_DOCS_ORIGIN"),
     refreshSecretId: required("SMOKE_MCP_REFRESH_SECRET_ID"),
     smokeSecret: required("SMOKE_CHECK_SECRET"),

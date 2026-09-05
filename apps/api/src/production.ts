@@ -32,14 +32,12 @@ import { makePgMcpAuthorizationRepository } from "@whatsapp-mcp/db/mcp-authoriza
 import { makePgMcpToolRepository } from "@whatsapp-mcp/db/mcp-tool";
 import { makePgMessageRetentionRepository } from "@whatsapp-mcp/db/message-retention";
 import { makePgMessageSearchRepository } from "@whatsapp-mcp/db/message-search";
-import { makePgOnboardingProfileRepository } from "@whatsapp-mcp/db/onboarding-profile";
 import {
   makePgPersonalAccountRepository,
   type PersonalAccountRepository,
 } from "@whatsapp-mcp/db/personal-account";
 import { makePgRecipientExclusionRepository } from "@whatsapp-mcp/db/recipient-exclusion";
 import { recordRecoverySourcePoint } from "@whatsapp-mcp/db/recovery-source-point";
-import { withPgRequestConnectionScope } from "@whatsapp-mcp/db/request-connection";
 import {
   type AtomicSendRepository,
   makePgAtomicSendRepositoryFromConnectionString,
@@ -208,13 +206,6 @@ import {
   createOAuthHandler,
   loadOAuthConfiguration,
 } from "./oauth";
-import {
-  createOnboardingProfileHandler,
-  isOnboardingProfileRequest,
-  OnboardingProfileClock,
-  OnboardingProfilePersistence,
-  OnboardingProfilePersistenceError,
-} from "./onboarding-profile";
 import {
   createPersonalAccountHandler,
   isPersonalAccountRequest,
@@ -888,51 +879,6 @@ const messageRetentionLayer = (environment: ApiEnvironment) =>
             ).updateForUser(input);
           },
           catch: () => new MessageRetentionPersistenceError(),
-        }),
-    }),
-  );
-
-const onboardingProfileLayer = (environment: ApiEnvironment) =>
-  Layer.mergeAll(
-    Layer.succeed(OnboardingProfileClock, {
-      now: Effect.sync(() => new Date().toISOString()),
-    }),
-    Layer.succeed(OnboardingProfilePersistence, {
-      get: (input) =>
-        Effect.tryPromise({
-          try: () => {
-            const connectionString = environment.HYPERDRIVE?.connectionString;
-            if (typeof connectionString !== "string")
-              throw new Error("database unavailable");
-            return makePgOnboardingProfileRepository(
-              connectionString,
-            ).getForUser(input.clerkUserId);
-          },
-          catch: () => new OnboardingProfilePersistenceError(),
-        }),
-      markSecurityCompleted: (input) =>
-        Effect.tryPromise({
-          try: () => {
-            const connectionString = environment.HYPERDRIVE?.connectionString;
-            if (typeof connectionString !== "string")
-              throw new Error("database unavailable");
-            return makePgOnboardingProfileRepository(
-              connectionString,
-            ).markSecurityCompletedForUser(input);
-          },
-          catch: () => new OnboardingProfilePersistenceError(),
-        }),
-      upsert: (input) =>
-        Effect.tryPromise({
-          try: () => {
-            const connectionString = environment.HYPERDRIVE?.connectionString;
-            if (typeof connectionString !== "string")
-              throw new Error("database unavailable");
-            return makePgOnboardingProfileRepository(
-              connectionString,
-            ).upsertForUser(input);
-          },
-          catch: () => new OnboardingProfilePersistenceError(),
         }),
     }),
   );
@@ -2561,7 +2507,6 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
     apiKeyRuntimeLayer(environment),
     restPersistenceLayer(environment),
     messageRetentionLayer(environment),
-    onboardingProfileLayer(environment),
     recipientExclusionLayer(environment),
     makeWebhookIngressProductionLayer(environment),
     mcpToolPersistenceLayer(environment),
@@ -2571,7 +2516,7 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
     sendLayer,
     mcpCursorSigningLayer(environment),
   );
-  const handler = createCanaryHandler(layer);
+  const handler = createCanaryHandler(layer, { databaseAlreadyChecked: true });
   const deploymentSmokeHandler = createDeploymentSmokeHandler(
     makeProductionDeploymentSmoke(environment),
   );
@@ -2617,10 +2562,6 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
     layer,
     environment.CLERK_AUTHORIZED_PARTY ?? "",
     retentionDayOptions(environment.MESSAGE_RETENTION_DAY_OPTIONS),
-  );
-  const onboardingProfileHandler = createOnboardingProfileHandler(
-    layer,
-    environment.CLERK_AUTHORIZED_PARTY ?? "",
   );
   const recipientExclusionHandler = createRecipientExclusionHandler(
     layer,
@@ -2682,17 +2623,15 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
           ReturnType<typeof createMcpRequestHandler>
         >[3],
       ) =>
-        withPgRequestConnectionScope(() =>
-          createMcpRequestHandler({
-            browserOrigin: environment.CLERK_AUTHORIZED_PARTY ?? "",
-            hourLimit: requestQuota.hourLimit,
-            layer,
-            minuteLimit: requestQuota.minuteLimit,
-            readMessageDailyRecordLimit: requestQuota.dailyRecordLimit,
-            storedMediaDailyByteLimit: requestQuota.dailyMediaByteLimit,
-            resourceUrl: configuration.resource,
-          })(mcpRequest, mcpEnvironment, mcpContext, authorization),
-        );
+        createMcpRequestHandler({
+          browserOrigin: environment.CLERK_AUTHORIZED_PARTY ?? "",
+          hourLimit: requestQuota.hourLimit,
+          layer,
+          minuteLimit: requestQuota.minuteLimit,
+          readMessageDailyRecordLimit: requestQuota.dailyRecordLimit,
+          storedMediaDailyByteLimit: requestQuota.dailyMediaByteLimit,
+          resourceUrl: configuration.resource,
+        })(mcpRequest, mcpEnvironment, mcpContext, authorization);
       const applicationHandler = async (
         nextRequest: Request,
         nextEnvironment: Parameters<
@@ -2761,9 +2700,6 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
         }
         if (isMessageRetentionRequest(nextRequest)) {
           return messageRetentionHandler(nextRequest);
-        }
-        if (isOnboardingProfileRequest(nextRequest)) {
-          return onboardingProfileHandler(nextRequest);
         }
         if (isPersonalAccountRequest(nextRequest)) {
           return personalAccountHandler(nextRequest);
@@ -3822,7 +3758,7 @@ export const createProductionScheduledHandler =
       }
       return;
     }
-    if (controller.cron !== "* * * * *") return;
+    if (controller.cron !== "*/4 * * * *") return;
     const connectionString = environment.HYPERDRIVE?.connectionString;
     const queue = environment.CONNECTION_SETUP_PROVISIONING_QUEUE;
     if (
@@ -3872,8 +3808,11 @@ export const createProductionScheduledHandler =
           await storedMediaRepository.finishObjectDeletion(deletion);
         }),
       );
-      const connectionDeletionRepository =
-        makePgWhatsAppConnectionRepository(connectionString);
+      const connectionDeletionRepository = makePgWhatsAppConnectionRepository(
+        connectionString,
+        // Cascading retained webhook projections can exceed the request budget.
+        30_000,
+      );
       const deletionMarkers =
         await connectionDeletionRepository.listDeletionPurgeCandidates({
           limit: 100,

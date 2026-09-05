@@ -204,6 +204,34 @@
       "when": 1787544000000,
       "tag": "0028_bind_send_request_shapes",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1787678308000,
+      "tag": "0029_persist_first_connection_completion",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1787689711458,
+      "tag": "0030_stop_serving_branch_restore_replay",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1787707546000,
+      "tag": "0031_record_account_envelope_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788570000000,
+      "tag": "0032_remove_first_connection_onboarding",
+      "breakpoints": true
     }
   ]
 }

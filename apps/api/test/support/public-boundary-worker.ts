@@ -53,10 +53,6 @@ import {
   MessageRetentionPersistence,
 } from "../../src/message-retention";
 import {
-  OnboardingProfileClock,
-  OnboardingProfilePersistence,
-} from "../../src/onboarding-profile";
-import {
   PersonalAccountIdentifiers,
   PersonalAccountPersistence,
 } from "../../src/personal-account";
@@ -133,36 +129,6 @@ const TEST_FAULT_INJECTOR_SENTINEL =
 
 const browserOrigin = "http://127.0.0.1:3000";
 const personalAccounts = new Map<string, string>();
-const onboardingProfiles = new Map<
-  string,
-  {
-    readonly completedAt: string;
-    readonly createdAt: string;
-    readonly intendedMcpClient: "claude" | "chatgpt" | "other" | "not_sure";
-    readonly primaryUseCase:
-      | "conversation_search"
-      | "summaries"
-      | "draft_replies"
-      | "outbound_sends"
-      | "follow_ups"
-      | "exploration"
-      | "other";
-    readonly researchCallInterest: "yes" | "no" | "not_sure";
-    readonly role:
-      | "founder_or_owner"
-      | "engineer"
-      | "product_or_design"
-      | "operations_or_support"
-      | "marketing_or_sales"
-      | "consultant_or_freelancer"
-      | "student_or_researcher"
-      | "other"
-      | "not_sure";
-    readonly securityCompletedAt: string | null;
-    readonly updatedAt: string;
-    readonly whatsappUsageContext: "personal" | "work" | "both";
-  }
->();
 const connectionSetups = new Map<
   string,
   {
@@ -740,53 +706,6 @@ const makeTestLayer = (
           return { days, updatedAt };
         }),
     }),
-    Layer.succeed(OnboardingProfileClock, {
-      now: Effect.succeed("2026-08-03T12:00:00.000Z"),
-    }),
-    Layer.succeed(OnboardingProfilePersistence, {
-      get: ({ clerkUserId }) =>
-        Effect.sync(() => {
-          if (!personalAccounts.has(clerkUserId)) {
-            return { accessible: false as const };
-          }
-          return {
-            accessible: true as const,
-            profile: onboardingProfiles.get(clerkUserId) ?? null,
-          };
-        }),
-      markSecurityCompleted: (input) =>
-        Effect.sync(() => {
-          const existing = onboardingProfiles.get(input.clerkUserId);
-          if (existing === undefined) return null;
-          const profile = {
-            ...existing,
-            securityCompletedAt:
-              existing.securityCompletedAt ?? input.completedAt,
-          };
-          onboardingProfiles.set(input.clerkUserId, profile);
-          return profile;
-        }),
-      upsert: (input) =>
-        Effect.sync(() => {
-          if (!personalAccounts.has(input.clerkUserId)) {
-            return null;
-          }
-          const existing = onboardingProfiles.get(input.clerkUserId);
-          const profile = {
-            completedAt: existing?.completedAt ?? input.updatedAt,
-            createdAt: existing?.createdAt ?? input.updatedAt,
-            intendedMcpClient: input.intendedMcpClient,
-            primaryUseCase: input.primaryUseCase,
-            researchCallInterest: input.researchCallInterest,
-            role: input.role,
-            securityCompletedAt: existing?.securityCompletedAt ?? null,
-            updatedAt: input.updatedAt,
-            whatsappUsageContext: input.whatsappUsageContext,
-          };
-          onboardingProfiles.set(input.clerkUserId, profile);
-          return profile;
-        }),
-    }),
     Layer.succeed(RecipientExclusionClock, {
       now: Effect.succeed("2026-08-03T12:00:00.000Z"),
     }),
@@ -1335,16 +1254,6 @@ const makeTestLayer = (
                 }
               : { outcome: "idempotency_conflict" as const };
           }
-          const hasRetainedConnection =
-            clerkUserId === "user_test_public_boundary" &&
-            whatsAppConnections.length > 0;
-          const profile = onboardingProfiles.get(clerkUserId);
-          if (
-            (profile === undefined || profile.securityCompletedAt === null) &&
-            !hasRetainedConnection
-          ) {
-            return { outcome: "onboarding_profile_required" as const };
-          }
           preparedSetupOwners.set(idempotencyKey, clerkUserId);
           return {
             accountKey: {
@@ -1407,7 +1316,10 @@ const makeTestLayer = (
       nextLifecycleClaimId: Effect.succeed(
         "40000000-0000-4000-8000-000000000018",
       ),
-      nextPublicId: Effect.succeed("con_000000000000000000018"),
+      nextPublicId: Effect.sync(
+        () =>
+          `con_${String(18 + whatsAppConnections.length).padStart(21, "0")}`,
+      ),
       nextWebhookIdentityKey: Effect.succeed(new Uint8Array(32).fill(18)),
     }),
     Layer.succeed(WhatsAppConnectionPersistence, {
@@ -1732,7 +1644,13 @@ const makeTestLayer = (
           return {
             ok: true as const,
             value: {
-              outcome: phoneNumber === "+15550123456" ? "match" : "mismatch",
+              outcome: [
+                "+15550123456",
+                "+15550123457",
+                "+15550123458",
+              ].includes(phoneNumber)
+                ? "match"
+                : "mismatch",
             },
           };
         }),
