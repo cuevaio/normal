@@ -664,6 +664,110 @@ test.describe("Connection Setup loading UI", () => {
   });
 });
 
+test("keeps the current QR while retrying transient observation failures", async ({
+  page,
+  request,
+}) => {
+  let qrAvailable = false;
+  let qrRequests = 0;
+  let requestsAtTransientFailure: number | null = null;
+  let availableQrResponse:
+    | { readonly body: Buffer; readonly headers: Record<string, string> }
+    | undefined;
+
+  await page.route("https://api.example.test/**", async (route) => {
+    const original = route.request();
+    const localUrl = new URL(original.url());
+    const isQrRequest =
+      original.method() === "GET" &&
+      /^\/v1\/connection-setups\/cst_[A-Za-z0-9_-]{21}\/qr$/u.test(
+        localUrl.pathname,
+      );
+    if (isQrRequest) {
+      qrRequests += 1;
+      if (qrAvailable && requestsAtTransientFailure === null) {
+        requestsAtTransientFailure = qrRequests;
+        await route.fulfill({
+          body: JSON.stringify({ error: "unavailable" }),
+          contentType: "application/json",
+          headers: { "access-control-allow-origin": webOrigin },
+          status: 503,
+        });
+        return;
+      }
+      if (availableQrResponse !== undefined) {
+        await route.fulfill({
+          body: availableQrResponse.body,
+          headers: availableQrResponse.headers,
+          status: 200,
+        });
+        return;
+      }
+    }
+
+    localUrl.protocol = "http:";
+    localUrl.hostname = "127.0.0.1";
+    localUrl.port = apiPort;
+    const response = await request.fetch(localUrl.toString(), {
+      data: original.postDataBuffer(),
+      headers: {
+        ...original.headers(),
+        origin: "http://127.0.0.1:3000",
+      },
+      method: original.method(),
+    });
+    const responseBody = await response.body();
+    const responseHeaders = {
+      ...response.headers(),
+      "access-control-allow-origin": webOrigin,
+    };
+    if (isQrRequest && response.status() === 200) {
+      qrAvailable = true;
+      availableQrResponse = {
+        body: responseBody,
+        headers: responseHeaders,
+      };
+    }
+    await route.fulfill({
+      body: responseBody,
+      headers: responseHeaders,
+      status: response.status(),
+    });
+  });
+  await installClerkBrowser(page, {
+    signedIn: true,
+    token: "signed-second-test-user",
+  });
+  await page.goto("/dashboard/connections");
+  await page
+    .getByRole("button", { name: /Add (another )?WhatsApp number/u })
+    .click();
+  const setup = page.getByRole("dialog", {
+    name: "New WhatsApp Connection",
+  });
+  await setup.getByLabel("Name", { exact: true }).fill("Personal WhatsApp");
+  await setup.getByLabel("WhatsApp number").fill("+1 (555) 012-3496");
+  await setup.getByRole("button", { name: "Continue", exact: true }).click();
+
+  const qrImage = page.getByRole("img", {
+    name: "Scan this WhatsApp QR code",
+  });
+  await expect(qrImage).toBeVisible();
+  await expect.poll(() => requestsAtTransientFailure).not.toBeNull();
+  await expect
+    .poll(() => qrRequests)
+    .toBeGreaterThan(requestsAtTransientFailure ?? Number.MAX_SAFE_INTEGER);
+  await expect(qrImage).toBeVisible();
+  await expect(page.getByTestId("connection-setup-status")).toHaveText(
+    "Scan this QR code with WhatsApp.",
+  );
+
+  await setup.getByRole("button", { name: "Cancel setup" }).click();
+  await expect(page.getByTestId("connection-setup-status")).toHaveText(
+    /Connection Setup cancelled\./u,
+  );
+});
+
 test("shows a terminal provisioning failure during Connection Setup", async ({
   page,
   request,
@@ -682,7 +786,7 @@ test("shows a terminal provisioning failure during Connection Setup", async ({
         body: JSON.stringify({ error: "provisioning_failed" }),
         contentType: "application/json",
         headers: { "access-control-allow-origin": webOrigin },
-        status: 503,
+        status: 409,
       });
       return;
     }

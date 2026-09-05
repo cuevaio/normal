@@ -1165,6 +1165,10 @@ export function PublicBoundaryJourney({
         }
         return;
       }
+      if (response.status === 503) {
+        observeAgain();
+        return;
+      }
       const body = (await response.json()) as { readonly error?: unknown };
       if (!isCurrent()) return;
       replaceQrImage(null);
@@ -1179,10 +1183,7 @@ export function PublicBoundaryJourney({
       }
       markState("unavailable");
     } catch {
-      if (isCurrent()) {
-        replaceQrImage(null);
-        markState("unavailable");
-      }
+      if (isCurrent()) observeAgain();
     }
   };
 
