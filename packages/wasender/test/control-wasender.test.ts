@@ -147,6 +147,44 @@ describe("real Wasender lifecycle adapter", () => {
     );
   });
 
+  test("accepts WAPI responses that omit disabled read controls", async () => {
+    const omittedReadControls = {
+      ignore_groups: undefined,
+      read_incoming_messages: undefined,
+    };
+    const responses = [
+      json({ success: true, data: [] }),
+      json({
+        success: true,
+        data: providerSession(omittedReadControls),
+      }),
+      json({
+        success: true,
+        data: [providerSession({ api_key: undefined, ...omittedReadControls })],
+      }),
+      json({
+        success: true,
+        data: providerSession(omittedReadControls),
+      }),
+    ];
+    const lifecycle = makeWasenderSessionLifecycle(
+      { credential, referenceSecret },
+      {
+        fetch: async () => responses.shift() ?? json({}, { status: 500 }),
+      },
+    );
+
+    const created = await Effect.runPromise(
+      lifecycle.createSession({ phoneNumber, setupMarker, webhookEndpoint }),
+    );
+    const reconciled = await Effect.runPromise(
+      lifecycle.reconcileSession({ setupMarker, webhookEndpoint }),
+    );
+
+    expect(created.connectionState).toBe("connecting");
+    expect(reconciled.outcome).toBe("present");
+  });
+
   test("assigns an unused proxy while creating a provider session", async () => {
     const requests: Request[] = [];
     const reservations: string[] = [];
@@ -646,10 +684,13 @@ describe("real Wasender lifecycle adapter", () => {
     expect(failure.retryDecision).toBe("do_not_retry");
   });
 
-  test("rejects a reconciled marker with broader provider retention or read settings", async () => {
+  test("rejects broader or unknown provider retention and read settings", async () => {
     for (const unsafeSetting of [
+      { ignore_groups: true },
+      { ignore_groups: null },
       { log_messages: true },
       { read_incoming_messages: true },
+      { read_incoming_messages: null },
     ]) {
       const responses = [
         json({
