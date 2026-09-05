@@ -27,7 +27,7 @@ import {
   makeWasenderWebhookNormalization,
   type NormalizedWebhookItem,
   type WebhookNormalization,
-} from "@whatsapp-mcp/wasender/webhook";
+} from "@whatsapp-mcp/whatsapp-provider/webhook";
 import { Context, Data, Effect, Layer, Redacted } from "effect";
 import { encodeBase64 } from "./base64-url";
 import {

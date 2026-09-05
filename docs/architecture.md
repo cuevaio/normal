@@ -100,7 +100,7 @@ flowchart LR
   requests, persist an API Key, or proxy browser data requests to the API
   Worker. Development and preview use isolated docs projects and hostnames.
 * `provider-control` is private. Provider API Credentials and provider specific
-  behavior do not cross its boundary or the `packages/wasender` seam.
+  behavior do not cross its boundary or the `packages/whatsapp-provider` seam.
 * `recovery-control` is public only on its dedicated custom domain for the
   protected GitHub recovery environment. A constant-time bearer check precedes
   its closed start/status contract, a Durable Object serializes runs, and a
@@ -150,7 +150,7 @@ flowchart LR
 
 For exact behavior, read [`CONTEXT.md`](../CONTEXT.md), the
 [MCP contract](mcp-contract.md), the [configuration reference](configuration.md),
-the [Wasender seam](wasender-seam.md), and the [ADRs](adr).
+the [WhatsApp provider seam](whatsapp-provider-seam.md), and the [ADRs](adr).
 * `recovery-verifier` has no public ingress. Recovery control reaches it through
   an authenticated service binding; it receives only guarded Neon child and
   aggregate observability authority. On the disposable child only, it resets

@@ -60,7 +60,7 @@ import { normalizeWhatsAppConnectionName } from "@whatsapp-mcp/domain/whatsapp-c
 import type {
   VerifiedImageBytes,
   VerifiedPdfBytes,
-} from "@whatsapp-mcp/wasender/session";
+} from "@whatsapp-mcp/whatsapp-provider/session";
 import { createMcpHandler } from "agents/mcp/server";
 import { Context, Data, Effect, type Layer, Option } from "effect";
 import { z } from "zod";

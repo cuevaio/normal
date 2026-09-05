@@ -5,9 +5,9 @@ import type {
 import {
   type DirectorySessionAuthority,
   makeWasenderSessionDirectory,
+  type ProviderIdentityProtectionKey,
   type WasenderDirectoryTelemetryEvent,
-  type WasenderIdentityProtectionKey,
-} from "@whatsapp-mcp/wasender/session";
+} from "@whatsapp-mcp/whatsapp-provider/session";
 import { Context, Data, Effect, Redacted } from "effect";
 import {
   importDirectoryIndexKey,
@@ -148,7 +148,7 @@ export const reconcileContacts = (
               });
               const identityProtectionKey = Redacted.make(
                 identity,
-              ) as WasenderIdentityProtectionKey;
+              ) as ProviderIdentityProtectionKey;
               return yield* makeWasenderSessionDirectory({
                 authority: sessionAuthority,
                 emitTelemetry: (event) => providerEvents.push(event),

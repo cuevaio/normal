@@ -30,7 +30,7 @@ Shared code is split by responsibility:
 | `packages/domain` | Pure domain rules and state transitions |
 | `packages/contracts` | MCP, API, health, handle, and service binding schemas |
 | `packages/db` | Drizzle schema, migrations, RLS-aware repositories, and database tools |
-| `packages/wasender` | Thin provider adapter for connection lifecycle, Directory, text and PDF sending, media, and webhook normalization |
+| `packages/whatsapp-provider` | Provider seam for connection lifecycle, Directory, text, PDF and image sending, media, and webhook normalization |
 | `infra` | OpenTofu configuration for Cloudflare, Vercel, Neon, and AWS KMS |
 | `scripts` | Deployment, validation, recovery, observability, and launch gate tooling |
 
@@ -161,7 +161,7 @@ Start with these documents:
 * [`docs/mcp-contract.md`](docs/mcp-contract.md) defines MCP tools, resources, authorization, errors, and pagination.
 * [`docs/configuration.md`](docs/configuration.md) lists runtime configuration and secret ownership.
 * [`docs/testing.md`](docs/testing.md) explains the public boundary test strategy.
-* [`docs/wasender-seam.md`](docs/wasender-seam.md) defines the provider boundary.
+* [`docs/whatsapp-provider-seam.md`](docs/whatsapp-provider-seam.md) defines the provider boundary.
 * [`docs/stored-media-container.md`](docs/stored-media-container.md) describes encrypted Stored Media.
 * [`docs/adr`](docs/adr) records architectural decisions.
 * [`docs/runbooks`](docs/runbooks) contains deployment, incident, recovery, security, and teardown procedures.
@@ -169,7 +169,7 @@ Start with these documents:
 The most important rules are simple:
 
 * Use the terms in `CONTEXT.md` in code, tests, and docs.
-* Keep provider details behind `packages/wasender` and `apps/provider-control`.
+* Keep provider details behind `packages/whatsapp-provider` and `apps/provider-control`.
 * Fail closed when identity, authorization, audit, quota, encryption, or configuration is unavailable.
 * Never retry an outbound send when provider acceptance is ambiguous.
 * Keep logs and telemetry free of message content, credentials, full phone numbers, provider identifiers, and tenant identifiers unless an approved contract explicitly allows them.

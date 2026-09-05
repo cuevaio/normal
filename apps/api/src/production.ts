@@ -47,16 +47,16 @@ import {
   type PendingStoredMediaCandidate,
 } from "@whatsapp-mcp/db/stored-media";
 import { makePgWhatsAppConnectionRepository } from "@whatsapp-mcp/db/whatsapp-connection";
-import type { SessionAuthority } from "@whatsapp-mcp/wasender/control";
-import { makeWasenderMediaRetrievalLayer } from "@whatsapp-mcp/wasender/media";
+import type { SessionAuthority } from "@whatsapp-mcp/whatsapp-provider/control";
+import { makeWasenderMediaRetrievalLayer } from "@whatsapp-mcp/whatsapp-provider/media";
 import {
   type DirectorySessionAuthority,
   MediaRetrieval,
   type MediaSource,
   makeWasenderSessionDirectory,
+  type ProviderIdentityProtectionKey,
   type ProviderNeutralFailure,
-  type WasenderIdentityProtectionKey,
-} from "@whatsapp-mcp/wasender/session";
+} from "@whatsapp-mcp/whatsapp-provider/session";
 import { Config, ConfigProvider, Data, Effect, Layer, Redacted } from "effect";
 import {
   AccountInsightsClock,
@@ -3153,7 +3153,7 @@ const groupDirectoryLayer = (environment: ApiEnvironment) =>
           try: () =>
             makeWasenderSessionDirectory({
               authority: sessionDirectoryAuthority(authority),
-              identityKey: identityKey as WasenderIdentityProtectionKey,
+              identityKey: identityKey as ProviderIdentityProtectionKey,
               emitTelemetry: (event) => {
                 Effect.runSync(
                   safeTelemetry.emit({

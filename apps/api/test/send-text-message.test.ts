@@ -8,13 +8,13 @@ import {
 import {
   makeVerifiedImageBytes,
   makeVerifiedPdfBytes,
-} from "@whatsapp-mcp/wasender/session";
+} from "@whatsapp-mcp/whatsapp-provider/session";
 import { Effect } from "effect";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   deriveRecipientRouteKeys,
   sealRecipientRoute,
-} from "../../../packages/wasender/src/recipient-route";
+} from "../../../packages/whatsapp-provider/src/recipient-route";
 import type { EnvelopeEncryption } from "../src/encryption/envelope";
 import {
   importSendFingerprintKey,

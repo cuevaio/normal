@@ -1,8 +1,8 @@
-import { isPublicIpAddress } from "@whatsapp-mcp/wasender/media";
+import { isPublicIpAddress } from "@whatsapp-mcp/whatsapp-provider/media";
 import {
   makeVerifiedPdfBytes,
   type VerifiedPdfBytes,
-} from "@whatsapp-mcp/wasender/session";
+} from "@whatsapp-mcp/whatsapp-provider/session";
 import { decodeBase64 } from "./base64-url";
 
 export const MAX_PDF_BYTES = 16_777_216;

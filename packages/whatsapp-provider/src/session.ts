@@ -30,8 +30,8 @@ export type StableMessageIdentity = AdapterReference<"StableMessageIdentity">;
 export type RecipientLocator = ContactLocator | GroupLocator;
 export type DirectorySessionAuthority =
   ProtectedAdapterValue<"SessionAuthority">;
-export type WasenderRecipientRoute =
-  ProtectedAdapterValue<"WasenderRecipientRoute">;
+export type ProviderRecipientRoute =
+  ProtectedAdapterValue<"ProviderRecipientRoute">;
 
 declare const verifiedPdfBytes: unique symbol;
 
@@ -105,15 +105,15 @@ export const makeVerifiedImageBytes = (
   return verified;
 };
 
-declare const wasenderIdentityProtectionKey: unique symbol;
+declare const providerIdentityProtectionKey: unique symbol;
 
 /**
  * Connection-scoped key used only to turn a verified provider message
  * identity into a non-reversible equality token.
  */
-export type WasenderIdentityProtectionKey = Redacted.Redacted<
+export type ProviderIdentityProtectionKey = Redacted.Redacted<
   Uint8Array & {
-    readonly [wasenderIdentityProtectionKey]: "WasenderIdentityProtectionKey";
+    readonly [providerIdentityProtectionKey]: "ProviderIdentityProtectionKey";
   }
 >;
 
@@ -161,7 +161,7 @@ export interface SessionDirectory {
 }
 
 export const SessionDirectory = Context.GenericTag<SessionDirectory>(
-  "@whatsapp-mcp/wasender/SessionDirectory",
+  "@whatsapp-mcp/whatsapp-provider/SessionDirectory",
 );
 
 export type DefinitiveSendFailureReason =
@@ -215,7 +215,7 @@ export interface TextSending {
 }
 
 export const TextSending = Context.GenericTag<TextSending>(
-  "@whatsapp-mcp/wasender/TextSending",
+  "@whatsapp-mcp/whatsapp-provider/TextSending",
 );
 
 export interface TextSendTelemetryEvent {
@@ -237,10 +237,10 @@ export interface TextSendTelemetry {
  */
 export interface WasenderTextSendingOptions {
   readonly authority: SessionAuthority;
-  readonly identityKey: WasenderIdentityProtectionKey;
+  readonly identityKey: ProviderIdentityProtectionKey;
   readonly resolveRecipient: (
     recipient: RecipientLocator,
-  ) => WasenderRecipientRoute | null;
+  ) => ProviderRecipientRoute | null;
   readonly telemetry: TextSendTelemetry;
 }
 
@@ -262,7 +262,7 @@ export interface PdfSending {
 }
 
 export const PdfSending = Context.GenericTag<PdfSending>(
-  "@whatsapp-mcp/wasender/PdfSending",
+  "@whatsapp-mcp/whatsapp-provider/PdfSending",
 );
 
 export interface PdfSendTelemetryEvent {
@@ -277,10 +277,10 @@ export interface PdfSendTelemetryEvent {
 
 export interface WasenderPdfSendingOptions {
   readonly authority: SessionAuthority;
-  readonly identityKey: WasenderIdentityProtectionKey;
+  readonly identityKey: ProviderIdentityProtectionKey;
   readonly resolveRecipient: (
     recipient: RecipientLocator,
-  ) => WasenderRecipientRoute | null;
+  ) => ProviderRecipientRoute | null;
   readonly telemetry: {
     readonly emit: (event: PdfSendTelemetryEvent) => void;
   };
@@ -298,7 +298,7 @@ export interface ImageSending {
 }
 
 export const ImageSending = Context.GenericTag<ImageSending>(
-  "@whatsapp-mcp/wasender/ImageSending",
+  "@whatsapp-mcp/whatsapp-provider/ImageSending",
 );
 
 export interface ImageSendTelemetryEvent {
@@ -313,10 +313,10 @@ export interface ImageSendTelemetryEvent {
 
 export interface WasenderImageSendingOptions {
   readonly authority: SessionAuthority;
-  readonly identityKey: WasenderIdentityProtectionKey;
+  readonly identityKey: ProviderIdentityProtectionKey;
   readonly resolveRecipient: (
     recipient: RecipientLocator,
-  ) => WasenderRecipientRoute | null;
+  ) => ProviderRecipientRoute | null;
   readonly telemetry: {
     readonly emit: (event: ImageSendTelemetryEvent) => void;
   };
@@ -378,7 +378,7 @@ export interface MediaRetrieval {
 }
 
 export const MediaRetrieval = Context.GenericTag<MediaRetrieval>(
-  "@whatsapp-mcp/wasender/MediaRetrieval",
+  "@whatsapp-mcp/whatsapp-provider/MediaRetrieval",
 );
 
 /**
@@ -441,7 +441,7 @@ export {
   makeWasenderPdfSendingLayer,
 } from "./pdf-send";
 export {
-  makeWasenderRecipientRoute,
+  makeProviderRecipientRoute,
   makeWasenderTextSending,
   makeWasenderTextSendingLayer,
 } from "./text-send";

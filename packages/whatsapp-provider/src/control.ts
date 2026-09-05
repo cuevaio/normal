@@ -133,7 +133,7 @@ export interface SessionLifecycle {
 }
 
 export const SessionLifecycle = Context.GenericTag<SessionLifecycle>(
-  "@whatsapp-mcp/wasender/SessionLifecycle",
+  "@whatsapp-mcp/whatsapp-provider/SessionLifecycle",
 );
 
 export const lifecycleWritePolicy = {

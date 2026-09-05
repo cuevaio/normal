@@ -65,7 +65,7 @@ While working:
 * Follow the existing Effect composition and error patterns.
 * Parse untrusted data at the boundary with the existing schemas.
 * Preserve authorization, RLS, audit, quota, encryption, deletion, and restore behavior.
-* Keep provider specific behavior behind `packages/wasender` and `apps/provider-control`.
+* Keep provider specific behavior behind `packages/whatsapp-provider` and `apps/provider-control`.
 * Keep production and test composition roots separate.
 * Never log message content, credentials, tokens, full phone numbers, provider payloads, or tenant identifiers.
 * Do not add a dependency when the existing stack can solve the problem clearly.

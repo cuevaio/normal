@@ -1,5 +1,5 @@
 import type { PersistedDirectoryCiphertext } from "@whatsapp-mcp/db/webhook-event";
-import type { DirectoryContact } from "@whatsapp-mcp/wasender/session";
+import type { DirectoryContact } from "@whatsapp-mcp/whatsapp-provider/session";
 import { Data, Effect, Encoding } from "effect";
 import type {
   ConnectionKeyEnvelope,

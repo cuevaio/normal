@@ -3,9 +3,9 @@ import { Effect, Redacted } from "effect";
 import {
   type DirectorySessionAuthority,
   makeWasenderSessionDirectory,
+  type ProviderIdentityProtectionKey,
   type ProviderNeutralFailure,
   type WasenderDirectoryTelemetryEvent,
-  type WasenderIdentityProtectionKey,
 } from "../src/session";
 import {
   changedPaginatedContactsSecondPage,
@@ -29,7 +29,7 @@ const credential =
 const authority = Redacted.make(credential) as DirectorySessionAuthority;
 const identityKey = Redacted.make(
   new Uint8Array(32).fill(39),
-) as WasenderIdentityProtectionKey;
+) as ProviderIdentityProtectionKey;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;

@@ -168,7 +168,7 @@ export interface WebhookNormalization {
 }
 
 export const WebhookNormalization = Context.GenericTag<WebhookNormalization>(
-  "@whatsapp-mcp/wasender/WebhookNormalization",
+  "@whatsapp-mcp/whatsapp-provider/WebhookNormalization",
 );
 
 export const webhookNormalizationPolicy = {

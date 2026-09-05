@@ -27,7 +27,7 @@
     "@whatsapp-mcp/contracts": "workspace:*",
     "@whatsapp-mcp/db": "workspace:*",
     "@whatsapp-mcp/domain": "workspace:*",
-    "@whatsapp-mcp/wasender": "workspace:*",
+    "@whatsapp-mcp/whatsapp-provider": "workspace:*",
     "agents": "0.20.1",
     "effect": "3.22.1",
     "zod": "4.4.3"

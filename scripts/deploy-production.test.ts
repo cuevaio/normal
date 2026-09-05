@@ -140,7 +140,7 @@ describe("production deployment order", () => {
       "apps/recovery-game-day/src",
       "apps/recovery-verifier/src",
       "packages/neon-recovery/src",
-      "packages/wasender/src",
+      "packages/whatsapp-provider/src",
     ] as const;
 
     for (const root of runtimeRoots) {

@@ -1,5 +1,5 @@
 import type { WebhookEventProcessingMaterial } from "@whatsapp-mcp/db/webhook-event";
-import type { NormalizedWebhookDelivery } from "@whatsapp-mcp/wasender/webhook";
+import type { NormalizedWebhookDelivery } from "@whatsapp-mcp/whatsapp-provider/webhook";
 import { Effect, Layer, Redacted } from "effect";
 import { describe, expect, test } from "vitest";
 import {

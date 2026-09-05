@@ -3,7 +3,7 @@
 - **Decision status:** Phase 0 evidence collection approved; non-production technical pilot pending legal, policy, license, and supply-chain gates; production replacement not approved
 - **Research cutoff:** 2026-07-30
 - **Internal repository snapshot:** `a7e2469` (rechecked 2026-07-31 after the concurrent Connection Setup provisioning merge)
-- **Later product note:** After this snapshot, ADR 0034 added `PdfSending` as a sixth Wasender capability. The five-capability language below is historical to the research cutoff. The current seam is documented in [`docs/wasender-seam.md`](../wasender-seam.md).
+- **Later product note:** After this snapshot, ADR 0034 added `PdfSending` as a sixth Wasender capability. The five-capability language below is historical to the research cutoff. The current seam is documented in [`docs/whatsapp-provider-seam.md`](../whatsapp-provider-seam.md).
 - **Targets evaluated:** 100, 1,000, and 10,000 simultaneously connected WhatsApp accounts
 - **Tier interpretation:** The targets are fleet-wide WhatsApp Connections, not per-Personal-Account limits. One Personal Account can retain at most three Connections and has an exact 5 GiB (`5368709120`-byte) Stored Media ceiling shared across them. [I9]
 - **Scope:** Replace WasenderAPI while retaining QR-linked WhatsApp accounts, ordinary direct and group conversations, and the repository's provider-neutral behavior
@@ -77,7 +77,7 @@ The legal gate must therefore produce two analyses rather than blending terms: o
 
 ## Required Compatibility
 
-The current codebase has the right five-capability architectural boundary, but it does not have runtime provider selection. `@whatsapp-mcp/wasender` exposes five independent capabilities and prevents raw provider values from crossing them: [I1] [I2]
+At the research cutoff, the codebase had the right five-capability architectural boundary, but it did not have runtime provider selection. The then-named `@whatsapp-mcp/wasender` package exposed five independent capabilities and prevented raw provider values from crossing them: [I1] [I2]
 
 | Capability | Current `normal` replacement requirement |
 | --- | --- |
@@ -839,8 +839,8 @@ All external sources were accessed on 2026-07-30 unless a publication date is st
 
 ### Internal Repository
 
-- **[I1]** Provider-neutral seam: [`docs/wasender-seam.md`](../wasender-seam.md)
-- **[I2]** Capability types and policies: [`packages/wasender/src/control.ts`](../../packages/wasender/src/control.ts), [`packages/wasender/src/session.ts`](../../packages/wasender/src/session.ts), and [`packages/wasender/src/webhook.ts`](../../packages/wasender/src/webhook.ts)
+- **[I1]** Provider-neutral seam: [`docs/whatsapp-provider-seam.md`](../whatsapp-provider-seam.md)
+- **[I2]** Capability types and policies: [`packages/whatsapp-provider/src/control.ts`](../../packages/whatsapp-provider/src/control.ts), [`packages/whatsapp-provider/src/session.ts`](../../packages/whatsapp-provider/src/session.ts), and [`packages/whatsapp-provider/src/webhook.ts`](../../packages/whatsapp-provider/src/webhook.ts)
 - **[I3]** ADR 0004, platform-managed sessions: [`docs/adr/0004-platform-manage-wasender-sessions.md`](../adr/0004-platform-manage-wasender-sessions.md)
 - **[I4]** ADR 0011, thin provider interface: [`docs/adr/0011-isolate-wasender-behind-a-thin-provider-interface.md`](../adr/0011-isolate-wasender-behind-a-thin-provider-interface.md)
 - **[I5]** ADR 0019, reconciled provisioning saga: [`docs/adr/0019-provision-provider-sessions-with-a-reconciled-saga.md`](../adr/0019-provision-provider-sessions-with-a-reconciled-saga.md)

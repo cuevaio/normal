@@ -8,9 +8,8 @@
  * build where the call target and validated host disagree fails at a boundary, mid-operation,
  * rather than anywhere a reader would look.
  *
- * The package, its types and its fixtures keep the Wasender name. This is a change of host, not
- * of protocol: the wire contract being spoken is still the one Wasender defined, and the adapters
- * still encode its envelopes, its error shapes and its two different pagination styles.
+ * Concrete adapter constructors and fixtures retain the Wasender name because the WAPI origin
+ * still implements that wire contract, including its envelopes, error shapes, and pagination.
  */
 export const providerOrigin = "https://api.wapi.crafter.run";
 

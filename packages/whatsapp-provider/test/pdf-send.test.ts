@@ -10,8 +10,8 @@ import {
   type ContactLocator,
   makeVerifiedPdfBytes,
   type PdfSendTelemetryEvent,
-  type WasenderIdentityProtectionKey,
-  type WasenderRecipientRoute,
+  type ProviderIdentityProtectionKey,
+  type ProviderRecipientRoute,
 } from "../src/session";
 
 const authority = Redacted.make(
@@ -19,12 +19,12 @@ const authority = Redacted.make(
 ) as SessionAuthority;
 const identityKey = Redacted.make(
   new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1)),
-) as WasenderIdentityProtectionKey;
+) as ProviderIdentityProtectionKey;
 const recipient = "opaque-recipient" as ContactLocator;
 const routeKeys = await deriveRecipientRouteKeys(Redacted.value(authority));
 const route = Redacted.make(
   await sealRecipientRoute(routeKeys, "contact", "15551234567"),
-) as WasenderRecipientRoute;
+) as ProviderRecipientRoute;
 const sourceBytes = new TextEncoder().encode("%PDF-1.7\n%%EOF\n");
 const pdf = makeVerifiedPdfBytes(sourceBytes);
 

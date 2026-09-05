@@ -11,9 +11,9 @@
 - `apps/web`: Next.js product UI on Vercel. Browser data requests go directly to the configured API origin; do not add a Vercel API proxy or rewrite.
 - `apps/docs`: static Astro/Scalar API reference on a separate Vercel project. It must not proxy authenticated requests or retain API Keys.
 - `apps/api`: public Cloudflare Worker for HTTP, OAuth, MCP, REST, webhooks, reconciliation, Queue consumers, and scheduled work.
-- `apps/provider-control`: private Cloudflare RPC service for provider provisioning/control. Provider credentials and provider-specific behavior stay here and in `packages/wasender`.
+- `apps/provider-control`: private Cloudflare RPC service for provider provisioning/control. Provider credentials and provider-specific behavior stay here and in `packages/whatsapp-provider`.
 - `apps/deletion-coordinator` and `apps/restore-coordinator`: scheduled Workers that preserve deletion and serving-branch recovery invariants. `apps/recovery-control` is the authenticated, serialized Workflow boundary for non-serving production drills and has no production object-delete binding. `apps/recovery-verifier` and `apps/recovery-game-day` are private recovery evidence Workers. `apps/operations-control` is the authenticated availability and pager boundary.
-- `packages/domain`: pure rules; `packages/contracts`: schemas, public handles, and OpenAPI; `packages/db`: migrations and RLS-aware repositories; `packages/wasender`: provider-neutral Effect capabilities.
+- `packages/domain`: pure rules; `packages/contracts`: schemas, public handles, and OpenAPI; `packages/db`: migrations and RLS-aware repositories; `packages/whatsapp-provider`: provider-neutral Effect capabilities.
 - Shared packages expose explicit subpaths. Do not add root or catch-all barrel exports.
 - Runtime configuration may select only `development`, `preview`, or `production`. Production and test composition roots are statically separate; no request or runtime switch may select test wiring.
 - Neon is authoritative for identity, tenant data, authorization, quotas, audit, and lifecycle state. KV, R2, and Queues must not become alternate authorities.

@@ -13,7 +13,7 @@
   "dependencies": {
     "@whatsapp-mcp/contracts": "workspace:*",
     "@whatsapp-mcp/domain": "workspace:*",
-    "@whatsapp-mcp/wasender": "workspace:*",
+    "@whatsapp-mcp/whatsapp-provider": "workspace:*",
     "effect": "3.22.1"
   },
   "devDependencies": {

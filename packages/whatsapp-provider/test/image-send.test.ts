@@ -11,9 +11,9 @@ import {
   type ImageSendTelemetryEvent,
   makeVerifiedImageBytes,
   maximumOutboundImageBytes,
+  type ProviderIdentityProtectionKey,
+  type ProviderRecipientRoute,
   type VerifiedImageBytes,
-  type WasenderIdentityProtectionKey,
-  type WasenderRecipientRoute,
 } from "../src/session";
 
 const authority = Redacted.make(
@@ -21,12 +21,12 @@ const authority = Redacted.make(
 ) as SessionAuthority;
 const identityKey = Redacted.make(
   new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1)),
-) as WasenderIdentityProtectionKey;
+) as ProviderIdentityProtectionKey;
 const recipient = "opaque-recipient" as ContactLocator;
 const routeKeys = await deriveRecipientRouteKeys(Redacted.value(authority));
 const route = Redacted.make(
   await sealRecipientRoute(routeKeys, "contact", "15551234567"),
-) as WasenderRecipientRoute;
+) as ProviderRecipientRoute;
 
 interface Attempt {
   readonly body: RequestInit["body"];

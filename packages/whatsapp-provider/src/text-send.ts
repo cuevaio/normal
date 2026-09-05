@@ -15,11 +15,11 @@ import {
 } from "./recipient-route";
 import {
   type IdentityBearingSendStatus,
+  type ProviderIdentityProtectionKey,
+  type ProviderRecipientRoute,
   type StableMessageIdentity,
   TextSending,
   type TextSendResult,
-  type WasenderIdentityProtectionKey,
-  type WasenderRecipientRoute,
   type WasenderTextSendingOptions,
 } from "./session";
 
@@ -325,11 +325,11 @@ export const productionOutboundSendRuntime: OutboundSendRuntime = {
     globalThis.setTimeout(callback, milliseconds),
 };
 
-export const makeWasenderRecipientRoute = async (
-  identityKey: WasenderIdentityProtectionKey,
+export const makeProviderRecipientRoute = async (
+  identityKey: ProviderIdentityProtectionKey,
   kind: "contact" | "group",
   providerIdentifier: string,
-): Promise<WasenderRecipientRoute> => {
+): Promise<ProviderRecipientRoute> => {
   const key = await crypto.subtle.importKey(
     "raw",
     new Uint8Array(Redacted.value(identityKey)),
@@ -343,7 +343,7 @@ export const makeWasenderRecipientRoute = async (
       kind,
       providerIdentifier,
     ),
-  ) as WasenderRecipientRoute;
+  ) as ProviderRecipientRoute;
 };
 
 /**

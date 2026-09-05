@@ -1,5 +1,5 @@
 import type { WebhookIngressMaterial } from "@whatsapp-mcp/db/webhook-ingress";
-import { authenticateWasenderWebhook } from "@whatsapp-mcp/wasender/webhook";
+import { authenticateWasenderWebhook } from "@whatsapp-mcp/whatsapp-provider/webhook";
 import { Context, Data, Effect, type Layer, Redacted } from "effect";
 import {
   type EnvelopeEncryption,
