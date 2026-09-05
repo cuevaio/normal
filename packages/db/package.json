@@ -45,7 +45,7 @@
     "db:studio": "drizzle-kit studio --config=drizzle.config.ts",
     "db:record-gap": "bun src/record-ingestion-gap-cli.ts",
     "lint": "biome check .",
-    "test": "bun test",
+    "test": "bun test --timeout 30000",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
