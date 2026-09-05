@@ -133,7 +133,7 @@ describe("real Wasender image-send adapter", () => {
     const image = makeVerifiedImageBytes(
       new Uint8Array([0xff, 0xd8, 0xff, 0xe0]),
     );
-    const temporaryUrl = "https://wasenderapi.com/media/private-image.jpg";
+    const temporaryUrl = "https://api.wapi.crafter.run/media/private-image.jpg";
     const harness = makeHarness((attempt) =>
       attempt.url.endsWith("/api/upload")
         ? Response.json({ publicUrl: temporaryUrl, success: true })
@@ -152,7 +152,7 @@ describe("real Wasender image-send adapter", () => {
       body: image,
       method: "POST",
       redirect: "manual",
-      url: "https://www.wasenderapi.com/api/upload",
+      url: "https://api.wapi.crafter.run/api/upload",
     });
     expect(harness.attempts[0]?.headers.get("content-type")).toBe("image/jpeg");
     expect(harness.attempts[1]).toMatchObject({
@@ -163,7 +163,7 @@ describe("real Wasender image-send adapter", () => {
       }),
       method: "POST",
       redirect: "manual",
-      url: "https://www.wasenderapi.com/api/send-message",
+      url: "https://api.wapi.crafter.run/api/send-message",
     });
     expect(JSON.stringify(harness.telemetry)).not.toContain(temporaryUrl);
     expect(JSON.stringify(harness.telemetry)).not.toContain("exact caption");
@@ -185,7 +185,7 @@ describe("real Wasender image-send adapter", () => {
     const image = makeVerifiedImageBytes(
       new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     );
-    const temporaryUrl = "https://www.wasenderapi.com/media/image.png";
+    const temporaryUrl = "https://api.wapi.crafter.run/media/image.png";
     const harness = makeHarness((attempt) =>
       attempt.url.endsWith("/api/upload")
         ? Response.json({ publicUrl: temporaryUrl, success: true })
@@ -204,7 +204,7 @@ describe("real Wasender image-send adapter", () => {
     const image = makeVerifiedImageBytes(new Uint8Array([0xff, 0xd8, 0xff]));
     const harness = makeHarness(() =>
       Response.json({
-        publicUrl: "https://www.wasenderapi.com.evil.test/image.jpg",
+        publicUrl: "https://api.wapi.crafter.run.evil.test/image.jpg",
         success: true,
       }),
     );
@@ -241,7 +241,7 @@ describe("real Wasender image-send adapter", () => {
     const harness = makeHarness((attempt) =>
       attempt.url.endsWith("/api/upload")
         ? Response.json({
-            publicUrl: "https://www.wasenderapi.com/media/image.jpg",
+            publicUrl: "https://api.wapi.crafter.run/media/image.jpg",
             success: true,
           })
         : Promise.reject(new TypeError("send connection closed")),
@@ -260,7 +260,7 @@ describe("real Wasender image-send adapter", () => {
       (attempt) => {
         if (attempt.url.endsWith("/api/upload")) {
           return Response.json({
-            publicUrl: "https://www.wasenderapi.com/media/image.jpg",
+            publicUrl: "https://api.wapi.crafter.run/media/image.jpg",
             success: true,
           });
         }

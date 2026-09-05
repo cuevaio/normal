@@ -1,5 +1,6 @@
 import { Effect, Layer, Redacted } from "effect";
 import { makeBoundedRetryAfterMs, maximumRetryAfterMs } from "./common";
+import { providerOrigin } from "./provider-origin";
 import {
   deriveIdentityRecipientRouteKeys,
   deriveRecipientRouteKeys,
@@ -21,12 +22,17 @@ import {
   readBoundedBody,
 } from "./text-send";
 
-const uploadUrl = "https://www.wasenderapi.com/api/upload";
-const sendMessageUrl = "https://www.wasenderapi.com/api/send-message";
-const publicMediaOrigins = new Set([
-  "https://wasenderapi.com",
-  "https://www.wasenderapi.com",
-]);
+const uploadUrl = `${providerOrigin}/api/upload`;
+const sendMessageUrl = `${providerOrigin}/api/send-message`;
+/**
+ * Origins an `/api/upload` response may name in `publicUrl`.
+ *
+ * An upload returns a URL on whichever origin served it, so this allow-list has to track the
+ * call target above -- a list pinned to a different host rejects every upload and the send then
+ * fails as `upload_failed` with nothing naming the cause. It stays an allow-list: the provider
+ * origin and nothing else, so a response cannot point the document fetch wherever it likes.
+ */
+const publicMediaOrigins = new Set([providerOrigin]);
 
 const contactIdentifier =
   /^(?:\+[1-9]\d{1,14}|[1-9]\d{6,14}|[1-9]\d{6,14}(?::\d{1,5})?@s\.whatsapp\.net|[1-9]\d{1,31}(?::\d{1,5})?@lid|@[A-Za-z0-9._-]{1,64})$/u;

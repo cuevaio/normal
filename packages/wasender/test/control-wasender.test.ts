@@ -122,7 +122,7 @@ describe("real Wasender lifecycle adapter", () => {
     expect(requests[0]?.method).toBe("GET");
     expect(requests[1]?.method).toBe("POST");
     expect(requests[1]?.url).toBe(
-      "https://www.wasenderapi.com/api/whatsapp-sessions",
+      "https://api.wapi.crafter.run/api/whatsapp-sessions",
     );
     expect(requests[1]?.headers.get("authorization")).toBe(
       `Bearer ${Redacted.value(credential)}`,
@@ -933,7 +933,7 @@ describe("real Wasender lifecycle adapter", () => {
       "POST",
     ]);
     expect(requests[4]?.url).toBe(
-      "https://www.wasenderapi.com/api/whatsapp-sessions/41/connect",
+      "https://api.wapi.crafter.run/api/whatsapp-sessions/41/connect",
     );
     expect(await requests[4]?.json()).toEqual({ linkMethod: "qr" });
   });
@@ -1043,7 +1043,7 @@ describe("real Wasender lifecycle adapter", () => {
       "POST",
     ]);
     expect(requests[4]?.url).toBe(
-      "https://www.wasenderapi.com/api/whatsapp-sessions/41/disconnect",
+      "https://api.wapi.crafter.run/api/whatsapp-sessions/41/disconnect",
     );
   });
 

@@ -1292,7 +1292,7 @@ provider response in logs as a credential-handling incident.
 
 No additional Cloudflare binding or public ingress is required for media
 retrieval. If an organization-level egress policy is applied outside this
-repository, allow outbound HTTPS only as needed to `www.wasenderapi.com` for
+repository, allow outbound HTTPS only as needed to `api.wapi.crafter.run` for
 decrypt metadata and guarded downloads and to `cloudflare-dns.com` for the
 adapter's bounded A and AAAA checks. Do not add an alternate media hostname or
 disable DNS validation to work around an outage.

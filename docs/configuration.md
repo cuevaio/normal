@@ -449,7 +449,7 @@ Provider-control startup validates the two Wasender secrets before serving even
 its private health route or an RPC method. The Wrangler manifest declares both
 names as required secrets, so deployment fails before serving when either secret
 has not been configured. Its lifecycle adapter calls only the fixed
-`https://www.wasenderapi.com` origin with the account-level credential, forces
+`https://api.wapi.crafter.run` origin with the account-level credential, forces
 provider message logging and automatic incoming-message reads off during
 creation, and omits `proxy_url`. The dormant Webshare selector and migrated
 `ProviderAllocationGate` class are not present in the production composition or
@@ -888,7 +888,7 @@ the normalized outcome `complete`, `in_progress`, `qr_available`, or
 
 The Wasender media adapter has no hostname, endpoint, redirect, timeout, or
 byte-limit environment override. Its production Layer fixes the decrypt
-endpoint and approved download hostname to `www.wasenderapi.com`, resolves that
+endpoint and approved download hostname to `api.wapi.crafter.run`, resolves that
 host through bounded DNS-over-HTTPS at `cloudflare-dns.com`, and fails closed
 when the per-session authority is empty, non-printable, or otherwise invalid.
 The session authority is provider data encrypted under the owning WhatsApp
@@ -916,12 +916,14 @@ specification](stored-media-container.md).
 
 Text, PDF, and image sending do not add an account-level Provider API Credential, endpoint
 override, public route, service binding, or infrastructure secret. The
-production adapters always call their fixed Wasender send and upload endpoints
-over the Worker's existing outbound HTTPS capability, reject unapproved
-redirects, and cannot select a test transport at runtime. Provider upload URLs
-remain adapter-local and are never persisted. This zero-binding infrastructure
-delta keeps ordinary connection operations outside provider-control and
-preserves ADR 0004's least-privilege split.
+production adapters always call the fixed
+`https://api.wapi.crafter.run/api/send-message` and
+`https://api.wapi.crafter.run/api/upload` endpoints over the Worker's existing
+outbound HTTPS capability, reject unapproved redirects, and cannot select a test
+transport at runtime. Provider upload URLs remain adapter-local and are never
+persisted. This zero-binding infrastructure delta keeps ordinary connection
+operations outside provider-control and preserves ADR 0004's least-privilege
+split.
 
 The adapter is composed per WhatsApp Connection with two values already
 protected by the connection's encryption boundary: its session-specific

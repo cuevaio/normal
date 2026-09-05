@@ -1,6 +1,7 @@
 import { Effect, Redacted } from "effect";
 import { encodeBase64Url } from "./base64-url";
 import { makeBoundedRetryAfterMs, maximumJsonResponseBytes } from "./common";
+import { providerOrigin } from "./provider-origin";
 import {
   deriveIdentityRecipientRouteKeys,
   type RecipientRouteKeys,
@@ -18,7 +19,6 @@ import type {
   WasenderIdentityProtectionKey,
 } from "./session";
 
-const wasenderApiOrigin = "https://www.wasenderapi.com";
 const directoryPageLimit = 100;
 const textEncoder = new TextEncoder();
 
@@ -215,7 +215,7 @@ const attemptRequest = async (
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const url = new URL(`/api/${kind}`, wasenderApiOrigin);
+    const url = new URL(`/api/${kind}`, providerOrigin);
     url.searchParams.set("paginated", "true");
     url.searchParams.set("page", String(page));
     url.searchParams.set("limit", String(directoryPageLimit));
