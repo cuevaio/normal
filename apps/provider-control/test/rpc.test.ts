@@ -9,7 +9,7 @@ import type {
   SessionAuthority,
   SessionLifecycle,
   SetupMarker,
-} from "@whatsapp-mcp/wasender/control";
+} from "@whatsapp-mcp/whatsapp-provider/control";
 import { Effect, Redacted } from "effect";
 import { describe, expect, test } from "vitest";
 import { makeProviderControlRpc } from "../src/rpc";

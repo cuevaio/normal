@@ -59,4 +59,4 @@ All external sources are first-party WasenderAPI pages accessed on 2026-08-20. W
 - **[I2]** [`packages/contracts/src/handles.ts`](../../packages/contracts/src/handles.ts)
 - **[I3]** [`packages/contracts/src/rest.ts`](../../packages/contracts/src/rest.ts)
 - **[I4]** [`docs/adr/0006-do-not-retry-ambiguous-sends.md`](../adr/0006-do-not-retry-ambiguous-sends.md)
-- **[I5]** [`packages/wasender/src/text-send.ts`](../../packages/wasender/src/text-send.ts)
+- **[I5]** [`packages/whatsapp-provider/src/text-send.ts`](../../packages/whatsapp-provider/src/text-send.ts)

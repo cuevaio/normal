@@ -8,6 +8,6 @@
     { "path": "./packages/domain" },
     { "path": "./packages/contracts" },
     { "path": "./packages/db" },
-    { "path": "./packages/wasender" }
+    { "path": "./packages/whatsapp-provider" }
   ]
 }

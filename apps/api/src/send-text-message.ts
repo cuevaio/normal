@@ -11,14 +11,14 @@ import type {
   SendGrantIdentity,
 } from "@whatsapp-mcp/db/send";
 import {
+  makeProviderRecipientRoute,
   makeWasenderImageSending,
   makeWasenderPdfSending,
-  makeWasenderRecipientRoute,
   makeWasenderTextSending,
+  type ProviderIdentityProtectionKey,
+  type ProviderRecipientRoute,
   type RecipientLocator,
-  type WasenderIdentityProtectionKey,
-  type WasenderRecipientRoute,
-} from "@whatsapp-mcp/wasender/session";
+} from "@whatsapp-mcp/whatsapp-provider/session";
 import { Effect, Redacted } from "effect";
 import { decodeBase64, encodeBase64, encodeBase64Url } from "./base64-url";
 import type {
@@ -451,10 +451,10 @@ export const makeAtomicSendTextMessageService = (
               }),
             );
             try {
-              let resolvedRecipient: WasenderRecipientRoute;
+              let resolvedRecipient: ProviderRecipientRoute;
               if (!("recipient" in provider)) {
-                resolvedRecipient = await makeWasenderRecipientRoute(
-                  Redacted.make(identityBytes) as WasenderIdentityProtectionKey,
+                resolvedRecipient = await makeProviderRecipientRoute(
+                  Redacted.make(identityBytes) as ProviderIdentityProtectionKey,
                   "contact",
                   destination.value,
                 );
@@ -481,11 +481,11 @@ export const makeAtomicSendTextMessageService = (
                     : null;
                 resolvedRecipient =
                   contactPhone === null
-                    ? (Redacted.make(recipient) as WasenderRecipientRoute)
-                    : await makeWasenderRecipientRoute(
+                    ? (Redacted.make(recipient) as ProviderRecipientRoute)
+                    : await makeProviderRecipientRoute(
                         Redacted.make(
                           identityBytes,
-                        ) as WasenderIdentityProtectionKey,
+                        ) as ProviderIdentityProtectionKey,
                         "contact",
                         contactPhone,
                       );
@@ -495,7 +495,7 @@ export const makeAtomicSendTextMessageService = (
                 authority: Redacted.make(authority) as never,
                 identityKey: Redacted.make(
                   identityBytes,
-                ) as WasenderIdentityProtectionKey,
+                ) as ProviderIdentityProtectionKey,
                 resolveRecipient: (candidate: RecipientLocator) =>
                   candidate === locator ? resolvedRecipient : null,
                 telemetry: { emit: options.telemetry },

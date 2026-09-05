@@ -8,8 +8,8 @@ import type {
   MediaRetrieval,
   MediaSource,
   ProviderNeutralFailure,
-} from "@whatsapp-mcp/wasender/session";
-import { makeMediaDownloadByteLimit } from "@whatsapp-mcp/wasender/session";
+} from "@whatsapp-mcp/whatsapp-provider/session";
+import { makeMediaDownloadByteLimit } from "@whatsapp-mcp/whatsapp-provider/session";
 import { Effect, Stream } from "effect";
 import type {
   ConnectionKeyEnvelope,

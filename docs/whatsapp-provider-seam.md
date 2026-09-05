@@ -1,6 +1,6 @@
 # Provider-neutral WhatsApp seam
 
-`@whatsapp-mcp/wasender` is the internal replacement seam around the sole
+`@whatsapp-mcp/whatsapp-provider` is the internal replacement seam around the sole
 private-beta provider. It exports no catch-all barrel and has seven independent
 Effect capabilities:
 
@@ -26,13 +26,12 @@ are why it is one constant rather than per-module literals: a build whose call
 target and validated host disagree fails mid-operation, at a boundary, rather
 than anywhere a reader would look for it.
 
-The package, its types, and its fixtures keep the Wasender name deliberately.
-This is a change of host, not of protocol. The wire contract is still the one
-Wasender defined, and the adapters still encode its response envelopes, its
-distinct failure shapes, and its two different pagination styles; the
-`api-docs` links throughout these documents remain the reference for that
-contract. Renaming the package would be a separate change with a much larger
-diff and no behavioral content.
+The package path, package name, and capability identities are provider-neutral.
+Concrete adapter constructors and protocol fixtures retain the Wasender name
+because the WAPI origin still implements the wire contract Wasender defined,
+including its response envelopes, distinct failure shapes, and two pagination
+styles. The `api-docs` links throughout these documents remain the reference for
+that contract.
 
 There is no runtime override and no environment variable. The origin is a
 constant, so the seam still offers no runtime provider selection and no
@@ -53,7 +52,7 @@ and the PDF and image implementations through `makeWasenderPdfSendingLayer` and
 `makeWasenderImageSendingLayer`; all three fix the provider endpoint and
 platform transport in production. The real Directory
 implementation is exported as
-`makeWasenderSessionDirectory` from `@whatsapp-mcp/wasender/session`. The other
+`makeWasenderSessionDirectory` from `@whatsapp-mcp/whatsapp-provider/session`. The other
 production implementations are exposed through their capability-specific
 modules. The seam does not add runtime provider selection or a selectable fake.
 The lifecycle implementation closes over the account-level Provider API

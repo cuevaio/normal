@@ -27,7 +27,7 @@ import {
   type SetupMarker,
   type WebhookEndpoint,
   type WhatsAppNumber,
-} from "@whatsapp-mcp/wasender/control";
+} from "@whatsapp-mcp/whatsapp-provider/control";
 import { Effect, Either, Redacted } from "effect";
 
 export interface ProviderControlRpcOptions {

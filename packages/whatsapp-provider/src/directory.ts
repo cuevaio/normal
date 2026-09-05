@@ -14,9 +14,9 @@ import type {
   DirectoryObservation,
   DirectorySessionAuthority,
   GroupLocator,
+  ProviderIdentityProtectionKey,
   ProviderNeutralFailure,
   SessionDirectory,
-  WasenderIdentityProtectionKey,
 } from "./session";
 
 const directoryPageLimit = 100;
@@ -67,7 +67,7 @@ export interface WasenderSessionDirectoryConfig {
   /** One WhatsApp Connection's session-specific Wasender API key. */
   readonly authority: DirectorySessionAuthority;
   /** The same per-connection identity key used by webhook normalization. */
-  readonly identityKey: WasenderIdentityProtectionKey;
+  readonly identityKey: ProviderIdentityProtectionKey;
   /** Receives only the allowlisted, content-free adapter event above. */
   readonly emitTelemetry?:
     | ((event: WasenderDirectoryTelemetryEvent) => void)
@@ -422,7 +422,7 @@ interface LocatorKeys extends RecipientRouteKeys {
 }
 
 const deriveLocatorKeys = async (
-  identityKey: WasenderIdentityProtectionKey,
+  identityKey: ProviderIdentityProtectionKey,
 ): Promise<LocatorKeys> => {
   const identityBytes = Redacted.value(identityKey);
   if (identityBytes.byteLength < 32) {

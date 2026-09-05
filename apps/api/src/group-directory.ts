@@ -8,7 +8,7 @@ import type {
   DirectoryGroup,
   DirectoryObservation,
   ProviderNeutralFailure,
-} from "@whatsapp-mcp/wasender/session";
+} from "@whatsapp-mcp/whatsapp-provider/session";
 import { Context, Data, Effect, Redacted } from "effect";
 import { decodeBase64 } from "./base64-url";
 import {

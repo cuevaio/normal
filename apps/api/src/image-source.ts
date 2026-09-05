@@ -2,7 +2,7 @@ import {
   makeVerifiedImageBytes,
   maximumOutboundImageBytes,
   type VerifiedImageBytes,
-} from "@whatsapp-mcp/wasender/session";
+} from "@whatsapp-mcp/whatsapp-provider/session";
 import { decodeBase64, isStandardPaddedBase64 } from "./base64-url";
 import { downloadVerifiedFile, type OutboundFileFetch } from "./pdf-source";
 

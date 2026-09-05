@@ -2,7 +2,7 @@ import {
   makeWasenderSessionLifecycle,
   SessionLifecycle,
   type WasenderLifecycleTelemetryEvent,
-} from "@whatsapp-mcp/wasender/control";
+} from "@whatsapp-mcp/whatsapp-provider/control";
 import { Config, ConfigProvider, Effect, Layer, Redacted } from "effect";
 import { createCanaryHandler } from "./canary";
 import { makeProviderControlRpc } from "./rpc";

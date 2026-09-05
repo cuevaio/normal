@@ -43,7 +43,7 @@ Implemented. The selected shape below is the accepted contract. Do not treat thi
 
 ### Boundary
 
-The existing API Worker remains the only public data plane. It gains a REST adapter parallel to the signed-in product handlers and MCP adapter. Provider behavior remains behind `provider-control` and `packages/wasender`.
+The existing API Worker remains the only public data plane. It gains a REST adapter parallel to the signed-in product handlers and MCP adapter. Provider behavior remains behind `provider-control` and `packages/whatsapp-provider`.
 
 The adapters call shared application operations rather than calling each other:
 
