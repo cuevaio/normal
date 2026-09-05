@@ -528,7 +528,7 @@ run "production_topology" {
   assert {
     condition = toset([
       for schedule in cloudflare_workers_cron_trigger.api.schedules : schedule.cron
-    ]) == toset(["* * * * *", "*/5 * * * *", "0 * * * *"])
+    ]) == toset(["*/4 * * * *", "*/5 * * * *", "0 * * * *"])
     error_message = "The API Worker must schedule maintenance, five-minute health reconciliation, and hourly retention work."
   }
 

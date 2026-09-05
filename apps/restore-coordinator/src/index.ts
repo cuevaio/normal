@@ -26,51 +26,66 @@ const required = (value: string | undefined, name: string) => {
   return value;
 };
 
-const scheduled: ExportedHandlerScheduledHandler<Environment> = async (
-  controller,
-  environment,
-) => {
-  const result = await replayRestore({
-    branchId: required(environment.NEON_BRANCH_ID, "Neon branch identity"),
-    environment: environment.DEPLOYMENT_ENVIRONMENT,
-    hmacSecret: Redacted.make(
-      required(
-        environment.DELETION_MARKER_HMAC_SECRET,
-        "Deletion marker HMAC secret",
-      ),
-    ),
-    handleObjectDeletion: async (deletion) => {
-      await environment[
-        deletion.bucket === "stored_media" ? "STORED_MEDIA" : "WEBHOOK_INGRESS"
-      ].delete(deletion.objectKey);
-    },
-    markers: makeDeletionMarkerStore({
-      bucket: environment.DELETION_MARKERS as unknown as DeletionMarkerBucket,
+export const createScheduledHandler = (
+  dependencies: { readonly replay: typeof replayRestore } = {
+    replay: replayRestore,
+  },
+): ExportedHandlerScheduledHandler<Environment> => {
+  let completedBranchId: string | undefined;
+  return async (controller, environment) => {
+    const branchId = required(
+      environment.NEON_BRANCH_ID,
+      "Neon branch identity",
+    );
+    if (completedBranchId === branchId) return;
+    completedBranchId = undefined;
+    const result = await dependencies.replay({
+      branchId,
       environment: environment.DEPLOYMENT_ENVIRONMENT,
-      hmacSecret: Redacted.make(environment.DELETION_MARKER_HMAC_SECRET),
-    }),
-    observedAt: new Date(controller.scheduledTime).toISOString(),
-    recipientHmacSecret: Redacted.make(
-      required(
-        environment.RECIPIENT_TRANSITION_HMAC_SECRET,
-        "WhatsApp Recipient Exclusion transition HMAC secret",
+      hmacSecret: Redacted.make(
+        required(
+          environment.DELETION_MARKER_HMAC_SECRET,
+          "Deletion marker HMAC secret",
+        ),
       ),
-    ),
-    recipientJournal:
-      environment.RECIPIENT_TRANSITIONS as unknown as RecipientJournalBucket,
-    repository: makePgRestoreRepository(
-      restrictedRestoreRuntimeConnectionString(
-        required(environment.RESTORE_DATABASE_URL, "Restore database"),
+      handleObjectDeletion: async (deletion) => {
+        await environment[
+          deletion.bucket === "stored_media"
+            ? "STORED_MEDIA"
+            : "WEBHOOK_INGRESS"
+        ].delete(deletion.objectKey);
+      },
+      markers: makeDeletionMarkerStore({
+        bucket: environment.DELETION_MARKERS as unknown as DeletionMarkerBucket,
+        environment: environment.DEPLOYMENT_ENVIRONMENT,
+        hmacSecret: Redacted.make(environment.DELETION_MARKER_HMAC_SECRET),
+      }),
+      observedAt: new Date(controller.scheduledTime).toISOString(),
+      recipientHmacSecret: Redacted.make(
+        required(
+          environment.RECIPIENT_TRANSITION_HMAC_SECRET,
+          "WhatsApp Recipient Exclusion transition HMAC secret",
+        ),
       ),
-    ),
-  });
-  console.info(
-    JSON.stringify({
-      event: "restore.replay.completed",
-      service: "restore-coordinator",
-      ...result,
-    }),
-  );
+      recipientJournal:
+        environment.RECIPIENT_TRANSITIONS as unknown as RecipientJournalBucket,
+      repository: makePgRestoreRepository(
+        restrictedRestoreRuntimeConnectionString(
+          required(environment.RESTORE_DATABASE_URL, "Restore database"),
+        ),
+      ),
+    });
+    completedBranchId = branchId;
+    console.info(
+      JSON.stringify({
+        event: "restore.replay.completed",
+        service: "restore-coordinator",
+        ...result,
+      }),
+    );
+  };
 };
+
+const scheduled = createScheduledHandler();
 
 export default { scheduled } satisfies ExportedHandler<Environment>;

@@ -38,7 +38,6 @@ import {
 } from "@whatsapp-mcp/db/personal-account";
 import { makePgRecipientExclusionRepository } from "@whatsapp-mcp/db/recipient-exclusion";
 import { recordRecoverySourcePoint } from "@whatsapp-mcp/db/recovery-source-point";
-import { withPgRequestConnectionScope } from "@whatsapp-mcp/db/request-connection";
 import {
   type AtomicSendRepository,
   makePgAtomicSendRepositoryFromConnectionString,
@@ -2517,7 +2516,7 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
     sendLayer,
     mcpCursorSigningLayer(environment),
   );
-  const handler = createCanaryHandler(layer);
+  const handler = createCanaryHandler(layer, { databaseAlreadyChecked: true });
   const deploymentSmokeHandler = createDeploymentSmokeHandler(
     makeProductionDeploymentSmoke(environment),
   );
@@ -2624,17 +2623,15 @@ export const createProductionHandler = (environment: ApiEnvironment) => {
           ReturnType<typeof createMcpRequestHandler>
         >[3],
       ) =>
-        withPgRequestConnectionScope(() =>
-          createMcpRequestHandler({
-            browserOrigin: environment.CLERK_AUTHORIZED_PARTY ?? "",
-            hourLimit: requestQuota.hourLimit,
-            layer,
-            minuteLimit: requestQuota.minuteLimit,
-            readMessageDailyRecordLimit: requestQuota.dailyRecordLimit,
-            storedMediaDailyByteLimit: requestQuota.dailyMediaByteLimit,
-            resourceUrl: configuration.resource,
-          })(mcpRequest, mcpEnvironment, mcpContext, authorization),
-        );
+        createMcpRequestHandler({
+          browserOrigin: environment.CLERK_AUTHORIZED_PARTY ?? "",
+          hourLimit: requestQuota.hourLimit,
+          layer,
+          minuteLimit: requestQuota.minuteLimit,
+          readMessageDailyRecordLimit: requestQuota.dailyRecordLimit,
+          storedMediaDailyByteLimit: requestQuota.dailyMediaByteLimit,
+          resourceUrl: configuration.resource,
+        })(mcpRequest, mcpEnvironment, mcpContext, authorization);
       const applicationHandler = async (
         nextRequest: Request,
         nextEnvironment: Parameters<
@@ -3761,7 +3758,7 @@ export const createProductionScheduledHandler =
       }
       return;
     }
-    if (controller.cron !== "* * * * *") return;
+    if (controller.cron !== "*/4 * * * *") return;
     const connectionString = environment.HYPERDRIVE?.connectionString;
     const queue = environment.CONNECTION_SETUP_PROVISIONING_QUEUE;
     if (

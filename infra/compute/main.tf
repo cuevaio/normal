@@ -1084,7 +1084,7 @@ resource "cloudflare_workers_cron_trigger" "api" {
   script_name = cloudflare_worker.api.name
 
   schedules = [
-    { cron = "* * * * *" },
+    { cron = "*/4 * * * *" },
     { cron = "*/5 * * * *" },
     { cron = "0 * * * *" },
   ]

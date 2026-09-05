@@ -140,7 +140,7 @@ The Worker runtime suite proves:
 - five-minute safe-read connection and webhook reconciliation with
   evidence-based Ingestion Gap opening, recovery closure, and stale-snapshot
   suppression;
-- minute-scheduled orphan discovery from real R2 metadata, republishing through
+- four-minute-scheduled orphan discovery from real R2 metadata, republishing through
   the Queue binding, convergence with later provider redelivery, jittered
   transient retries, and DLQ acknowledgment after Ingestion Gap persistence;
 - opaque incident alerting, audited immutable replay through the ordinary
@@ -148,6 +148,7 @@ The Worker runtime suite proves:
   non-reversible Webhook Item identities;
 - provider-control service-binding calls;
 - scheduled-handler effects through the supported runtime helpers;
+- branch-specific warm-isolate restore completion suppression;
 - an OAuth authorization redirect over signed-in HTTP;
 - MCP tool discovery over HTTP JSON-RPC;
 - `send_image` authorization and Client Confirmation metadata, strict image

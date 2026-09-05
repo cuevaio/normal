@@ -1279,6 +1279,9 @@ sufficient on its own.
 The readiness response proves a restricted Hyperdrive connection can read the
 exact expected schema version. It emits only an allowlisted request outcome;
 database URLs, SQL, tenant identifiers, and migration errors are never logged.
+Successful checks may be reused within one Worker isolate for up to 15 seconds
+only when the connection, Neon branch, and migration mode are identical;
+failures are never reused.
 The repository's provider-control acceptance suite invokes real lifecycle
 reconciliation through the Cloudflare RPC entrypoint, rejects malformed RPC
 arguments before provider access, and proves that the same lifecycle operation
@@ -1348,7 +1351,7 @@ outcomes and counts, never either identity or message content.
 
 If a Worker terminates after the durable transaction but before a complete
 provider response is recorded, allow the 30-second dispatch lease to expire.
-The minute schedule atomically changes unresolved operations to `unknown`; an
+The four-minute schedule atomically changes unresolved operations to `unknown`; an
 exact replay can perform the same convergence before the schedule runs and
 must never dispatch. Monitor `send.dispatch_lease.sweep_completed` by its count
 only; a sustained nonzero count indicates interrupted or overlong attempts.

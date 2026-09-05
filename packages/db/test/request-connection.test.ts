@@ -73,4 +73,109 @@ describe("request connection manager", () => {
     expect(connectCount).toBe(2);
     expect(closeCount).toBe(2);
   });
+
+  test("isolates concurrent uses while reusing idle scoped connections", async () => {
+    const firstEntered = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const secondEntered = Promise.withResolvers<void>();
+    let closeCount = 0;
+    let connectCount = 0;
+    const manager = makeRequestConnectionManager({
+      close: async () => {
+        closeCount += 1;
+      },
+      connect: async () => ({ id: ++connectCount }),
+    });
+
+    await manager.run(async () => {
+      const first = manager.withConnection("database", async () => {
+        firstEntered.resolve();
+        await releaseFirst.promise;
+      });
+      await firstEntered.promise;
+      const second = manager.withConnection("database", async () => {
+        secondEntered.resolve();
+      });
+      await secondEntered.promise;
+      await second;
+      expect(closeCount).toBe(1);
+      releaseFirst.resolve();
+      await first;
+      await manager.withConnection("database", async () => undefined);
+      expect(closeCount).toBe(1);
+    });
+
+    expect(connectCount).toBe(2);
+    expect(closeCount).toBe(2);
+  });
+
+  test("reuses a scoped connection after a callback fails", async () => {
+    const manager = makeRequestConnectionManager({
+      close: async () => undefined,
+      connect: async () => ({ id: 1 }),
+    });
+
+    await manager.run(async () => {
+      await expect(
+        manager.withConnection("database", async () => {
+          throw new Error("query failed");
+        }),
+      ).rejects.toThrow("query failed");
+      await expect(
+        manager.withConnection("database", async (client) => client.id),
+      ).resolves.toBe(1);
+    });
+  });
+
+  test("keeps different scoped connections independent", async () => {
+    const releaseFirst = Promise.withResolvers<void>();
+    const firstEntered = Promise.withResolvers<void>();
+    const secondEntered = Promise.withResolvers<void>();
+    let connectCount = 0;
+    const manager = makeRequestConnectionManager({
+      close: async () => undefined,
+      connect: async () => ({ id: ++connectCount }),
+    });
+
+    await manager.run(async () => {
+      const first = manager.withConnection("api", async () => {
+        firstEntered.resolve();
+        await releaseFirst.promise;
+      });
+      await firstEntered.promise;
+      const second = manager.withConnection("webhook", async () => {
+        secondEntered.resolve();
+      });
+      await secondEntered.promise;
+      releaseFirst.resolve();
+      await Promise.all([first, second]);
+    });
+
+    expect(connectCount).toBe(2);
+  });
+
+  test("waits for acquired work before closing its connection", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let closeCount = 0;
+    const manager = makeRequestConnectionManager({
+      close: async () => {
+        closeCount += 1;
+      },
+      connect: async () => ({ id: 1 }),
+    });
+
+    const scope = manager.run(async () => {
+      void manager.withConnection("database", async () => {
+        entered.resolve();
+        await release.promise;
+      });
+      await entered.promise;
+    });
+    await entered.promise;
+    expect(closeCount).toBe(0);
+    release.resolve();
+    await scope;
+    expect(closeCount).toBe(1);
+  });
 });

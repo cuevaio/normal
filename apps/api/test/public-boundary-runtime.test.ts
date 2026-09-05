@@ -1096,7 +1096,7 @@ describe("public-boundary Worker harness", () => {
     const orphanId = orphan.key.slice("webhook-events/".length);
 
     const controller = createScheduledController({
-      cron: "* * * * *",
+      cron: "*/4 * * * *",
       scheduledTime: orphan.uploaded.valueOf() + 60_000,
     });
     const context = createExecutionContext();
