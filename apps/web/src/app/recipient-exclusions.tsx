@@ -7,6 +7,25 @@ import {
 } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { queryKeys } from "@/lib/query/keys";
 import {
   applyRecipientExclusion,
@@ -39,7 +58,7 @@ export function RecipientExclusions({
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [kind, setKind] = useState<RecipientKind>("contact");
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState({ announce: false, message: "" });
   const selectedConnectionId = connectionId ?? connections[0]?.id ?? null;
   const recipientsQuery = useInfiniteQuery({
     enabled: selectedConnectionId !== null,
@@ -117,11 +136,12 @@ export function RecipientExclusions({
 
   const setExcluded = async (recipient: Recipient, excluded: boolean) => {
     if (selectedConnectionId === null || exclusionMutation.isPending) return;
-    setStatus(
-      excluded
+    setStatus({
+      announce: true,
+      message: excluded
         ? `Saving. Normal will stop tracking ${recipientLabel(recipient)}.`
         : `Saving. Normal may track ${recipientLabel(recipient)} again.`,
-    );
+    });
     try {
       const saved = await exclusionMutation.mutateAsync({
         excluded,
@@ -130,12 +150,13 @@ export function RecipientExclusions({
       const nextStatus = saved
         ? `Normal no longer tracks ${recipientLabel(recipient)}.`
         : `Normal may track ${recipientLabel(recipient)} again.`;
-      setStatus(nextStatus);
+      setStatus({ announce: false, message: nextStatus });
       toast.success(nextStatus);
     } catch {
-      setStatus(
-        `Could not save ${recipientLabel(recipient)}. Other settings still work.`,
-      );
+      setStatus({
+        announce: true,
+        message: `Could not save ${recipientLabel(recipient)}. Other settings still work.`,
+      });
     }
   };
 
@@ -150,59 +171,69 @@ export function RecipientExclusions({
   return (
     <div className="flex w-full flex-col gap-6">
       <div className="grid gap-3 sm:grid-cols-[minmax(0,16rem)_10rem_minmax(16rem,1fr)] sm:items-start">
-        <label
-          className="grid gap-1.5 text-sm font-medium"
-          htmlFor="recipient-connection"
-        >
-          WhatsApp Connection
-          <select
-            className="h-10 w-full rounded-lg border bg-background px-3 text-sm shadow-xs outline-none transition-[border-color,box-shadow] duration-150 ease-[var(--ease-out)] focus:border-ring focus:ring-3 focus:ring-ring/20"
-            id="recipient-connection"
-            onChange={(event) => setConnectionId(event.target.value)}
+        <Field>
+          <FieldLabel htmlFor="recipient-connection">
+            WhatsApp Connection
+          </FieldLabel>
+          <Select
+            items={connections.map((connection) => ({
+              label:
+                connection.displayName ??
+                `WhatsApp Connection ending ${connection.numberSuffix}`,
+              value: connection.id,
+            }))}
+            onValueChange={(value) => setConnectionId(value)}
             value={selectedConnectionId ?? ""}
           >
-            {connections.map((connection) => (
-              <option key={connection.id} value={connection.id}>
-                {connection.displayName ??
-                  `WhatsApp Connection ending ${connection.numberSuffix}`}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label
-          className="grid gap-1.5 text-sm font-medium"
-          htmlFor="recipient-kind"
-        >
-          Recipient kind
-          <select
-            className="h-10 w-full rounded-lg border bg-background px-3 text-sm shadow-xs outline-none transition-[border-color,box-shadow] duration-150 ease-[var(--ease-out)] focus:border-ring focus:ring-3 focus:ring-ring/20"
-            id="recipient-kind"
-            onChange={(event) =>
-              setKind(event.target.value === "group" ? "group" : "contact")
+            <SelectTrigger className="w-full" id="recipient-connection">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {connections.map((connection) => (
+                  <SelectItem key={connection.id} value={connection.id}>
+                    {connection.displayName ??
+                      `WhatsApp Connection ending ${connection.numberSuffix}`}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="recipient-kind">Recipient kind</FieldLabel>
+          <Select
+            items={[
+              { label: "Contacts", value: "contact" },
+              { label: "Groups", value: "group" },
+            ]}
+            onValueChange={(value) =>
+              setKind(value === "group" ? "group" : "contact")
             }
             value={kind}
           >
-            <option value="contact">Contacts</option>
-            <option value="group">Groups</option>
-          </select>
-        </label>
-        <label
-          className="grid gap-1.5 text-sm font-medium"
-          htmlFor="recipient-search"
-        >
-          Search by name
-          <input
-            className="h-10 w-full rounded-lg border bg-background px-3 text-sm shadow-xs outline-none transition-[border-color,box-shadow] duration-150 ease-[var(--ease-out)] placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/20"
+            <SelectTrigger className="w-full" id="recipient-kind">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="contact">Contacts</SelectItem>
+                <SelectItem value="group">Groups</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="recipient-search">Search by name</FieldLabel>
+          <Input
             id="recipient-search"
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Start of a display name"
             type="search"
             value={search}
           />
-          <span className="text-xs font-normal text-muted-foreground">
-            Enter at least three characters.
-          </span>
-        </label>
+          <FieldDescription>Enter at least three characters.</FieldDescription>
+        </Field>
       </div>
 
       {page === null ? null : (
@@ -244,37 +275,37 @@ export function RecipientExclusions({
                   {table.recipients.length}
                 </span>
               </div>
-              <div className="overflow-x-auto rounded-xl border">
-                <table className="w-full min-w-[34rem] border-collapse text-left text-sm">
-                  <thead className="bg-muted/45 text-xs text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-2.5 font-medium" scope="col">
+              <div className="overflow-hidden rounded-xl border">
+                <Table className="min-w-[34rem] border-collapse text-left">
+                  <TableHeader className="bg-muted/45 text-xs text-muted-foreground">
+                    <TableRow>
+                      <TableHead className="px-4 py-2.5" scope="col">
                         Name
-                      </th>
-                      <th className="px-4 py-2.5 font-medium" scope="col">
+                      </TableHead>
+                      <TableHead className="px-4 py-2.5" scope="col">
                         Kind
-                      </th>
-                      <th className="px-4 py-2.5 font-medium" scope="col">
+                      </TableHead>
+                      <TableHead className="px-4 py-2.5" scope="col">
                         Phone
-                      </th>
-                      <th
+                      </TableHead>
+                      <TableHead
                         className="px-4 py-2.5 text-right font-medium"
                         scope="col"
                       >
                         Action
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody className="divide-y">
                     {table.recipients.length === 0 ? (
-                      <tr>
-                        <td
+                      <TableRow>
+                        <TableCell
                           className="px-4 py-8 text-center text-muted-foreground"
                           colSpan={4}
                         >
                           {table.empty}
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ) : (
                       table.recipients.map((recipient) => {
                         const saving =
@@ -282,27 +313,26 @@ export function RecipientExclusions({
                           exclusionMutation.variables?.recipient.id ===
                             recipient.id;
                         return (
-                          <tr
+                          <TableRow
                             data-testid="recipient-exclusion"
                             key={recipient.id}
                           >
-                            <th className="px-4 py-3 font-medium" scope="row">
+                            <TableHead className="h-auto px-4 py-3" scope="row">
                               {recipientLabel(recipient)}
-                            </th>
-                            <td className="px-4 py-3 text-muted-foreground">
+                            </TableHead>
+                            <TableCell className="px-4 py-3 text-muted-foreground">
                               {recipient.kind === "contact"
                                 ? "Contact"
                                 : "Group"}
-                            </td>
-                            <td className="px-4 py-3 tabular-nums text-muted-foreground">
+                            </TableCell>
+                            <TableCell className="px-4 py-3 tabular-nums text-muted-foreground">
                               {recipient.phoneLastFour === null
                                 ? "Not available"
                                 : `Ending ${recipient.phoneLastFour}`}
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <button
+                            </TableCell>
+                            <TableCell className="px-4 py-3 text-right">
+                              <Button
                                 aria-label={`${recipient.excluded ? "Track again" : "Stop tracking"} ${recipientLabel(recipient)}`}
-                                className="rounded-md px-2.5 py-1.5 font-medium text-foreground outline-none transition-[background-color,transform] duration-150 ease-[var(--ease-out)] hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
                                 disabled={exclusionMutation.isPending}
                                 onClick={() =>
                                   void setExcluded(
@@ -310,21 +340,23 @@ export function RecipientExclusions({
                                     !recipient.excluded,
                                   )
                                 }
+                                size="sm"
                                 type="button"
+                                variant="ghost"
                               >
                                 {saving
                                   ? "Saving..."
                                   : recipient.excluded
                                     ? "Track again"
                                     : "Stop tracking"}
-                              </button>
-                            </td>
-                          </tr>
+                              </Button>
+                            </TableCell>
+                          </TableRow>
                         );
                       })
                     )}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             </section>
           ))}
@@ -336,21 +368,27 @@ export function RecipientExclusions({
       ) : null}
 
       {page?.nextCursor == null ? null : (
-        <button
-          className="w-fit rounded-lg border bg-background px-3 py-2 text-sm font-medium shadow-xs outline-none transition-[background-color,transform] duration-150 ease-[var(--ease-out)] hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40 active:scale-[0.97]"
+        <Button
           onClick={() => void recipientsQuery.fetchNextPage()}
           type="button"
+          variant="outline"
         >
           Show more recipients
-        </button>
+        </Button>
       )}
 
       <p
         aria-live="polite"
+        className="sr-only"
+        data-testid="recipient-exclusion-announcement"
+      >
+        {status.announce ? status.message : ""}
+      </p>
+      <p
         className="min-h-5 text-sm text-muted-foreground"
         data-testid="recipient-exclusion-status"
       >
-        {status}
+        {status.message}
       </p>
     </div>
   );
