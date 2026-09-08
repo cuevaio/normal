@@ -93,6 +93,7 @@ export const ListGroupsOutputContract = makePublicObjectContract({
   groups: Schema.Array(
     Schema.Struct({
       group_id: GroupId,
+      conversation_id: Schema.NullOr(ConversationId),
       display_name: Schema.NullOr(Schema.String),
     }),
   ).pipe(Schema.maxItems(50)),

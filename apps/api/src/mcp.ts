@@ -645,11 +645,11 @@ const ListConnectionsOutputSchema = z
 
 const codePointLength = (value: string): number => Array.from(value).length;
 const listGroupsDescription =
-  "List currently joined WhatsApp Recipients in one selected WhatsApp Connection without roster or provider metadata. Returns group_id handles for directory lookup and sending; group_id cannot be used as read_messages.conversation_id. Use list_chats to find observed group conversations.";
+  "List currently joined WhatsApp Recipients in one selected WhatsApp Connection without roster or provider metadata. Returns group_id handles for directory lookup and sending; group_id cannot be used as read_messages.conversation_id. Use conversation_id to read this group when messages:read is granted and retained activity exists; otherwise it is null.";
 const listChatsDescription =
   "List recent WhatsApp Conversations with observed Stored Message activity. Use this to browse recent or unnamed conversations. Do not page through this tool when the User names a contact; call list_contacts with its search input instead. Pass a returned conversation_id to read_messages or recipient_id to send_text_message.";
 const readMessagesDescription =
-  "Read a chronological page of one observed WhatsApp Conversation. Get conversation_id from list_contacts when the User names a person, or from list_chats when browsing recent conversations. The returned recipient_id can be passed directly to send_text_message without another contact lookup.";
+  "Read a chronological page of one observed WhatsApp Conversation. Get conversation_id from list_contacts when the User names a person, from list_groups when naming a group, or from list_chats when browsing recent conversations. The returned recipient_id can be passed directly to send_text_message without another contact lookup.";
 const listContactsDescription =
   "Find active contacts in one selected WhatsApp Connection. When the User names a person, call this tool with its search input; do not use search_messages to locate a person. contact_id can be passed to send_text_message. conversation_id can be passed to read_messages when messages:read is granted and retained activity exists; otherwise it is null.";
 const sendTextMessageDescription =
@@ -681,6 +681,10 @@ const ListGroupsOutputSchema = z
         z
           .object({
             group_id: z.string().regex(/^grp_[A-Za-z0-9_-]{21}$/u),
+            conversation_id: z
+              .string()
+              .regex(/^cvs_[A-Za-z0-9_-]{21}$/u)
+              .nullable(),
             display_name: z.string().nullable(),
           })
           .strict(),
@@ -1889,6 +1893,7 @@ const listGroups = (
       group.displayName === null
         ? Effect.succeed({
             displayName: null as string | null,
+            conversationPublicId: group.conversationPublicId ?? null,
             normalizedName: "",
             publicId: group.publicId,
           })
@@ -1923,6 +1928,7 @@ const listGroups = (
               ),
               Effect.map((displayName) => ({
                 displayName,
+                conversationPublicId: group.conversationPublicId ?? null,
                 normalizedName: normalizeGroupDisplayName(displayName),
                 publicId: group.publicId,
               })),
@@ -1984,6 +1990,7 @@ const listGroups = (
       groups: selected.map((group) => ({
         display_name: group.displayName,
         group_id: group.publicId,
+        conversation_id: group.conversationPublicId,
       })),
       has_more: hasMore,
       next_cursor: nextCursor,

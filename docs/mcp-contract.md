@@ -115,6 +115,7 @@ Input fields:
   "groups": [
     {
       "group_id": "grp_H8q...21-characters",
+      "conversation_id": "cvs_f9A...21-characters",
       "display_name": "Family"
     }
   ],
@@ -128,7 +129,7 @@ Input fields:
 
 Results include only groups marked current and joined in the latest Directory projection and sort by normalized display name and then `group_id`. The page's `stale` and `partial` fields qualify that projected membership because the provider is authoritative. Group descriptions, profile URLs, and rosters are never returned.
 
-`group_id` names a WhatsApp Recipient for Directory lookup and sending. It is not a WhatsApp Conversation handle and cannot be passed as `read_messages.conversation_id`. To read observed group history, call `list_chats` with `kind: "group"`, match the returned `recipient_id` to the `group_id` when needed, and pass that result's `conversation_id` to `read_messages`. A joined group may have no WhatsApp Conversation yet when the platform has not observed a Stored Message for it.
+`group_id` names a WhatsApp Recipient for Directory lookup and sending. It is not a WhatsApp Conversation handle and cannot be passed as `read_messages.conversation_id`. `conversation_id` is returned only when the current grant includes `messages:read` and retained activity exists; otherwise it is `null`. Pass a non-null handle directly to `read_messages`. To browse observed group history, call `list_chats` with `kind: "group"`, match the returned `recipient_id` to the `group_id` when needed, and pass that result's `conversation_id` to `read_messages`. A joined group may have no WhatsApp Conversation yet when the platform has not observed a Stored Message for it.
 
 ## `list_chats`
 

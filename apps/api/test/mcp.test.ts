@@ -739,6 +739,11 @@ const makeHarness = (
                     },
                     id: "30000000-0000-4000-8000-000000000039",
                     publicId: "grp_AAAAAAAAAAAAAAAAAAAAA",
+                    conversationPublicId: overrides.scopes?.includes(
+                      "messages:read",
+                    )
+                      ? "cvs_AAAAAAAAAAAAAAAAAAAAA"
+                      : null,
                   },
                   {
                     displayName: {
@@ -749,6 +754,7 @@ const makeHarness = (
                     },
                     id: "30000000-0000-4000-8000-000000000040",
                     publicId: "grp_aaaaaaaaaaaaaaaaaaaaa",
+                    conversationPublicId: null,
                   },
                 ],
                 partial: false,
@@ -1729,6 +1735,37 @@ describe("stateless MCP list_groups boundary", () => {
     );
   });
 
+  test("returns the named group conversation without listing chats", async () => {
+    const harness = makeHarness({
+      scopes: ["directory:read", "messages:read"],
+    });
+    const response = await harness.handler(
+      jsonRpcRequest("tools/call", {
+        arguments: {
+          connection_id: "con_123456789012345678939",
+          search: "fam",
+        },
+        name: "list_groups",
+      }),
+      {},
+      executionContext,
+      authorization,
+    );
+    const body = (await response.json()) as {
+      result: { structuredContent: unknown };
+    };
+    expect(body.result.structuredContent).toMatchObject({
+      groups: [
+        {
+          group_id: "grp_AAAAAAAAAAAAAAAAAAAAA",
+          conversation_id: "cvs_AAAAAAAAAAAAAAAAAAAAA",
+        },
+        { group_id: "grp_aaaaaaaaaaaaaaaaaaaaa", conversation_id: null },
+      ],
+    });
+    expect(harness.observations).not.toContain("list-chats");
+  });
+
   test("audits before decrypting and returns normalized prefix results without provider data", async () => {
     const harness = makeHarness({ scopes: ["directory:read"] });
     const response = await harness.handler(
@@ -1761,10 +1798,12 @@ describe("stateless MCP list_groups boundary", () => {
         {
           display_name: "Family",
           group_id: "grp_AAAAAAAAAAAAAAAAAAAAA",
+          conversation_id: null,
         },
         {
           display_name: "Family",
           group_id: "grp_aaaaaaaaaaaaaaaaaaaaa",
+          conversation_id: null,
         },
       ],
       has_more: false,

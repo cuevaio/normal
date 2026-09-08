@@ -797,6 +797,7 @@ const groupPage = {
       },
       id: "30000000-0000-4000-8000-000000000082",
       publicId: "grp_123456789012345678901",
+      conversationPublicId: null,
     },
     {
       displayName: {
@@ -807,6 +808,7 @@ const groupPage = {
       },
       id: "30000000-0000-4000-8000-000000000083",
       publicId: "grp_123456789012345678902",
+      conversationPublicId: null,
     },
   ],
   partial: false,

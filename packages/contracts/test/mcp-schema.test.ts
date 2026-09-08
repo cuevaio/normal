@@ -92,6 +92,7 @@ describe("makePublicObjectContract", () => {
       groups: [
         {
           group_id: "grp_123456789012345678901",
+          conversation_id: null,
           display_name: "Family",
         },
       ],

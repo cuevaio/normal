@@ -219,6 +219,7 @@ export interface McpToolChatPage {
 }
 
 export interface McpToolGroupRecord {
+  readonly conversationPublicId: string | null;
   readonly displayName: {
     readonly ciphertext: string;
     readonly keyVersion: number;
@@ -1207,8 +1208,38 @@ const historyWindow = (
   };
 };
 
+const groupConversationPublicId = (canRead: boolean, observedAt: Date) => sql<
+  string | null
+>`
+  CASE WHEN ${canRead} THEN (
+    SELECT conversations.public_id
+    FROM public.whatsapp_conversations conversations
+    JOIN public.whatsapp_connections connections
+      ON connections.personal_account_id = conversations.personal_account_id
+      AND connections.id = conversations.whatsapp_connection_id
+    WHERE conversations.personal_account_id = whatsapp_groups.personal_account_id
+      AND conversations.whatsapp_connection_id = whatsapp_groups.whatsapp_connection_id
+      AND conversations.kind = 'group'
+      AND conversations.recipient_locator = whatsapp_groups.provider_locator
+      AND EXISTS (
+        SELECT 1 FROM public.stored_messages retained
+        WHERE retained.personal_account_id = conversations.personal_account_id
+          AND retained.whatsapp_connection_id = conversations.whatsapp_connection_id
+          AND retained.conversation_id = conversations.id
+          AND retained.content_expired_at IS NULL
+          AND retained.sent_at >= greatest(
+            connections.created_at,
+            ${observedAt}::timestamptz
+              - connections.message_retention_days * interval '24 hours'
+          )
+      )
+    ORDER BY conversations.created_at
+    LIMIT 1
+  ) ELSE NULL END`;
+
 const encryptedGroupRecords = (
   persistedGroups: ReadonlyArray<{
+    readonly conversation_public_id: unknown;
     readonly display_name_ciphertext: unknown;
     readonly display_name_ciphertext_version: unknown;
     readonly display_name_key_version: unknown;
@@ -1218,6 +1249,14 @@ const encryptedGroupRecords = (
   }>,
 ): ReadonlyArray<McpToolGroupRecord> =>
   persistedGroups.map((group) => {
+    const conversationPublicId = group.conversation_public_id;
+    if (
+      conversationPublicId !== null &&
+      (typeof conversationPublicId !== "string" ||
+        !/^cvs_[A-Za-z0-9_-]{21}$/u.test(conversationPublicId))
+    ) {
+      throw new Error("invalid group conversation handle");
+    }
     const id = group.id;
     const publicId = group.public_id;
     const ciphertext = bytes(group.display_name_ciphertext);
@@ -1237,7 +1276,7 @@ const encryptedGroupRecords = (
       version === null &&
       keyVersion === null
     ) {
-      return { displayName: null, id, publicId };
+      return { conversationPublicId, displayName: null, id, publicId };
     }
     if (
       ciphertext === null ||
@@ -1248,6 +1287,7 @@ const encryptedGroupRecords = (
       throw new Error("invalid encrypted WhatsApp group display name");
     }
     return {
+      conversationPublicId,
       displayName: {
         ciphertext: base64(ciphertext),
         keyVersion,
@@ -3435,6 +3475,10 @@ export const makeMcpToolRepository = (
         const connectionId = material.connectionKey.connectionId;
         const persistedGroups = await db
           .select({
+            conversation_public_id: groupConversationPublicId(
+              scopes.includes("messages:read"),
+              input.observedAt,
+            ),
             id: whatsappGroupsInApp.id,
             public_id: whatsappGroupsInApp.publicId,
             display_name_ciphertext_version:
@@ -4110,6 +4154,7 @@ export const makeMcpToolRepository = (
             connections.id AS connection_id,
             connections.created_at AS connection_created_at,
             connections.personal_account_id,
+            grants.permissions AS grant_permissions,
             states.as_of,
             coalesce(states.stale, true) AS stale,
             coalesce(states.partial, true) AS partial,
@@ -4186,6 +4231,12 @@ export const makeMcpToolRepository = (
         const connectionId = material.connectionKey.connectionId;
         const persistedGroups = await db
           .select({
+            conversation_public_id: groupConversationPublicId(
+              input.permissions.includes("messages:read") &&
+                Array.isArray(materialRows[0]?.grant_permissions) &&
+                materialRows[0].grant_permissions.includes("messages:read"),
+              input.observedAt,
+            ),
             id: whatsappGroupsInApp.id,
             public_id: whatsappGroupsInApp.publicId,
             display_name_ciphertext_version:
