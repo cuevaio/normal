@@ -36,6 +36,9 @@ Shared code is split by responsibility:
 
 The API Worker is the public data plane. Provider credentials stay behind the private `provider-control` service binding. Neon is the authoritative data store, while Cloudflare bindings handle edge protocol state, queues, and encrypted webhook payloads.
 
+For permission-aware use from ChatGPT, Claude, and other MCP Clients, see
+[Using Normal safely with AI clients](docs/chat-knowledge-workflow.md).
+
 ## Requirements
 
 You need:
